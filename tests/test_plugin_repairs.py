@@ -56,8 +56,45 @@ def test_excessively_nested_manifest_is_a_candidate_error():
                **{'bad/' + name: raw for name, raw in invalid.items()}}
     candidates = inspect_archive('mixed.zip', packed(members, wrapper=''))
     assert len(candidates) == 2
-    assert '嵌套过深' in next(c['error'] for c in candidates if c.get('error'))
-    assert any(not c.get('error') for c in candidates)
+    by_root = {candidate['root']: candidate for candidate in candidates}
+    assert set(by_root) == {'bad', 'good'}
+    # Parser recursion limits differ across CPython versions/platforms. If
+    # parsing succeeds, schema validation must still reject the unknown field.
+    assert by_root['bad']['error'] in {
+        'plugin.json：JSON 或参数定义嵌套过深，请简化结构',
+        'plugin.json 存在不支持的字段：nested',
+    }
+    assert 'manifest' not in by_root['bad']
+    assert not by_root['good'].get('error')
+    assert by_root['good']['manifest']['id'] == 'packaged_example'
+    assert by_root['good']['code'] == files()['main.py'].decode()
+
+
+def test_manifest_parser_recursion_has_a_friendly_candidate_local_error(monkeypatch):
+    from mikubot import plugin_packages
+    bad_manifest = '{"nested":"force-parser-recursion"}'
+    members = {**{'good/' + name: raw for name, raw in files().items()},
+               'bad/plugin.json': bad_manifest.encode()}
+    native_loads = json.loads
+    failed_inputs = []
+
+    def parse_with_recursion(value, *args, **kwargs):
+        if value == bad_manifest:
+            failed_inputs.append(value)
+            raise RecursionError('fixture JSON decoder recursion')
+        return native_loads(value, *args, **kwargs)
+
+    monkeypatch.setattr(plugin_packages.json, 'loads', parse_with_recursion)
+    candidates = inspect_archive('mixed.zip', packed(members, wrapper=''))
+    assert failed_inputs == [bad_manifest]
+    assert len(candidates) == 2
+    by_root = {candidate['root']: candidate for candidate in candidates}
+    assert set(by_root) == {'bad', 'good'}
+    assert by_root['bad']['error'] == 'plugin.json：JSON 或参数定义嵌套过深，请简化结构'
+    assert 'manifest' not in by_root['bad']
+    assert not by_root['good'].get('error')
+    assert by_root['good']['manifest']['id'] == 'packaged_example'
+    assert by_root['good']['code'] == files()['main.py'].decode()
 
 
 def test_chat_edit_keeps_auxiliary_files_schema_and_history_and_disables(automatic):

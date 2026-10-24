@@ -85,16 +85,30 @@ async def test_memory_scoring_yields_loop_and_revalidates_deleted_memory(tmp_pat
     store=Store(tmp_path)
     item=store.create_memory({'scope_id':'web:default','user_id':'owner','kind':'fact','content':'喜欢天文'})
     engine=MemoryEngine(store,{'memory':{'semantic_enabled':False}})
-    real=engine._rank_snapshot;entered=threading.Event();release=threading.Event()
+    real=engine._rank_snapshot
+    loop=asyncio.get_running_loop();loop_thread=threading.get_ident()
+    entered=asyncio.Event();release=threading.Event();snapshots=[];worker_threads=[]
     def rank(*args):
-        result=real(*args);entered.set()
-        if not release.wait(3):raise RuntimeError('test worker was not released')
+        worker_threads.append(threading.get_ident())
+        result=real(*args)
+        snapshots.extend(doc.record['id'] for doc in result)
+        loop.call_soon_threadsafe(entered.set)
+        # This is a deadlock guard, not a cold-index or thread-start benchmark.
+        if not release.wait(30):raise RuntimeError('test worker was not released')
         return result
     monkeypatch.setattr(engine,'_rank_snapshot',rank)
     task=asyncio.create_task(engine.inspect('web:default','owner','天文'))
     try:
-        assert await asyncio.to_thread(entered.wait,1)
+        # Wait on the worker's explicit snapshot boundary without borrowing a
+        # second default-executor worker or depending on CI startup speed.
+        await asyncio.wait_for(entered.wait(),30)
+        assert worker_threads and all(worker!=loop_thread for worker in worker_threads)
+        assert item['id'] in snapshots
         assert not task.done()
+        responsive=loop.create_future()
+        loop.call_soon(responsive.set_result,True)
+        assert await responsive
+        assert not release.is_set() and not task.done()
         store.delete_memory(item['id'])
         release.set()
         assert not (await task)['items']
