@@ -101,7 +101,7 @@ class ToolActions:
 
     def _config(self, server_id):
         item = next((x for x in self.settings.get().get('mcp_servers', []) if x['id'] == server_id), None)
-        if not item: raise ValueError('扩展服务已删除')
+        if not item: raise ValueError('MCP 服务已删除')
         return item
 
     @staticmethod
@@ -285,9 +285,9 @@ class ToolActions:
     def propose(self, alias, arguments, scope_id, user_id, metadata):
         identity=self._identity_for(scope_id,user_id,metadata.get('trusted_identity'))
         entry = next((x for x in self.available(scope_id, user_id,identity) if x['function']['name'] == alias), None)
-        if not entry: raise ValueError('扩展工具未允许、未发现或目录已过期')
+        if not entry: raise ValueError('MCP 工具未允许、未发现或目录已过期')
         validate_arguments(entry['_tool']['inputSchema'], arguments)
-        if self._redact(arguments) != arguments: raise ValueError('扩展参数含本地配置密钥，拒绝发送')
+        if self._redact(arguments) != arguments: raise ValueError('MCP 参数含本地配置密钥，拒绝发送')
         cfg = self._config(entry['_server_id'])
         sources = list(metadata.get('source_ids', []))
         context = list(metadata.get('_context_source_ids', sources))
@@ -299,7 +299,7 @@ class ToolActions:
                          knowledge_refs=metadata.get('_knowledge_refs',{}).copy(), persona_id=metadata.get('_persona_id','default'), provenance_complete=True,
                          request_generation=metadata.get('request_generation'), config_identity=self._identity(cfg), schema_hash=entry['_tool']['schema_hash'],
                          trusted_identity=identity,expires_at=(datetime.now(timezone.utc)+timedelta(minutes=10)).isoformat())
-        return {'status':'pending_approval','executed':False,'run_id':item['id'],'message':'仅提出操作，尚未执行。请在本地扩展工具页检查参数并批准。'}
+        return {'status':'pending_approval','executed':False,'run_id':item['id'],'message':'仅提出操作，尚未执行。请在本地 MCP 页检查参数并批准。'}
 
     def _check(self, item):
         if item.get('read_only'): raise ValueError('恢复的工具回执仅供查看，不能重新执行')
@@ -315,7 +315,7 @@ class ToolActions:
                                               '_context_source_ids':item['context_source_ids'],'_memory_versions':item['memory_versions'],'_jargon_versions':item['jargon_versions'],
                                               '_knowledge_refs':item.get('knowledge_refs',{}),'_persona_id':item.get('persona_id','default')})
         if self._closed or not scope.get('allow_mcp',False) or not scope.get('allow_tools',True) or not self.chat._request_current(scope_id,user_id,{'request_generation':item.get('request_generation')}):
-            raise ValueError('请求已替换、暂停或关闭扩展权限')
+            raise ValueError('请求已替换、暂停或关闭 MCP 权限')
         cfg = self._config(item['server_id'])
         if not cfg['enabled'] or item['tool_name'] not in cfg['allowed_tools'] or item['config_identity'] != self._identity(cfg): raise ValueError('服务配置或工具权限已变化')
         if datetime.fromisoformat(item['expires_at']) <= datetime.now(timezone.utc): raise ValueError('审批已过期，请重新提出请求')

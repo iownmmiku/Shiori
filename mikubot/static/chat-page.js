@@ -41,7 +41,7 @@ async function sendChat(form) {
   try {
     const response = await api("/api/chat",{method:"POST",body:{scope_id:state.scope,text,images},signal:controller.signal});
     state.draft = ""; state.images = [];
-    if (response.pending_actions?.length) { state.pendingToolNotice = {scope_id:state.scope,count:response.pending_actions.length}; toast(`有 ${response.pending_actions.length} 项扩展工具调用等待你审批，尚未执行。`); }
+    if (response.pending_actions?.length) { state.pendingToolNotice = {scope_id:state.scope,count:response.pending_actions.length}; toast(`有 ${response.pending_actions.length} 项 MCP 调用等待你审批，尚未执行。`); }
     if (response.memories?.length) toast(`已参考 ${response.memories.length} 条记忆`);
   } catch (error) { toast(error.name === "AbortError" ? "已停止等待；后台可能仍在处理，请刷新记录确认。" : error.message,error.name !== "AbortError"); }
   finally { state.sending = false; state.controller = null; await bootstrap(); if (state.page === "chat") $("#chat-text")?.focus(); }
@@ -51,7 +51,7 @@ async function renderChat() {
   let html = await renderChatBase();const pending = state.pendingToolNotice;
   if(!state.scope.startsWith('web:') && window.MikubotLearning)html=(await window.MikubotLearning.deliveryPanel())+html;
   if (!pending || pending.scope_id !== state.scope) return html;
-  return html.replace('<div class="chat-layout">',`${notice(`刚才提出了 ${pending.count} 项扩展工具请求，请前往审批页查看当前状态。批准前不会执行，批准结果仅在本地查看。`,"warning","go-tools","查看工具请求")}<div class="chat-layout">`);
+  return html.replace('<div class="chat-layout">',`${notice(`刚才提出了 ${pending.count} 项 MCP 请求，请前往审批页查看当前状态。批准前不会执行，批准结果仅在本地查看。`,"warning","go-tools","查看工具请求")}<div class="chat-layout">`);
 }
 
 async function showSources(message) {

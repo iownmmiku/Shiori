@@ -298,7 +298,7 @@ class Settings:
                 self._validate_mcp_url(server['url'])
                 self._data['mcp_servers'].append(server)
             except Exception:
-                self.warning = '一个扩展工具配置无法读取，已忽略；请重新配置'
+                self.warning = '一个 MCP 服务配置无法读取，已忽略；请重新配置'
         # Older or hand-edited files must never expose URL-embedded credentials.
         try:
             self._validate_ws_url(self._data['onebot']['ws_url'])
@@ -431,19 +431,19 @@ class Settings:
                 if section == 'mcp_servers':
                     items = patch[section]
                     if not isinstance(items, list) or len(items) > 8:
-                        raise ValueError('扩展服务最多8个')
+                        raise ValueError('MCP 服务最多 8 个')
                     previous = {x['id']: x for x in updated['mcp_servers']}
                     servers, seen = [], set()
                     for item in items:
                         if not isinstance(item, dict) or not re.fullmatch(r'[a-zA-Z0-9_-]{1,48}', str(item.get('id', ''))) or item['id'] in seen:
-                            raise ValueError('扩展服务ID须唯一，且仅包含字母数字、下划线或短横线')
+                            raise ValueError('MCP 服务 ID 须唯一，且仅包含字母数字、下划线或短横线')
                         seen.add(item['id'])
                         server = {k: item.get(k, default) for k, default in {'id':'', 'name':'', 'url':'', 'token':'', 'enabled':False, 'allowed_tools':[]}.items()}
                         server['url'] = str(server['url']).strip()
                         self._validate_mcp_url(server['url'])
                         server['name'] = str(server['name']).strip()[:80] or server['id']
                         if type(server['enabled']) is not bool or not isinstance(server['allowed_tools'], list) or len(server['allowed_tools']) > 50 or any(not isinstance(x, str) or not 1 <= len(x) <= 128 for x in server['allowed_tools']):
-                            raise ValueError('扩展服务开关或工具允许列表格式错误')
+                            raise ValueError('MCP 服务开关或工具允许列表格式错误')
                         server['allowed_tools'] = list(dict.fromkeys(server['allowed_tools']))
                         server['token'] = str(server['token'] or previous.get(server['id'], {}).get('token', ''))
                         if item.get('clear_token'):

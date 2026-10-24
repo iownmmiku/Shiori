@@ -365,7 +365,7 @@ class ChatService:
                             result = await self.provider.complete(messages, tools=tools if step < 2 else None, scope_id=scope_id, before_send=before_send)
                     except ProviderError:
                         if not actions: raise
-                        result = {'content':'模型未能继续整理答复。已执行的工具结果保留在下方和扩展工具记录中，请核对后再决定下一步；不会自动重跑。', 'tool_calls':[], 'usage':usage}
+                        result = {'content':'模型未能继续整理答复。已执行的工具结果保留在下方和 MCP 调用记录中，请核对后再决定下一步；不会自动重跑。', 'tool_calls':[], 'usage':usage}
                         break
                     usage = result['usage']
                 reply = strip_memory_citations(result.get('content', ''), versions, user_text=text).strip()
@@ -379,7 +379,7 @@ class ChatService:
                     return self._interrupted(actions)
                 pending_actions = [x['result'] for x in actions if x.get('ok') and isinstance(x.get('result'),dict) and x['result'].get('status') == 'pending_approval']
                 if pending_actions:
-                    reply = '已提出扩展工具操作，尚未执行。请在本地管理台的“扩展工具”页检查服务、参数和来源，逐次批准。'
+                    reply = '已提出 MCP 调用，尚未执行。请在本地管理台的“MCP”页检查服务、参数和来源，逐次批准。'
                     generated_reply = False
                 changed = self._changed(versions, jargon_versions, scope_id, str(user_id))
                 changed = changed or self._knowledge_changed(scope.get('persona_id', 'default'), manifest.get('knowledge_refs', {}))
