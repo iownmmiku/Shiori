@@ -62,6 +62,23 @@ async function main(){
   responder=defaultResponse;await perform();
   assert.equal(calls.at(-1)[1].method,'DELETE','explicit removal retains revocation semantics');
   assert.equal(calls.at(-1)[0],`/api/chat/attachments/${refId}?scope_id=web%3Adefault`);
+
+  // A reference GET may finish after a send has already consumed/released that
+  // very reference. Even if sending is false again, the old receipt is stale.
+  let completeLookup;
+  responder=async(url)=>url.startsWith('/api/chat/attachments/'+refId+'?')?new Promise(resolve=>{completeLookup=resolve;}):{};
+  const lateReuse=ui.handleAction('attachment-reuse',{dataset:{id:refId,scope:'web:default'}});
+  nodes.get('#chat-text').value='another turn';state.draft='another turn';
+  await ui.sendChat();
+  completeLookup({id:refId,name:'late.txt'});
+  await assert.rejects(lateReuse,/已变化/);
+  assert.ok(!(await ui.renderChat()).includes('late.txt'),'a completed send invalidates in-flight reuse receipts');
+
+  responder=async(url)=>url.startsWith('/api/chat/attachments/'+refId+'?')?new Promise(resolve=>{completeLookup=resolve;}):{};
+  const otherScope=ui.handleAction('attachment-reuse',{dataset:{id:refId,scope:'web:default'}});
+  state.scope='web:other';completeLookup({id:refId,name:'wrong-scope.txt'});
+  await assert.rejects(otherScope,/已变化/);
+  assert.ok(!(await ui.renderChat()).includes('wrong-scope.txt'),'a late reuse callback must retain its captured owner scope');
   console.log('PASS: attachment release, task protection, scope changes, failed release, restart management and explicit revocation UI');
 }
 main().catch(error=>{console.error(error);process.exitCode=1;});

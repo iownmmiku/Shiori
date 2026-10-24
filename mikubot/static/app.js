@@ -43,7 +43,9 @@ const paths = {
   diagnostics:'<path d="M3 12h4l2-5 3 10 2-5h7"/>',
 };
 const icon = name => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name] || paths.spark}</svg>`;
-const pageNames = {overview:"机器人概览",chat:"聊天",models:"模型供应商",memory:"记忆档案",culture:"群语言与表达",knowledge:"知识与检索",personaKnowledge:"人格知识",tasks:"任务与提醒",tools:"MCP",persona:"机器人配置",groups:"群与会话",logs:"运行日志",statistics:"数据统计",plugins:"插件",diagnostics:"自检与诊断",settings:"系统设置",jobs:"后台任务",help:"使用指南"};
+const pageNames = {overview:"运行概览",chat:"聊天",models:"模型供应商",memory:"记忆档案",culture:"群语言与表达",knowledge:"知识与检索",personaKnowledge:"人格知识",tasks:"任务与提醒",tools:"MCP",persona:"机器人配置",groups:"群与会话",logs:"运行日志",statistics:"数据统计",plugins:"插件",diagnostics:"自检与诊断",settings:"系统设置",jobs:"后台任务",help:"使用指南"};
+// Keep old model links working without restoring a second configuration page.
+const sidebarPageNames = Object.fromEntries(Object.entries(pageNames).filter(([page]) => page !== "models"));
 const state = {page:localStorage.getItem("qunyu-page") || "chat",scope:localStorage.getItem("qunyu-scope") || "web:default",boot:null,settings:{},scopes:[],personas:[],records:[],messages:[],filters:{},images:[],draft:"",sending:false,controller:null,renderId:0,modalRecord:null,modalKind:null,authenticated:false};
 if (!pageNames[state.page]) state.page = "overview";
 const labels = {fact:"事实",preference:"偏好",event:"共同经历",note:"笔记",active:"有效",archived:"已归档",superseded:"已替代",deleted:"已删除",pending:"待处理",approved:"已确认",rejected:"已拒绝",disabled:"已停用",running:"执行中",completed:"已完成",cancelled:"已取消",failed:"失败",private:"仅本人",group:"会话共享",todo:"待办",reminder:"提醒",none:"不重复",daily:"每天",weekly:"每周",balanced:"适时回应",quiet:"仅被提及",active_activity:"积极接话",delivered:"已送达",lexical:"关键词检索",hybrid:"混合检索",semantic:"语义检索",basic:"基础检索"};
@@ -100,8 +102,8 @@ function renderNavigation() {
   // The sidebar lives in its own script. If that script ever fails to load, fall
   // back to a flat list instead of throwing and leaving the shell blank.
   $("#navigation").innerHTML = layout?.render
-    ? layout.render({ pageNames, current: state.page, icon, esc: e })
-    : `<div class="primary-navigation">${Object.keys(pageNames).filter(key => key !== "help").map(key => `<button type="button" class="nav-item ${key === state.page ? "active" : ""}" data-page="${e(key)}">${icon(key)}<span>${e(pageNames[key])}</span></button>`).join("")}</div>`;
+    ? layout.render({ pageNames: sidebarPageNames, current: state.page, icon, esc: e })
+    : `<div class="primary-navigation">${Object.keys(sidebarPageNames).filter(key => key !== "help").map(key => `<button type="button" class="nav-item ${key === state.page ? "active" : ""}" data-page="${e(key)}">${icon(key)}<span>${e(sidebarPageNames[key])}</span></button>`).join("")}</div>`;
   document.body.classList.toggle("chat-page",state.page === "chat");
   $("#page-breadcrumb").textContent = pageNames[state.page];
   $("#scope-icon").innerHTML = icon("groups");
@@ -112,22 +114,21 @@ function renderNavigation() {
   $("#sidebar-status-text").textContent = state.settings.paused ? "已暂停自动回复" : modelReady ? "本地服务已就绪" : "等待配置模型";
   $("#sidebar-status-sub").textContent = modelReady ? (configuredModel().model || "你的数据，留在你的电脑") : "连接模型即可开始聊天";
   $("#version-label").textContent = state.boot?.version || "0.1";
-  $("#workspace-version").textContent = state.boot?.version || "0.1.5";
-  if ($("#header-version")) $("#header-version").textContent = "v" + (state.boot?.version || "0.1.5");
+  $("#workspace-version").textContent = state.boot?.version || "0.1.6";
+  if ($("#header-version")) $("#header-version").textContent = "v" + (state.boot?.version || "0.1.6");
   const portWarning = $("#port-warning"), listener = state.boot?.listener;
   if (portWarning) {
     portWarning.hidden = !listener?.port_changed;
     portWarning.textContent = listener?.port_changed ? listener.port_warning : "";
   }
 }
-// The management dialog is re-rendered wholesale on every change, which would
-// otherwise drop focus (and any in-progress keyboard interaction) back to the
-// first field. Identify the focused control so it can be restored afterwards.
+// Structural edits replace only the management panel, keeping its form, footer
+// and dialog stable. Page-group ids change on a move, so use the page identity.
 function sidebarFocusKey(element) {
   if (!element || !element.dataset) return "";
-  const { sidebarField = "", targetPage = "", id = "", action = "" } = element.dataset;
+  const { sidebarField = "", targetPage = "", id = "", action = "", view = "", icon = "" } = element.dataset;
   if (!sidebarField && !targetPage && !action) return "";
-  return [sidebarField, targetPage, id, action, element.tagName].join("|");
+  return [sidebarField, targetPage, targetPage ? "" : id, action, view, icon, element.tagName].join("|");
 }
 function findSidebarControl(key) {
   if (!key) return null;
@@ -136,24 +137,33 @@ function findSidebarControl(key) {
   }
   return null;
 }
+function saveSidebarTitles(form) {
+  for (const input of $$('[data-sidebar-field="title"]',form)) {
+    window.MikubotSidebar?.handleChange?.(input,sidebarContext());
+  }
+}
 function sidebarContext() {
-  return { pageNames, icon, esc: e, notify: toast, rerender: () => { renderNavigation(); leaveHiddenPage(); },
+  return { pageNames: sidebarPageNames, icon, esc: e, notify: toast, rerender: () => { renderNavigation(); leaveHiddenPage(); },
            rerenderManage: () => {
-             if (state.modalKind !== "sidebar-manage") return;
-             const key = sidebarFocusKey(document.activeElement);
-             const list = $("#modal .sidebar-manage-pages");
-             const scroll = list ? list.scrollTop : 0;
-             openSidebarManage();
-             // openModal focuses the first field on a 30 ms timer, so restore after
-             // that runs; otherwise focus and the list scroll position are lost.
-             setTimeout(() => {
-               const nextList = $("#modal .sidebar-manage-pages");
-               if (nextList) nextList.scrollTop = scroll;
-               const next = findSidebarControl(key);
-               if (!next) return;
-               next.focus();
-               try { next.setSelectionRange?.(next.value.length, next.value.length); } catch {}
-             }, 60);
+             const dialog = $("#modal"), panel = $("#modal .sidebar-manage");
+             if (state.modalKind !== "sidebar-manage" || !dialog?.open || !panel) return;
+             const active = document.activeElement, key = sidebarFocusKey(active);
+             const selection = [active?.selectionStart,active?.selectionEnd,active?.selectionDirection];
+             const inPanel = panel.contains(active);
+             const scroll = ["#modal","#modal .modal-body","#modal .sidebar-manage-pages","#modal .sidebar-manage-list"]
+               .map(selector => [selector,$(selector)?.scrollTop]);
+             panel.outerHTML = window.MikubotSidebar.manageBody({pageNames:sidebarPageNames,icon,esc:e});
+             const next = findSidebarControl(key);
+             // Choosing an icon closes the replacement <details>. Its hidden
+             // palette buttons cannot take focus, so return to its summary.
+             const picker = next?.closest?.(".sidebar-icon-picker");
+             const visible = picker && !picker.open ? picker.querySelector("summary") : next;
+             const focus = visible && !visible.disabled ? visible : inPanel ? $("#modal .manage-tab.active") : null;
+             focus?.focus({preventScroll:true});
+             if (focus === next && Number.isInteger(selection[0])) {
+               try { next.setSelectionRange?.(...selection); } catch {}
+             }
+             for (const [selector,top] of scroll) if (top !== undefined && $(selector)) $(selector).scrollTop = top;
            },
            openManage: openSidebarManage };
 }
@@ -161,7 +171,7 @@ function sidebarContext() {
 // Hiding the page you are currently on (or its whole group) would leave no
 // active sidebar entry, so fall back to chat and tell the user how to return.
 function leaveHiddenPage() {
-  window.MikubotSidebar?.prepare?.(pageNames);
+  window.MikubotSidebar?.prepare?.(sidebarPageNames);
   if (state.page !== "chat" && window.MikubotSidebar && !window.MikubotSidebar.isPageVisible(state.page)) {
     state.page = "chat"; localStorage.setItem("qunyu-page","chat");
     renderNavigation();
@@ -174,24 +184,26 @@ function leaveHiddenPage() {
 // itself can never be hidden or removed.
 function openSidebarManage() {
   openModal("管理侧边栏","调整分类、顺序与显示范围。隐藏的页面不会出现在侧边栏，但功能与数据都保留，可随时恢复。",
-            window.MikubotSidebar.manageBody({ pageNames, icon, esc: e }),"sidebar-manage",null,"完成");
+            window.MikubotSidebar.manageBody({ pageNames:sidebarPageNames, icon, esc: e }),"sidebar-manage",null,"完成");
 }
 
 async function bootstrap(showWizard = false) {
   const boot = await api("/api/bootstrap");
   state.boot = boot; state.settings = boot.settings || {}; state.scopes = boot.scopes || []; state.personas = boot.personas || [];
   if (!state.scopes.find(item => item.id === state.scope)) state.scope = state.scopes[0]?.id || "web:default";
+  if(state.page === "models"){state.page="persona";state.botTab="models";localStorage.setItem("qunyu-page","persona");}
   // The remembered page may have been hidden since the last visit; never strand
   // the user on a page with no sidebar entry.
-  window.MikubotSidebar?.prepare?.(pageNames);
+  window.MikubotSidebar?.prepare?.(sidebarPageNames);
   if (window.MikubotSidebar && !window.MikubotSidebar.isPageVisible(state.page)) { state.page = "chat"; localStorage.setItem("qunyu-page","chat"); }  state.authenticated = true; renderNavigation(); await renderPage();
   if (showWizard && boot.setup_required && !sessionStorage.getItem("qunyu-wizard-skipped")) showWizardModal();
 }
 async function navigate(page) {
   if (!pageNames[page]) return;
+  if(page === "models"){page="persona";state.botTab="models";}
   // A hidden page has no sidebar entry; keep navigation truthful by refusing it
   // and telling the user how to bring it back.
-  window.MikubotSidebar?.prepare?.(pageNames);
+  window.MikubotSidebar?.prepare?.(sidebarPageNames);
   if (window.MikubotSidebar && !window.MikubotSidebar.isPageVisible(page)) { toast("该页面已在侧边栏隐藏，可在「管理侧边栏 → 管理页面」中恢复。",true); return; }
   if (state.page === "chat") state.draft = $("#chat-text")?.value || state.draft;
   state.page = page; state.filters = {}; localStorage.setItem("qunyu-page",page);
@@ -212,6 +224,7 @@ async function renderPage() {
     window.MikubotPages.afterRender();
     window.MikubotStatistics?.afterRender();
     window.MikubotUpdates?.afterRender();
+    window.MikubotFeatures.afterRender?.();
   } catch (error) { if (id === state.renderId) main.innerHTML = `${heading("LOCAL WORKSPACE",pageNames[state.page],"数据暂时没有加载成功。请确认本地服务仍在运行。") }<div class="inline-error">${e(error.message)}</div><div class="section-actions">${button("重新加载","refresh","primary","refresh")}</div>`; }
 }
 
@@ -298,7 +311,9 @@ async function saveModal(kind,form) {
   else return;
   if (kind === "persona") { payload.profile = {}; for (const key of ["residence","occupation","age","birthday","routine","background","relationship"]) { payload.profile[key] = data["profile_"+key] ?? item?.profile?.[key] ?? ""; delete payload["profile_"+key]; } }
   if (kind === "scope") {
-    const inherited = ['persona_id','model_id','activity','trigger_at','trigger_reply','trigger_name','plan_enabled','proactive_reply','always_reply','allow_tools','allow_mcp','use_persona_knowledge'];
+    if(data.debounce_enabled !== undefined)payload.debounce_enabled=data.debounce_enabled === "" ? null : data.debounce_enabled === "true";
+    for(const key of ["debounce_seconds","debounce_max_wait_seconds"])if(data[key] !== undefined)payload[key]=data[key] === "" ? null : Number(data[key]);
+    const inherited = ['debounce_enabled','debounce_seconds','debounce_max_wait_seconds','persona_id','model_id','activity','trigger_at','trigger_reply','trigger_name','plan_enabled','proactive_reply','always_reply','allow_tools','allow_mcp','use_persona_knowledge'];
     if (item?.profile_id != null) for (const key of inherited) if (payload[key] === item[key]) delete payload[key];
     if (!item && payload.persona_id === 'default') delete payload.persona_id;
   }
@@ -374,6 +389,7 @@ document.addEventListener("click",async event => {
   const action = target.dataset.action, id = target.dataset.id, item = state.records.find(record => record.id === id);
   try {
     if (await window.MikubotLearning?.handleAction(action,target)) return;
+    if (await window.MikubotBotModels?.handleAction(action,target)) return;
     if (await window.MikubotEmbedding?.handleAction(action,target)) return;
     if (await window.MikubotPages.handleAction(action,target)) return;
     if (await window.MikubotExperience.handleAction(action,target)) return;
@@ -439,7 +455,7 @@ document.addEventListener("click",async event => {
     else if (action === "new-scope") scopeModal();
     else if (action === "edit-scope") scopeModal(state.scopes.find(s => s.id === id));
     else if (action === "toggle-scope") { const group = state.scopes.find(s => s.id === id); await api(`/api/scopes/${encodeURIComponent(id)}`,{method:"PUT",body:{enabled:!group.enabled}}); toast(group.enabled ? "会话已暂停" : "会话已启用"); await bootstrap(); }
-    else if (action === "scope-chat") { state.scope = id; localStorage.setItem("qunyu-scope",id); await navigate("chat"); }
+    else if (action === "scope-chat") { if(state.sending || state.debouncePending)throw new Error("请先完成或取消当前回复与消息收集。");state.scope = id; localStorage.setItem("qunyu-scope",id); await navigate("chat"); }
     else if (action === "attach-image") $("#image-input").click();
     else if (action === "remove-image") { state.images.splice(Number(target.dataset.index),1); renderImagePreviews(); }
     else if (action === "view-image") { openModal("对话图片","",`<img class="image-lightbox" src="${e(target.src)}" alt="对话原图">`); $("#modal").classList.add("modal-wide"); }
@@ -467,12 +483,17 @@ document.addEventListener("submit",async event => {
   if ($("#modal-error",form)) $("#modal-error",form).hidden = true;
   try {
     if (await window.MikubotLearning?.handleSubmit(kind,form)) return;
+    if (await window.MikubotBotModels?.handleSubmit(kind,form)) return;
     if (await window.MikubotPages.handleSubmit(kind,form)) return;
     if (await window.MikubotEmbedding?.handleSubmit(kind,form)) return;
     if (await window.MikubotExperience.handleSubmit(kind,form)) return;
     if (kind === "quick-start") { await window.MikubotQuickStart.submit(form); return; }
     if (await window.MikubotFeatures.handleSubmit(kind,form)) return;
-    if (kind === "sidebar-manage") { closeModal(); toast("侧边栏布局已保存"); renderNavigation(); return; }
+    if (kind === "sidebar-manage") {
+      saveSidebarTitles(form); closeModal();
+      toast(window.MikubotSidebar?.isTemporary?.() ? "本次侧边栏调整仅临时生效，较新版本的原存档已保留。" : "侧边栏布局已保存");
+      renderNavigation(); return;
+    }
     if (kind === "approve-tool-run") await approveToolRun(form);
     else if (kind === "mcp-allowlist") await saveMcpAllowlist(form);
     else if (kind === "confirm") { await state.confirm(); closeModal(); toast(state.stopped ? "mikubot已退出，可以关闭页面" : "操作已完成"); if (!state.stopped) await bootstrap(); }
@@ -495,11 +516,12 @@ document.addEventListener("input",event => {
   if (event.target.id === "chat-text") { state.draft = event.target.value; event.target.style.height = "auto"; event.target.style.height = Math.min(event.target.scrollHeight,180) + "px"; }
 });
 document.addEventListener("change",async event => {
+  if(event.target.id === "time-zone-preset" && event.target.value){const form=event.target.closest("form");$('[name="timezone"]',form).value=event.target.value;return;}
   if (window.MikubotSidebar?.handleChange?.(event.target,sidebarContext())) return;
   try { if (await window.MikubotEmbedding?.handleChange(event.target)) return; } catch (error) { toast(error.message,true); return; }
   try { if (await window.MikubotPages.handleChange(event.target)) return; } catch (error) { toast(error.message,true); return; }
   try { if (await window.MikubotExperience.handleChange(event.target)) return; } catch (error) { toast(error.message,true); return; }
-  if (event.target.id === "global-scope") { if (state.sending) { event.target.value = state.scope; toast("请等待当前回复，或先停止等待。",true); return; } state.scope = event.target.value; localStorage.setItem("qunyu-scope",state.scope); state.filters = {}; state.draft = ""; state.images = []; await renderPage(); }
+  if (event.target.id === "global-scope") { if (state.sending || state.debouncePending) { event.target.value = state.scope; toast("请等待当前回复，或先停止等待。",true); return; } state.scope = event.target.value; localStorage.setItem("qunyu-scope",state.scope); state.filters = {}; state.draft = ""; state.images = []; await renderPage(); }
   if (event.target.name === "adapter" && !window.MikubotQuickStart.adapterChanged(event.target)) updateAdapterFields();
   if (event.target.id === "knowledge-persona") { state.knowledgePersona = event.target.value; await renderPage(); }
   if (event.target.id === "image-input") {

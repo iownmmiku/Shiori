@@ -1,7 +1,7 @@
 """Persistent extraction cursors and bounded idle flushes for short conversations."""
 from __future__ import annotations
 import asyncio
-from datetime import datetime,timedelta,timezone
+from datetime import datetime,timezone
 import json
 import hashlib
 from .timezones import day_bounds
@@ -19,18 +19,28 @@ class MemoryLifecycle:
         with self.store._lock,self.store._conn:self.store._write('events',record,('kind','created_at'))
 
     def _state(self,scope,user):
-        since=(datetime.now(timezone.utc)-timedelta(days=1)).isoformat()
         key='memory-progress-'+hashlib.sha256((scope+'\x00'+user).encode()).hexdigest()[:32]
         try:
             record=self.store._get('events',key)['details']
+            # Old empty cursors were seeded at now-24h despite never processing
+            # any source. They can safely resume from the beginning.
+            if not record.get('cursor_id') and record.get('cursor_at'):
+                state=('', '', record.get('last_attempt', ''), record.get('last_error', ''))
+                self._save(scope,user,state);return state
             return tuple(record.get(field,'') for field in ('cursor_at','cursor_id','last_attempt','last_error'))
         except KeyError:
-            state=(since,'','','');self._save(scope,user,state);return state
+            state=('','','','');self._save(scope,user,state);return state
 
     def pending(self,scope,user,limit=32):
         cursor_at,cursor_id,_,_=self._state(scope,str(user))
+        blocked = self.store.blocked_memory_sources(scope)
         with self.store._lock:
-            rows=self.store._conn.execute("SELECT data FROM messages WHERE scope_id=? AND user_id=? AND role='user' AND (created_at>? OR (created_at=? AND id>?)) ORDER BY created_at,id LIMIT ?",(scope,str(user),cursor_at,cursor_at,cursor_id,limit)).fetchall()
+            anchor = self.store._conn.execute('SELECT rowid FROM messages WHERE scope_id=? AND user_id=? AND id=?', (scope,str(user),cursor_id)).fetchone()
+            # Resolve the durable ID each time instead of persisting rowid.
+            # A deleted cursor conservatively replays timestamp ties; UUID
+            # lexical order must never skip an earlier inserted message.
+            order = anchor[0] if anchor else 0
+            rows=self.store._conn.execute("SELECT data FROM messages WHERE scope_id=? AND user_id=? AND role='user' AND (created_at>? OR (created_at=? AND rowid>?)) AND id NOT IN (SELECT value FROM json_each(?)) ORDER BY created_at,rowid LIMIT ?",(scope,str(user),cursor_at,cursor_at,order,json.dumps(sorted(blocked)),max(1,min(400,int(limit))))).fetchall()
         return [json.loads(row[0]) for row in rows]
 
     def attempt(self,scope,user,error=''):
@@ -39,8 +49,13 @@ class MemoryLifecycle:
 
     def advance(self,scope,user,records):
         if not records:return
-        latest=max(records,key=lambda item:(item['created_at'],item['id']))
-        state=list(self._state(scope,user));state[:2]=[latest['created_at'],latest['id']];state[3]=''
+        ordered=self.store.ordered_messages([item['id'] for item in records],scope_id=scope)
+        if not ordered:return
+        latest=ordered[-1]
+        state=list(self._state(scope,user))
+        old=self.store.ordered_messages([state_id for state_id in (state[1],latest['id']) if state_id],scope_id=scope)
+        if old and old[-1]['id'] != latest['id']:return
+        state[:2]=[latest['created_at'],latest['id']];state[3]=''
         self._save(scope,user,state)
 
     def allowed(self,require_model=True):
@@ -73,12 +88,16 @@ class MemoryLifecycle:
     async def start(self):
         if self.task and not self.task.done():return
         async def poll():
+            after = ('', '')
             while True:
                 await asyncio.sleep(15)
                 if not self.allowed() or self.chat.settings.get()['paused']:continue
-                since=(datetime.now(timezone.utc)-timedelta(days=1)).isoformat()
                 with self.store._lock:
-                    pairs=self.store._conn.execute("SELECT scope_id,user_id,MAX(created_at) FROM messages WHERE role='user' AND created_at>=? GROUP BY scope_id,user_id ORDER BY MAX(created_at) DESC LIMIT 32",(since,)).fetchall()
+                    pairs=self.store._conn.execute("SELECT scope_id,user_id,MAX(created_at) FROM messages WHERE role='user' AND (scope_id>? OR (scope_id=? AND user_id>?)) GROUP BY scope_id,user_id ORDER BY scope_id,user_id LIMIT 32",(after[0],after[0],after[1])).fetchall()
+                if not pairs:
+                    after=('', '')
+                    continue
+                after=(pairs[-1][0],pairs[-1][1])
                 idle=self.chat.settings.get()['memory'].get('extraction_idle_seconds',180)
                 now=datetime.now(timezone.utc)
                 for scope,user,latest in pairs:

@@ -20,6 +20,29 @@ def _key(value):
     return re.sub(r'[\W_]+', '', unicodedata.normalize('NFKC', str(value))).casefold()
 
 
+def wiki_works(text):
+    """Extract credited works from identity statements, never search keywords."""
+    lead = unicodedata.normalize('NFKC', str(text)[:2000])
+    names = []
+    for match in re.finditer(r'(?<![不未认認])(?:是|为|為)([^。！？\n]{1,320}?)(?:角色|人物)', lead[:700]):
+        credit = match[1]
+        quoted = re.findall(r'《([^》\n]{1,160})》|「([^」\n]{1,160})」|『([^』\n]{1,160})』', credit)
+        if quoted:
+            names.extend(next(part for part in group if part) for group in quoted)
+        else:
+            credit = re.sub(r'(?:中|里|裡|内|內)?的?(?:(?:虚构|虛構|登场|登場|主要|重要|一名|一位|一个|一個))*$', '', credit).strip()
+            names.append(credit)
+            names.append(re.sub(r'^(?:电子游戏|電子遊戲|电视动画|電視動畫|轻小说|輕小說|游戏|遊戲|动画|動畫|漫画|漫畫|小说|小說)\s*', '', credit))
+    for match in re.finditer(r'fictional character[^.\n]{0,80}?\b(?:from|in)\s+(?:the\s+)?(?:(?:video game|anime|manga|novel|series)\s+)?([^\.\n]{1,160})', lead[:700], re.I):
+        names.append(match[1].strip(' "\''))
+    return list(dict.fromkeys(name.strip() for name in names if 1 <= len(name.strip()) <= 160))[:12]
+
+
+def work_matches(works, requested, aliases=()):
+    wanted = {_key(name) for name in (requested, *aliases) if name}
+    return any(_key(name) in wanted for name in works)
+
+
 def _rows(value):
     rows = value.get('data', []) if isinstance(value, dict) else value
     return [row for row in rows[:50] if isinstance(row, dict)] if isinstance(rows, list) else []
@@ -140,11 +163,16 @@ class CharacterCatalog:
         if not from_work:
             roles.sort(key=lambda r: not any(_key(query) == _key(name) for name in r['aliases']))
         if not roles:
-            roles = await self._wiki(query, work, failures)
+            aliases = []
+            for subject in _rows(subjects):
+                names = [str(subject.get(key) or '') for key in ('name', 'name_cn')]
+                if work and any(_key(work) == _key(name) for name in names):
+                    aliases.extend(name for name in names if name)
+            roles = await self._wiki(query, work, failures, aliases)
         return {'characters': roles, 'failures': failures,
                 'warnings': ([] if roles else ['核心站点暂未找到角色，请换用完整角色名或作品名称重试。'])}
 
-    async def _wiki(self, query, work, failures):
+    async def _wiki(self, query, work, failures, aliases=()):
         async def find(base):
             params = {'action': 'query', 'format': 'json', 'formatversion': '2', 'generator': 'search',
                       'gsrsearch': query + (' ' + work if work else ''), 'gsrlimit': '4',
@@ -160,11 +188,17 @@ class CharacterCatalog:
                         continue
                     if not re.search(r'(?:是|为|為)[^。\n]{0,100}(?:角色|人物)|fictional character', body[:500], re.I):
                         continue
+                    works = wiki_works(body)
+                    if work and not work_matches(works, work, aliases):
+                        failures.append({'source': base, 'error': '备用来源未能核实限定作品，未作为角色候选'})
+                        continue
+                    credited = next((name for name in works if work_matches([name], work, aliases)), works[0] if works else '作品信息待核对')
                     page_base = 'https://zh.wikipedia.org/wiki' if 'wikipedia' in base else base
                     page = {'title': title[:240], 'text': body, 'url': page_base + '/' + quote(title.replace(' ', '_'))}
                     result.append({'id': ('moegirl-' if 'moegirl' in base else 'wikipedia-') + str(row['pageid']),
-                                   'name': title[:160], 'aliases': [title[:160]], 'work': work or '请核对简介中的作品',
-                                   'works': [work] if work else [], 'description': body[:360], 'url': page['url'],
+                                   'name': title[:160], 'aliases': [title[:160]], 'work': credited,
+                                   'works': works, 'work_verified': bool(works), '_work_aliases': list(aliases),
+                                   'description': body[:360], 'url': page['url'],
                                    'source': '萌娘百科' if 'moegirl' in base else 'Wikipedia', '_page': page})
                 return result
             except (ValueError, OSError, TimeoutError, AttributeError, KeyError, TypeError) as exc:

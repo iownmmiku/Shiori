@@ -153,10 +153,11 @@ async function fullScriptIntegration(){
   browser.window=browser;vm.createContext(browser);
   for(const file of require('./ui_modules.cjs').integrationScripts)vm.runInContext(fs.readFileSync(path.join(__dirname,"../mikubot/static",file),"utf8"),browser,{filename:file});
   await new Promise(resolve=>setTimeout(resolve,10));
-  assert.match(element("#navigation").innerHTML,/机器人管理/);
+  assert.match(element("#navigation").innerHTML,/运行概览/);
   assert.match(element("#content").innerHTML,/聊天模式/);
   assert.match(element("#content").innerHTML,/本会话模型/);
-  assert.match(element("#navigation").innerHTML,/模型供应商/);
+  assert.ok(!element("#navigation").innerHTML.includes('data-page="models"'),'models are managed inside bot configuration');
+  assert.match(element("#navigation").innerHTML,/机器人配置/);
   assert.match(element("#navigation").innerHTML,/运行日志/);
   assert.equal(element("#port-warning").hidden,true);
   vm.runInContext('state.boot.listener={port_changed:true,requested_port:8765,actual_port:8766,port_warning:"请求8765，实际8766。OneBot <script>bad</script>"}; renderNavigation();',browser);

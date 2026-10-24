@@ -8,7 +8,7 @@ function node(){return {children:[],parentNode:null,append(child){this.children=
 const body=node(),region=node(),dialog=node();dialog.open=false;body.append(region);
 const sandbox={window:{},URLSearchParams,state:{scope:'web:default',filters:{}},
   $:selector=>nodes.get(selector)||({'#toast-region':region,'#modal':dialog}[selector]),document:{body,createElement:node},
-  e:escape,icon:()=>'',setTimeout:()=>{},rows:value=>Array.isArray(value)?value:value.items||[],
+  e:escape,icon:()=>'',scopeName:id=>id,setTimeout:()=>{},rows:value=>Array.isArray(value)?value:value.items||[],
   heading:()=>'',listToolbar:()=>'<div class="toolbar">',notice:()=>'',empty:()=>'',memoryCard:item=>`<article>${escape(item.content)}</article>`,
   button:(text,action,style,symbol,attrs='')=>`<button data-action="${action}" ${attrs}>${text}</button>`,field:()=>'',
   query:params=>new URLSearchParams(Object.entries(params).filter(([,value])=>value!==undefined&&value!=='')).toString(),

@@ -17,7 +17,7 @@ from .settings import resolve_model, resolved_identity
 from .output import OutputLimitError, split_transport_output
 from .access import manager_for, private_allowed, chat_allowed
 from .qq_diagnostics import QQDiagnostics, private_scope
-from .timezones import config_zone
+from .timezones import config_zone, ingress_times
 
 
 def _ids(value):
@@ -153,6 +153,9 @@ class OneBotBridge:
                 pending = self._pending.get(echo)
                 if pending and pending[0] is socket:
                     if not pending[1].done():
+                        timing = getattr(pending[1], '_mikubot_ack_timing', None)
+                        if timing is not None:
+                            timing['received'] = time.perf_counter()
                         pending[1].set_result(payload)
                     continue
                 # Reading must remain free to receive action echoes while replies run.
@@ -295,6 +298,7 @@ class OneBotBridge:
         if not isinstance(payload, dict):
             return
         self._last_event_at = datetime.now(timezone.utc).isoformat()
+        message_times = ingress_times(payload.get('time'), received_at=self._last_event_at)
         if payload.get('self_id'):
             self._self_id = str(payload['self_id'])
         if payload.get('post_type') != 'message':
@@ -383,7 +387,7 @@ class OneBotBridge:
             self._diagnostics.mark('empty_message', scope_id=scope_id, user_id=user_id)
             return
         text = text or '请看看这张图片。'
-        metadata = {'platform': 'qq', 'platform_message_id': platform_id,
+        metadata = {**message_times, 'platform': 'qq', 'platform_message_id': platform_id,
                     'onebot_self_id': str(payload.get('self_id', '')), 'source_id': platform_id,
                     'sender_name': str((payload.get('sender') or {}).get('card') or (payload.get('sender') or {}).get('nickname') or user_id),
                     'is_owner': self.access.is_admin(trusted_identity), 'is_admin': self.access.is_admin(trusted_identity),
@@ -495,6 +499,7 @@ class OneBotBridge:
         return bool(parts)
 
     async def _send_part(self, scope_id, text, *, metadata=None):
+        started = time.perf_counter()
         sticker=(metadata or {}).get('sticker')
         if not self._allowed(scope_id) or self._socket is None or not str(text).strip() and not sticker:
             return False
@@ -517,13 +522,32 @@ class OneBotBridge:
         socket = self._socket
         echo = uuid.uuid4().hex
         future = asyncio.get_running_loop().create_future()
+        ack_timing = {}
+        future._mikubot_ack_timing = ack_timing
         self._pending[echo] = (socket, future)
+        write_started, write_finished, dispatched = started, None, False
+        def timings():
+            now = time.perf_counter()
+            received = ack_timing.get('received')
+            values = {'send_total_ms': round((now - started) * 1000, 2),
+                      'preflight_ms': round((write_started - started) * 1000, 2)}
+            if write_finished is not None:
+                values.update(socket_write_ms=round((write_finished - write_started) * 1000, 2),
+                              ack_wait_ms=round(max(0, (received or now) - write_finished) * 1000, 2))
+            if received is not None:
+                values['ack_resume_ms'] = round(max(0, now - received) * 1000, 2)
+            return values
         try:
             action = {'action': 'send_group_msg' if kind == 'group' else 'send_private_msg', 'params': params, 'echo': echo}
+            write_started = time.perf_counter()
+            # Once handed to the transport a cancelled send has unknown delivery,
+            # even if the caller has not yet received the connector's echo.
+            dispatched = True
             if hasattr(socket, 'send_json'):
                 await socket.send_json(action)
             else:
                 await socket.send(json.dumps(action, ensure_ascii=False))
+            write_finished = time.perf_counter()
             timeout = float(self._config().get('action_timeout_seconds', 30))
             result = await asyncio.wait_for(future, max(0.01, min(timeout, 60)))
             confirmed = bool(result and result.get('status') == 'ok' and result.get('retcode') == 0
@@ -535,6 +559,7 @@ class OneBotBridge:
                 self._diagnostics.mark('send_failed', scope_id=scope_id, stage='failed')
                 self.store.add_event('qq_delivery', 'QQ 发送结果未确认；请勿自动重复发送', scope_id=scope_id,
                                      platform_code=code,
+                                     assistant_message_id=(metadata or {}).get('assistant_message_id'), send_timing=timings(),
                                      output_part=(metadata or {}).get('output_part'))
             else:
                 self._diagnostics.mark('reply_failed' if (metadata or {}).get('failure_feedback') else 'sent', scope_id=scope_id,
@@ -544,15 +569,24 @@ class OneBotBridge:
                 while len(self._outgoing) > 2048:
                     self._outgoing.popitem(last=False)
                 self.store.add_event('qq_sent', 'QQ 消息已确认发送', scope_id=scope_id, platform_message_id=message_id,
-                                     output_part=(metadata or {}).get('output_part'), assistant_message_id=(metadata or {}).get('assistant_message_id'))
+                                     output_part=(metadata or {}).get('output_part'), assistant_message_id=(metadata or {}).get('assistant_message_id'),
+                                     send_timing=timings())
             return confirmed
         except asyncio.CancelledError:
+            if dispatched:
+                try:
+                    self.store.add_event('qq_delivery', 'QQ发送等待已取消，已派发分段的送达状态未知；不会自动重发',
+                        scope_id=scope_id, assistant_message_id=(metadata or {}).get('assistant_message_id'),
+                        output_part=(metadata or {}).get('output_part'), send_timing=timings(), delivery_status='unknown')
+                except Exception:
+                    pass  # A failed timing write must not replace cancellation.
             raise
         except Exception as exc:
             self._diagnostics.mark('send_failed', scope_id=scope_id, stage='failed')
             self._last_error = f'发送结果未确认（{type(exc).__name__}）'
             self.store.add_exception('qq_delivery', '发送超时或连接中断，送达状态未知', exc, scope_id=scope_id,
-                                 output_part=(metadata or {}).get('output_part'))
+                                 output_part=(metadata or {}).get('output_part'),
+                                 assistant_message_id=(metadata or {}).get('assistant_message_id'), send_timing=timings())
             return False
         finally:
             self._pending.pop(echo, None)

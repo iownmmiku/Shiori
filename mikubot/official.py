@@ -10,6 +10,7 @@ import base64
 import io
 from collections import OrderedDict
 from datetime import datetime, timezone
+from .timezones import ingress_times
 import re
 import time
 from typing import Any
@@ -225,6 +226,7 @@ class OfficialBridge:
             return
         self._diagnostics.message()
         self._last_event_at = _now()
+        message_times = ingress_times(_field(message, 'timestamp', None), received_at=self._last_event_at)
         author = _field(message, "author", {})
         user_id = str(_field(author, "member_openid" if kind == "group" else "user_openid", "") or "")
         target = str(_field(message, "group_openid", "") or "") if kind == "group" else user_id
@@ -282,7 +284,7 @@ class OfficialBridge:
         self._seen[key] = None
         while len(self._seen) > 4096:
             self._seen.popitem(last=False)
-        metadata = {"platform": "qqofficial", "official_app_id": app_id, "platform_message_id": platform_id,
+        metadata = {**message_times, "platform": "qqofficial", "official_app_id": app_id, "platform_message_id": platform_id,
                     "source_id": platform_id, "sender_name": user_id, "images": images,
                     "is_owner":self.access.is_admin(trusted_identity), "is_admin":self.access.is_admin(trusted_identity),
                     "trusted_identity":trusted_identity,

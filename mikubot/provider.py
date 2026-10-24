@@ -10,15 +10,17 @@ import heapq
 import uuid
 from datetime import datetime, timedelta, timezone
 from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from urllib.parse import urlsplit
 
 import httpx
 from .settings import (resolve_model, MAX_OUTPUT_TOKENS, CUSTOM_PARAM_RESERVED,
                        CUSTOM_PARAM_MAX_ABS, CUSTOM_PARAM_MAX_STRING, CUSTOM_PARAM_MAX_JSON,
                        CUSTOM_PARAM_MAX_COUNT)
-from .timezones import config_zone, day_bounds
+from .timezones import config_zone, day_bounds, refresh_dispatch_time
 from .model_stream import receive_chat, ModelStreamError, IncompleteModelStreamError
 from .chat_preview import emit_preview, preview_active
+from .timing import add_duration
 
 
 class ProviderError(ValueError):
@@ -75,6 +77,7 @@ def request_timeout(config):
 
 
 BACKGROUND_PURPOSES = {'knowledge', 'memory_extract', 'memory', 'jargon_learning', 'expression_learning', 'context_digest', 'distillation', 'sticker_vision', 'sticker_select', 'embedding_index'}
+_queue_wait_ms = ContextVar('model_queue_wait_ms', default=0)
 
 
 class _PriorityGate:
@@ -128,6 +131,98 @@ class _PriorityGate:
                 'background': sum(p > 0 and not e['future'].done() for p, _, e in self.queue)}
 
 
+class _ModelScheduler:
+    """Grant global, model and background capacity together, never partially.
+
+    A queued request owns no scarce resource. Ready foreground work therefore
+    bypasses both a saturated model and background work awaiting another slot.
+    The existing gates remain read-only scheduling/status views here; standalone
+    _PriorityGate users keep their original acquire/release behavior.
+    """
+    def __init__(self, provider):
+        self.provider, self.counter, self.waiting = provider, 0, []
+
+    def _configure(self):
+        config = self.provider.settings.get().get('scheduler', {})
+        self.provider._global_gate.capacity = config.get('global_model_concurrency', 2)
+        self.provider._global_gate.queue_limit = config.get('global_model_queue_limit', 32)
+        self.provider._background_gate.queue_limit = config.get('background_queue_limit', 16)
+        for gate in self.provider._provider_locks.values():
+            gate.capacity = config.get('model_concurrency', 1)
+            gate.queue_limit = config.get('model_queue_limit', 32)
+
+    def _views(self):
+        self.provider._global_gate.queue = list(self.waiting)
+        self.provider._background_gate.queue = [item for item in self.waiting if item[2]['background']]
+        for key, gate in self.provider._provider_locks.items():
+            gate.queue = [item for item in self.waiting if item[2]['key'] == key]
+        for gate in (self.provider._global_gate, self.provider._background_gate, *self.provider._provider_locks.values()):
+            gate.busy = gate.active > 0
+
+    def _drain(self):
+        self.waiting = [item for item in self.waiting if not item[2]['future'].done()]
+        self.waiting.sort(key=lambda item: item[:2])
+        global_gate, background_gate = self.provider._global_gate, self.provider._background_gate
+        for item in list(self.waiting):
+            if global_gate.active >= global_gate.capacity:
+                break
+            entry = item[2]
+            gate = self.provider._provider_locks[entry['key']]
+            if gate.active >= gate.capacity or (entry['background'] and background_gate.active >= background_gate.capacity):
+                continue
+            self.waiting.remove(item)
+            entry['granted'] = True
+            global_gate.active += 1
+            gate.active += 1
+            if entry['background']:
+                background_gate.active += 1
+            entry['future'].set_result(None)
+        self._views()
+
+    async def acquire(self, key, background):
+        self.provider._provider_locks.setdefault(key, _PriorityGate())
+        self._configure()
+        self.counter += 1
+        entry = {'key': key, 'background': background, 'granted': False, 'released': False,
+                 'future': asyncio.get_running_loop().create_future()}
+        item = (10 if background else 0, self.counter, entry)
+        self.waiting.append(item)
+        self._drain()
+        if not entry['granted']:
+            gate = self.provider._provider_locks[key]
+            if (len(self.waiting) > self.provider._global_gate.queue_limit or
+                    len(gate.queue) > gate.queue_limit or
+                    (background and len(self.provider._background_gate.queue) > self.provider._background_gate.queue_limit)):
+                self.waiting.remove(item)
+                entry['future'].cancel()
+                self._views()
+                raise ProviderError('模型请求队列已满，请稍后重试；未发送本次模型请求。')
+        try:
+            await entry['future']
+        except BaseException:
+            if entry['granted']:
+                self.release(entry)
+            else:
+                entry['future'].cancel()
+                self.waiting = [item for item in self.waiting if item[2] is not entry]
+                self._drain()
+            raise
+        return entry
+
+    def release(self, entry):
+        if entry['released']:
+            return
+        entry['released'] = True
+        self.provider._global_gate.active -= 1
+        self.provider._provider_locks[entry['key']].active -= 1
+        if entry['background']:
+            self.provider._background_gate.active -= 1
+        # Lower limits never interrupt dispatched requests. They apply to new
+        # grants after those requests finish; higher limits admit queued work.
+        self._configure()
+        self._drain()
+
+
 def endpoint(base: str, resource='chat/completions') -> str:
     base = base.strip().rstrip('/')
     parsed = urlsplit(base)
@@ -136,6 +231,26 @@ def endpoint(base: str, resource='chat/completions') -> str:
     if base.endswith('/chat/completions'):
         base = base[:-len('/chat/completions')]
     return base + '/' + resource
+
+
+def input_size(messages, tools=None):
+    """Shared text/image accounting for prompt trimming and final dispatch."""
+    chars, images = 0, 0
+    for message in messages:
+        content = message.get('content')
+        if isinstance(content, list):
+            for part in content:
+                if isinstance(part, dict) and part.get('type') == 'image_url':
+                    images += 1
+                elif isinstance(part, dict):
+                    chars += len(str(part.get('text', '')))
+        else:
+            chars += len(str(content or ''))
+        chars += sum(len(json.dumps(message[key], ensure_ascii=False))
+                     for key in ('tool_calls', 'function_call') if message.get(key))
+    if tools:
+        chars += len(json.dumps(tools, ensure_ascii=False))
+    return chars, images
 
 
 def estimate_tokens(messages, tools=None):
@@ -166,6 +281,7 @@ class Provider:
         self._provider_locks = {}
         self._background_gate = _PriorityGate()
         self._global_gate = _PriorityGate(2, 32)
+        self._scheduler = _ModelScheduler(self)
         self._reservations = {}
         self._health = {}
 
@@ -195,33 +311,21 @@ class Provider:
 
     @asynccontextmanager
     async def _provider_slot(self, candidate, purpose='chat'):
-        # Serialize one configured provider while unrelated model routes can
-        # progress. The global lock protects only short budget transactions.
-        key = candidate.get('id', 'default')
-        background = purpose in BACKGROUND_PURPOSES
-        gate = self._provider_locks.setdefault(key, _PriorityGate())
-        scheduler=self.settings.get().get('scheduler',{})
-        gate.capacity=scheduler.get('model_concurrency',1)
-        gate.queue_limit=scheduler.get('model_queue_limit',32)
-        self._background_gate.queue_limit=scheduler.get('background_queue_limit',16)
-        self._global_gate.capacity=scheduler.get('global_model_concurrency',2)
-        self._global_gate.queue_limit=scheduler.get('global_model_queue_limit',32)
-        if background:
-            await self._background_gate.acquire(10)
-        acquired = global_acquired = False
+        started = time.monotonic()
         try:
-            await self._global_gate.acquire(10 if background else 0)
-            global_acquired = True
-            await gate.acquire(10 if background else 0)
-            acquired = True
-            yield
+            entry = await self._scheduler.acquire(candidate.get('id', 'default'), purpose in BACKGROUND_PURPOSES)
         finally:
-            if acquired:
-                gate.release()
-            if global_acquired:
-                self._global_gate.release()
-            if background:
-                self._background_gate.release()
+            # A cancelled/expired waiter still spent time in the queue, even
+            # though it never reserved budget or obtained a dispatch slot.
+            waiting_seconds = max(0, time.monotonic() - started)
+            add_duration('model_queue_ms', waiting_seconds)
+        waited = round(waiting_seconds * 1000)
+        token = _queue_wait_ms.set(waited)
+        try:
+            yield waited
+        finally:
+            _queue_wait_ms.reset(token)
+            self._scheduler.release(entry)
 
     def planner_totals(self, scope_id):
         start, end = day_bounds(self.settings)
@@ -341,7 +445,8 @@ class Provider:
             request_id = self._reservations.get(key, {}).get('request_id') or uuid.uuid4().hex
             self._reservations[key] = {'request_id': request_id, 'scope_id': scope_id, 'purpose': purpose, 'model': cfg['model'],
                 'provider_id': cfg.get('id', 'default'), 'input_tokens': estimated_input, 'output_tokens': allowed_output,
-                'cost': input_cost + allowed_output * output_price / 1000000,'cost_known':bool(input_price or output_price)}
+                'cost': input_cost + allowed_output * output_price / 1000000,'cost_known':bool(input_price or output_price),
+                'queue_wait_ms': _queue_wait_ms.get()}
             return key, allowed_output
 
     async def _settle(self, reservation, record=None, *, uncertain=False):
@@ -464,7 +569,7 @@ class Provider:
             configured = 0
         if requested is None:
             requested = configured if purpose == 'chat' and configured else 1000
-        elif configured:
+        if configured:
             requested = min(requested, configured)
         return requested
 
@@ -507,24 +612,12 @@ class Provider:
             raise ProviderError('模型请求无法序列化为 JSON，请检查模型参数、消息或工具定义。') from exc
 
     async def _complete(self, messages, *, tools=None, config=None, purpose='chat', scope_id='web:default', max_tokens=None, before_send=None):
+        messages = refresh_dispatch_time(messages, self.settings, purpose=purpose)
         cfg = dict(config or self.settings.get()['model'])
         if not cfg.get('base_url') or not cfg.get('model'):
             raise ProviderError('请先在设置中填写模型服务地址与模型名称，并测试连接。')
         limits = self.settings.get().get('context', {})
-        chars, images = 0, 0
-        for message in messages:
-            content = message.get('content')
-            if isinstance(content, list):
-                for part in content:
-                    if isinstance(part, dict) and part.get('type') == 'image_url':
-                        images += 1
-                    elif isinstance(part, dict):
-                        chars += len(str(part.get('text', '')))
-            else:
-                chars += len(str(content or ''))
-            chars += sum(len(json.dumps(message[key], ensure_ascii=False)) for key in ('tool_calls', 'function_call') if message.get(key))
-        if tools:
-            chars += len(json.dumps(tools, ensure_ascii=False))
+        chars, images = input_size(messages, tools)
         if chars > limits.get('max_input_chars', 80000) or images > limits.get('max_images', 3):
             raise ProviderError('本次模型输入超过文字或图片总上限，请减少资料、历史或工具输出后重试。')
         url = endpoint(cfg['base_url'])
@@ -570,6 +663,7 @@ class Provider:
                 for attempt in range(5):
                     self._check_reserved_limits(reservation)
                     self._check_send(before_send)
+                    payload['messages'] = refresh_dispatch_time(messages, self.settings, purpose=purpose, for_transport=True)
                     try:
                         dispatched = True
                         if payload.get('stream'):
@@ -650,6 +744,7 @@ class Provider:
                       'cost_known':bool(cfg.get('input_price') or cfg.get('output_price')),
                       'request_id': self._reservations.get(reservation, {}).get('request_id'), 'ttft_ms': ttft_ms,
                       'estimated': 'prompt_tokens' not in raw_usage or 'completion_tokens' not in raw_usage,
+                      'queue_wait_ms': _queue_wait_ms.get(),
                       'latency_ms': round((time.monotonic() - started) * 1000)}
             if message.get('tool_calls') and not payload.get('tools'):
                 raise ProviderError('实际请求未允许工具，服务返回的工具调用未执行。')
@@ -749,6 +844,7 @@ class Provider:
                 record = {'scope_id': scope_id, 'purpose': 'embedding', 'model': cfg['model'], 'provider_id': cfg.get('id', 'default'),
                           'input_tokens': tokens, 'output_tokens': 0, 'cost': tokens * price / 1000000,
                           'estimated': 'prompt_tokens' not in raw_usage and 'total_tokens' not in raw_usage,
+                          'queue_wait_ms': _queue_wait_ms.get(),
                           'latency_ms': round((time.monotonic() - started) * 1000)}
                 self._check_send(guard)
                 return vectors

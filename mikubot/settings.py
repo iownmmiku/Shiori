@@ -31,6 +31,7 @@ DEFAULTS = {
                     'chat_policy': 'blacklist', 'blocked_users': [], 'blocked_groups': [], 'max_message_chars': 0},
     'budget': {'daily_tokens': 100000, 'daily_cost': 0.0},
     'time': {'timezone': 'Asia/Shanghai', 'awareness_enabled': True},
+    'debounce': {'enabled': False, 'seconds': 3, 'max_wait_seconds': 30},
     'memory': {'semantic_enabled': False, 'embedding_model': '', 'embedding_price': 0.0,
                'top_k': 8, 'auto_review': True, 'organization_enabled': True,
                'term_cache_mb':64, 'read_concurrency':2, 'read_queue_limit':32,
@@ -56,7 +57,7 @@ DEFAULTS = {
                'reply_max_chars':0,'message_max_chars':0,'remove_parentheses':False},
     'exploration': {'enabled':False,'interval_hours':24,'daily_searches':6,'max_results':4,'valid_days':90},
     'routing': {'chat': '', 'planner':'', 'memory': '', 'gate': '', 'summary': '', 'distillation': '', 'embedding': '', 'fallback': []},
-    'context': {'enabled': False, 'trigger_messages': 60, 'max_chars': 18000, 'keep_recent': 24,
+    'context': {'enabled': False, 'trigger_messages': 60, 'max_chars': 18000, 'keep_recent': 24, 'recent_turns':24,
                 'max_input_chars':80000, 'max_history_messages':400, 'max_images':3},
     'paused': False,
     'updates': {'allow_remote':False},
@@ -124,6 +125,19 @@ def validate_custom_params(custom_params) -> dict:
     return cleaned
 
 
+def resolved_debounce(config, scope=None):
+    """Global defaults with optional profile/scope overrides; legacy merge is separate."""
+    scope = scope or {}
+    options = dict(DEFAULTS['debounce'], **config.get('debounce', {}))
+    for key in options:
+        value = scope.get('debounce_' + key, (scope.get('settings') or {}).get('debounce_' + key))
+        if value is not None:
+            options[key] = value
+    options['seconds'] = max(.1, min(60, float(options['seconds'])))
+    options['max_wait_seconds'] = max(options['seconds'], min(300, float(options['max_wait_seconds'])))
+    return options
+
+
 def resolved_identity(config, scope=None):
     scope = scope or {}
     identity = dict(DEFAULTS['identity'],**config.get('identity',{}))
@@ -139,13 +153,20 @@ def resolved_identity(config, scope=None):
 
 
 def resolve_model(config, purpose='chat', *, model_id=None):
-    """An empty task route keeps the original single-model configuration."""
+    """Keep configured legacy routes; new task routes can inherit chat."""
     aliases = {'jargon_learning': 'memory', 'expression_learning': 'memory', 'memory_extract': 'memory', 'context_digest': 'summary','knowledge':'summary','sticker_select':'planner'}
     route = aliases.get(purpose, purpose)
     route = route if route in ('planner','memory', 'gate', 'summary', 'distillation', 'embedding') else 'chat'
     provider_id = config.get('routing', {}).get(route, '') if model_id is None else model_id
     if route == 'distillation' and model_id is None and not provider_id:
         return resolve_model(config, 'chat')
+    if route in ('planner', 'memory', 'gate', 'summary') and model_id is None and not provider_id:
+        legacy = config.get('model', {})
+        # Existing installations may intentionally send background work to a
+        # separate inline model. Preserve that configured service, but do not
+        # leave a fresh catalog-only setup with unusable background routes.
+        if not legacy.get('base_url') or not legacy.get('model'):
+            return resolve_model(config, 'chat')
     if provider_id and provider_id != 'default':
         found = next((x for x in config.get('providers', []) if x.get('id') == provider_id), None)
         if found and found.get('enabled', True):
@@ -567,7 +588,7 @@ class Settings:
             if any(item.get('model_type') == 'embedding' and item['id'] in fallback for item in updated['providers']):
                 raise ValueError('嵌入模型不能作为聊天备用模型')
             context = updated['context']
-            for key, low, high in (('max_input_chars',2000,200000),('max_history_messages',1,400),('max_images',0,3)):
+            for key, low, high in (('max_input_chars',2000,200000),('max_history_messages',1,400),('max_images',0,3),('recent_turns',1,100)):
                 if type(context[key]) is not int or not low <= context[key] <= high:
                     raise ValueError(f'上下文参数{key}须为{low}—{high}的整数')
             if type(context['enabled']) is not bool:
@@ -593,6 +614,15 @@ class Settings:
                 value=updated['planner'][key]
                 if type(value) is not int or not minimum <= value <= maximum:
                     raise ValueError(f'Planner {key}须为{minimum}—{maximum}的整数')
+            debounce = updated['debounce']
+            if type(debounce['enabled']) is not bool:
+                raise ValueError('消息防抖开关须为布尔值')
+            for key, low, high in (('seconds', .1, 60), ('max_wait_seconds', 1, 300)):
+                value = debounce[key]
+                if type(value) not in (int, float) or not math.isfinite(value) or not low <= value <= high:
+                    raise ValueError(f'消息防抖 {key} 须为 {low}—{high} 秒')
+            if debounce['max_wait_seconds'] < debounce['seconds']:
+                raise ValueError('消息防抖最长等待时间不能少于等待秒数')
             stickers=updated['stickers']
             for key in ('enabled','collect_enabled','send_enabled'):
                 if type(stickers[key]) is not bool: raise ValueError('表情包开关须为布尔值')

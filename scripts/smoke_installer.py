@@ -20,7 +20,7 @@ def main():
     parser.add_argument('--work-dir', required=True, type=Path)
     parser.add_argument('--port', type=int, default=18767)
     parser.add_argument('--mcp-fixture-url', default='')
-    parser.add_argument('--version', '--expect-version', '--expect', dest='version', default='0.1.5')
+    parser.add_argument('--version', '--expect-version', '--expect', dest='version', default='0.1.6')
     args = parser.parse_args()
     version = effective_contract_version(args.version)
     root = args.work_dir.resolve()

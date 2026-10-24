@@ -6,7 +6,8 @@ FIELDS = {'persona_id', 'model_id', 'activity', 'trigger_at', 'trigger_reply',
           'trigger_name', 'plan_enabled', 'proactive_reply', 'always_reply',
           'allow_tools', 'allow_mcp', 'use_persona_knowledge', 'private_always_reply',
           'auto_memory', 'dictionary_learn', 'dictionary_use', 'dictionary_understand',
-          'expression_learn', 'expression_use', 'context_compress'}
+          'expression_learn', 'expression_use', 'context_compress',
+          'debounce_enabled', 'debounce_seconds', 'debounce_max_wait_seconds'}
 DEFAULT_PROFILES = {'default_id': 'default', 'items': [
     {'id': 'default', 'name': '默认配置', 'values': {'persona_id': 'default', 'model_id': ''}}]}
 
@@ -36,8 +37,19 @@ def validate_profiles(value):
                     raise ValueError('人格或模型ID格式错误')
             elif field == 'activity':
                 if data not in ('quiet', 'balanced', 'active'): raise ValueError('回应方式无效')
+            elif field in ('debounce_seconds', 'debounce_max_wait_seconds'):
+                from math import isfinite
+                low, high = (.1, 60) if field == 'debounce_seconds' else (1, 300)
+                if data is not None and (type(data) not in (int, float) or not isfinite(data) or not low <= data <= high):
+                    raise ValueError(f'消息防抖 {field} 须为空值或 {low}—{high} 秒')
+            elif field == 'debounce_enabled':
+                if data is not None and type(data) is not bool:
+                    raise ValueError('消息防抖开关须为布尔值或空值')
             elif type(data) is not bool and not (data is None and field in ('trigger_at','trigger_reply','trigger_name','plan_enabled','proactive_reply')):
                 raise ValueError('配置开关格式错误')
+        if (values.get('debounce_seconds') is not None and values.get('debounce_max_wait_seconds') is not None
+                and values['debounce_seconds'] > values['debounce_max_wait_seconds']):
+            raise ValueError('消息防抖最长等待时间不能少于等待秒数')
     if value['default_id'] not in seen: raise ValueError('默认配置不存在')
 
 

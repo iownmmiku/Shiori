@@ -7,8 +7,9 @@ function scopeModal(item = null) {
   scopeModalBase(item);
   const body = $("#modal .modal-body"), inherited = [["","继承全局"],["true","本会话开启"],["false","本会话关闭"]];
   const quiet = ["quiet_start","quiet_end"].map(name => $(`[name="${name}"]`,body)?.closest(".field")).filter(Boolean);
-  body.insertAdjacentHTML("beforeend",`${toggle("always_reply","本会话每条必回复","跳过回复与否的 Planner 判断，仍遵守暂停、接收规则和工具权限。",item?.always_reply ?? false)}${toggle("use_persona_knowledge","使用人格的公开知识","关闭后，这个会话的回答与规划不再引用人格公开资料。",item?.use_persona_knowledge ?? true)}<details class="details advanced-settings"><summary>高级设置 · 触发、记忆、预算与输出</summary><div class="form-grid scope-advanced-grid">${field("bot_name","本会话机器人名称",item?.bot_name || "","text","留空继承全局名称。","maxlength=\"40\"")}${field("bot_aliases","本会话别名",(item?.bot_aliases || []).join("，"),"text","逗号或换行分隔；留空继承全局。")}${select("trigger_at","被 @ 时触发",inherited,item?.trigger_at ?? "")}${select("trigger_reply","被回复时触发",inherited,item?.trigger_reply ?? "")}${select("trigger_name","提及名称时触发",inherited,item?.trigger_name ?? "")}${select("plan_enabled","Planner 语义规划",inherited,item?.plan_enabled ?? "")}${select("proactive_reply","主动接话",inherited,item?.proactive_reply ?? "")}${field("memory_space","共享记忆空间",item?.memory_space || "","text","留空隔离；同名空间只共享显式允许的群可见记忆。","data-full maxlength=\"80\"")}${field("cooldown_seconds","接话冷却（秒）",item?.cooldown_seconds ?? 20,"number","限制连续插话。","min=\"0\" max=\"600\"")}${field("followup_seconds","话题跟进窗口（秒）",item?.followup_seconds ?? 90,"number","识别回复后的后续接话。","min=\"0\" max=\"600\"")}${field("merge_window_ms","短消息合并（毫秒）",item?.merge_window_ms ?? 0,"number","0 表示关闭。","min=\"0\" max=\"2000\"")}${field("daily_tokens","会话每日 Token 上限",item?.daily_tokens ?? 0,"number","0 表示不限，仍受全局预算限制。","min=\"0\" max=\"10000000\"")}${field("planner_min_interval_ms","Planner 最小间隔（毫秒）",item?.planner_min_interval_ms ?? "","number","留空继承；直接触发不受频率限制。","min=\"0\" max=\"60000\"")}${field("planner_daily_calls","Planner 每日调用上限",item?.planner_daily_calls ?? "","number","留空继承；0 表示不设置此项上限。","min=\"0\" max=\"100000\"")}${field("planner_daily_tokens","Planner 每日 Token 上限",item?.planner_daily_tokens ?? "","number","留空继承；0 表示不设置此项上限。","min=\"0\" max=\"10000000\"")}${field("planner_max_age_ms","Planner 消息有效期（毫秒）",item?.planner_max_age_ms ?? "","number","留空继承；过时的主动接话不再规划。","min=\"1000\" max=\"120000\"")}</div>${toggle("dictionary_learn","自动发现群词","发现候选，确认后采用。",item?.dictionary_learn ?? false)}${toggle("context_compress","整理长对话上下文","还需全局启用。",item?.context_compress ?? false)}${toggle("expression_learn","学习表达方式","候选确认前不采用。",item?.expression_learn ?? false)}${toggle("expression_use","采用已确认表达","独立于群词理解与主动用梗。",item?.expression_use ?? false)}${toggle("allow_mcp","允许提出 MCP 请求","还需允许工具总开关，调用须本地逐次批准。",item?.allow_mcp ?? false)}${toggle("output_override","单独设置本会话输出","关闭则继承全局的回复长度、括号处理与分段设置。",hasScopeOutput(item))}${outputFields(inheritedScopeOutput(item),"out_")}</details>`);
+  body.insertAdjacentHTML("beforeend",`${toggle("always_reply","本会话每条必回复","跳过回复与否的 Planner 判断，仍遵守暂停、接收规则和工具权限。",item?.always_reply ?? false)}${toggle("use_persona_knowledge","使用人格的公开知识","关闭后，这个会话的回答与规划不再引用人格公开资料。",item?.use_persona_knowledge ?? true)}<details class="details advanced-settings"><summary>高级设置 · 触发、记忆、预算与输出</summary><div class="form-grid scope-advanced-grid">${field("bot_name","本会话机器人名称",item?.bot_name || "","text","留空继承全局名称。","maxlength=\"40\"")}${field("bot_aliases","本会话别名",(item?.bot_aliases || []).join("，"),"text","逗号或换行分隔；留空继承全局。")}${select("trigger_at","被 @ 时触发",inherited,item?.trigger_at ?? "")}${select("trigger_reply","被回复时触发",inherited,item?.trigger_reply ?? "")}${select("trigger_name","提及名称时触发",inherited,item?.trigger_name ?? "")}${select("plan_enabled","Planner 语义规划",inherited,item?.plan_enabled ?? "")}${select("proactive_reply","主动接话",inherited,item?.proactive_reply ?? "")}${field("memory_space","共享记忆空间",item?.memory_space || "","text","留空隔离；同名空间只共享显式允许的群可见记忆。","data-full maxlength=\"80\"")}${field("cooldown_seconds","接话冷却（秒）",item?.cooldown_seconds ?? 20,"number","限制连续插话。","min=\"0\" max=\"600\"")}${field("followup_seconds","话题跟进窗口（秒）",item?.followup_seconds ?? 90,"number","识别回复后的后续接话。","min=\"0\" max=\"600\"")}<input type="hidden" name="merge_window_ms" value="${e(item?.merge_window_ms ?? 0)}">${field("daily_tokens","会话每日 Token 上限",item?.daily_tokens ?? 0,"number","0 表示不限，仍受全局预算限制。","min=\"0\" max=\"10000000\"")}${field("planner_min_interval_ms","Planner 最小间隔（毫秒）",item?.planner_min_interval_ms ?? "","number","留空继承；直接触发不受频率限制。","min=\"0\" max=\"60000\"")}${field("planner_daily_calls","Planner 每日调用上限",item?.planner_daily_calls ?? "","number","留空继承；0 表示不设置此项上限。","min=\"0\" max=\"100000\"")}${field("planner_daily_tokens","Planner 每日 Token 上限",item?.planner_daily_tokens ?? "","number","留空继承；0 表示不设置此项上限。","min=\"0\" max=\"10000000\"")}${field("planner_max_age_ms","Planner 消息有效期（毫秒）",item?.planner_max_age_ms ?? "","number","留空继承；过时的主动接话不再规划。","min=\"1000\" max=\"120000\"")}</div>${toggle("dictionary_learn","自动发现群词","发现候选，确认后采用。",item?.dictionary_learn ?? false)}${toggle("context_compress","整理长对话上下文","还需全局启用。",item?.context_compress ?? false)}${toggle("expression_learn","学习表达方式","候选确认前不采用。",item?.expression_learn ?? false)}${toggle("expression_use","采用已确认表达","独立于群词理解与主动用梗。",item?.expression_use ?? false)}${toggle("allow_mcp","允许提出 MCP 请求","还需允许工具总开关，调用须本地逐次批准。",item?.allow_mcp ?? false)}${toggle("output_override","单独设置本会话输出","关闭则继承全局的回复长度、括号处理与分段设置。",hasScopeOutput(item))}${outputFields(inheritedScopeOutput(item),"out_")}</details>`);
   const advanced = $(".scope-advanced-grid",body);
+  body.insertAdjacentHTML("beforeend",debounceFields(item || {}));
   quiet.forEach(node => advanced.append(node));
   for (const name of ['persona_id','activity']) {
     const node = $(`[name="${name}"]`,body)?.closest('.field');
@@ -39,7 +40,33 @@ function identitySection() {
 
 function timeAwarenessSection() {
   const clock = state.settings.time || {};
-  return `<section class="panel settings-section" id="time-awareness-section"><h2>现实时间</h2><form data-form="time-awareness">${toggle("awareness_enabled","感知现实时间","让对话和 Planner 获知当前日期、时间、星期与时区；关闭后不再主动提供当前时钟，提醒和日配额照常运行。",clock.awareness_enabled ?? true)}<div class="form-grid">${field("timezone","时区（IANA）",clock.timezone || "Asia/Shanghai","text","例如 Asia/Shanghai、Asia/Hong_Kong 或 America/New_York。","required data-full")}</div><div class="section-actions"><button type="submit" class="btn primary">保存时间设置</button></div></form></section>`;
+  const zone=clock.timezone || "Asia/Shanghai";
+  const zones=[["Asia/Shanghai","中国标准时间"],["Asia/Hong_Kong","香港"],["Asia/Tokyo","日本"],["UTC","协调世界时 UTC"],["America/New_York","纽约"],["America/Los_Angeles","洛杉矶"],["Europe/London","伦敦"]];
+  return `<section class="panel settings-section" id="time-awareness-section"><h2>现实时间</h2><form data-form="time-awareness">${toggle("awareness_enabled","感知现实时间","让对话和 Planner 获知当前日期、时间、星期与时区；关闭后不再主动提供当前时钟，提醒和日配额照常运行。",clock.awareness_enabled ?? true)}<div class="form-grid"><label class="field"><span>常用时区</span><select id="time-zone-preset"><option value="">自定义时区</option>${zones.map(([value,label])=>`<option value="${value}" ${value===zone?"selected":""}>${label}</option>`).join("")}</select></label>${field("timezone","时区（IANA）",zone,"text","可选择常用时区，也可填写其他 IANA 名称；保存后生效。","required data-full")}</div><p id="time-clock-preview" class="clock-preview" role="status">正在读取程序时钟…</p><p class="help-caption">历史发送时间与事件发生时间分别保存。关闭感知不会更改原记录或关闭提醒。</p><div class="section-actions"><button type="submit" class="btn primary">保存时间设置</button>${button("使用浏览器时区","browser-time-zone","ghost","time")}</div></form></section>`;
+}
+
+function debounceSection() {
+  const cfg=state.settings.debounce || {};
+  return `<section class="panel settings-section" id="debounce-section"><h2>等你说完再回复</h2><p>连续短消息集中处理，新消息会重新计时；群聊按发送者分别收集。@、点名和私聊也遵守此设置。</p><form data-form="debounce">${toggle("enabled","开启消息防抖","默认关闭。开启后，连续补充的话和图片会一起交给机器人，不再叠加群聊集中判断窗口。",cfg.enabled ?? false)}<div class="form-grid">${field("seconds","等待时间（秒）",cfg.seconds ?? 3,"number","从最后一条新消息开始计算。","min=\"0.1\" max=\"60\" step=\"0.1\"")}</div><details class="details"><summary>高级 · 最长等待保护</summary>${field("max_wait_seconds","持续发言最长收集（秒）",cfg.max_wait_seconds ?? 30,"number","防止一直有新消息时永远不回复；不得短于等待时间。","min=\"1\" max=\"300\" step=\"0.1\"")}</details><p class="help-caption">已经开始生成或发送的回复会继续完成。停止命令立即生效。本地网页等待期间可点击立即回复或取消，刷新页面会放弃尚未提交的消息。</p><div class="section-actions"><button type="submit" class="btn primary">保存防抖设置</button></div></form></section>`;
+}
+
+function debounceFields(values={}) {
+  return `<details class="details"><summary>单独设置消息防抖（可留空继承）</summary>${select("debounce_enabled","消息防抖",[["","跟随默认设置"],["true","开启"],["false","关闭"]],values.debounce_enabled == null ? "" : String(values.debounce_enabled))}<div class="form-grid">${field("debounce_seconds","等待时间（秒）",values.debounce_seconds ?? "","number","留空继承，默认3秒。","min=\"0.1\" max=\"60\" step=\"0.1\"")}${field("debounce_max_wait_seconds","最长收集（秒）",values.debounce_max_wait_seconds ?? "","number","留空继承，默认30秒。","min=\"0.1\" max=\"300\" step=\"0.1\"")}</div></details>`;
+}
+
+let clockTimer;
+function afterRender() {
+  clearTimeout(clockTimer);
+  const node=document.getElementById("time-clock-preview");
+  if(!node)return;
+  const zone=state.settings.time?.timezone || "Asia/Shanghai";
+  api("/api/time").then(clock=>{
+    if(!node.isConnected)return;
+    const instant=Date.parse(clock.now), loaded=Date.now();
+    if(!Number.isFinite(instant))throw new Error("程序时钟格式无效");
+    const show=()=>{if(!node.isConnected)return;node.textContent=`程序当前时间：${new Intl.DateTimeFormat("zh-CN",{timeZone:zone,dateStyle:"full",timeStyle:"long"}).format(instant+Date.now()-loaded)} · ${zone}${Math.abs(instant-loaded)>120000?" · 与浏览器时钟相差超过两分钟，请核对设备时间":""}`;clockTimer=setTimeout(show,1000);};
+    show();
+  }).catch(()=>{if(node.isConnected)node.textContent="程序时钟暂未读取成功，请刷新后重试。";});
 }
 
 function outputSection() {
@@ -140,6 +167,13 @@ async function presetModal(scopeId) {
 }
 
 async function handleAction(action,target) {
+  if(action === "browser-time-zone") {
+    const zone=Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const form=target.closest("form");
+    $('[name="timezone"]',form).value=zone;
+    const preset=$('#time-zone-preset',form);if(preset)preset.value=zone;
+    toast("已填入浏览器时区，保存后生效。");return true;
+  }
   if(action === "memory-page"){state.memoryPage.offset=Number(target.dataset.offset)||0;await renderPage();return true;}
   if(action === "open-memory-tools"){state.memoryToolsOpen=true;await renderPage();return true;}
   if(action === "search-relation-memory") {
@@ -187,6 +221,10 @@ async function handleAction(action,target) {
 
 async function handleSubmit(kind,form) {
   const data = getForm(form), record = state.modalRecord;
+  if(kind === "debounce") {
+    await api('/api/settings',{method:'PUT',body:{debounce:{enabled:!!data.enabled,seconds:Number(data.seconds),max_wait_seconds:Number(data.max_wait_seconds)}}});
+    toast("消息防抖已保存");await bootstrap();return true;
+  }
   if(kind === "memory-relation-search"){state.relationMemoryQuery=data.q;await renderPage();return true;}
   if (kind === "knowledge-sources") await api("/api/knowledge/sources",{method:"PUT",body:{persona_id:record.persona_id,rules:{allowed_domains:splitNames(data.allowed_domains),blocked_domains:splitNames(data.blocked_domains),rss_urls:String(data.rss_urls).split(/\r?\n/).map(value => value.trim()).filter(Boolean),manual_urls:String(data.manual_urls).split(/\r?\n/).map(value => value.trim()).filter(Boolean),use_bing:data.use_bing}}});
   else if (kind === "knowledge-edit") await api(`/api/knowledge/${encodeURIComponent(record.id)}`,{method:"PUT",body:{title:data.title,text:data.text,interest:data.interest,published_at:data.published_at ? new Date(data.published_at).toISOString() : "",updated_at:data.updated_at ? new Date(data.updated_at).toISOString() : "",valid_until:new Date(data.valid_until).toISOString()}});
@@ -201,5 +239,5 @@ async function handleSubmit(kind,form) {
   return true;
 }
 
-return {scopeModal,identitySection,timeAwarenessSection,outputSection,plannerSection,explorationSection,renderPersonaKnowledge,safeKnowledgeURL,explorePersona,renderGroups,memoryToolsPanel,personaExtras,handleAction,handleSubmit};
+return {scopeModal,identitySection,timeAwarenessSection,debounceSection,debounceFields,outputSection,plannerSection,explorationSection,renderPersonaKnowledge,safeKnowledgeURL,explorePersona,renderGroups,memoryToolsPanel,personaExtras,handleAction,handleSubmit,afterRender};
 })();

@@ -122,6 +122,7 @@ async function main(){
     assert.throws(()=>sandbox.modelPayload({values:{base_url:"u",model:"m",custom_params:invalid}}),/自定义参数必须是有效的 JSON 对象。/,`rejects ${invalid}`);
   }
   assert.match(read("app.js"),/parseCustomParams\(data\.custom_params\)/,"settings payload uses the shared parser");
+  for (const value of ['{"seed":1e309}', '{"seed":-1e309}']) assert.throws(() => sandbox.parseCustomParams(value), /有限数字/);
 
   // 6. Catalog submission: invalid custom params are reported in Chinese before
   //    any request; valid values are mapped numerically and as an object.

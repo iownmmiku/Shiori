@@ -66,6 +66,14 @@ def test_modal_notifications_and_bounded_memory_page_interactions():
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+def test_memory_archive_default_range_and_culture_independence():
+    node = shutil.which('node')
+    if not node: pytest.skip('Optional frontend regression requires Node.js')
+    result = subprocess.run([node, str(Path(__file__).with_name('frontend_memory_scope.cjs'))],
+                            capture_output=True, text=True, encoding='utf-8', timeout=20)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def test_sticker_configuration_library_and_editing_interactions():
     node = shutil.which('node')
     if not node: pytest.skip('Optional frontend regression requires Node.js')

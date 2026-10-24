@@ -367,7 +367,7 @@ def create_app(data_dir=None, *, start_workers=True, allow_remote=False):
         data['id'] = id or str(data.get('id') or 'web:' + __import__('uuid').uuid4().hex[:12])
         if not re.fullmatch(r'(web|qq|qqofficial):[\w:.-]{1,180}', data['id']):
             raise ValueError('对话 ID 格式不正确')
-        for key in ('trigger_at', 'trigger_reply', 'trigger_name', 'plan_enabled', 'proactive_reply'):
+        for key in ('trigger_at', 'trigger_reply', 'trigger_name', 'plan_enabled', 'proactive_reply', 'debounce_enabled'):
             if key in data and data[key] is not None and type(data[key]) is not bool:
                 raise ValueError('继承开关须为布尔值或空值')
         for key in ('enabled', 'dictionary_learn', 'dictionary_understand', 'dictionary_use', 'expression_learn', 'expression_use', 'always_reply', 'context_compress', 'auto_memory', 'allow_tools', 'allow_mcp', 'semantic_gate', 'use_persona_knowledge'):
@@ -391,6 +391,14 @@ def create_app(data_dir=None, *, start_workers=True, allow_remote=False):
                 except (ValueError, TypeError) as exc:
                     raise ValueError(f'{key} 超出支持范围 {minimum}—{maximum}') from exc
                 data[key] = value
+        for key, low, high in (('debounce_seconds', .1, 60), ('debounce_max_wait_seconds', 1, 300)):
+            if key in data and data[key] is not None:
+                value = data[key]
+                if type(value) not in (int, float) or not __import__('math').isfinite(value) or not low <= value <= high:
+                    raise ValueError(f'{key} 须为空值或 {low}—{high} 秒')
+        if (data.get('debounce_seconds') is not None and data.get('debounce_max_wait_seconds') is not None
+                and data['debounce_seconds'] > data['debounce_max_wait_seconds']):
+            raise ValueError('消息防抖最长等待时间不能少于等待秒数')
         if 'bot_aliases' in data:
             if data['bot_aliases'] is not None:
                 if not isinstance(data['bot_aliases'], list) or len(data['bot_aliases']) > 12 or any(not isinstance(x, str) or not 1 <= len(x.strip()) <= 30 for x in data['bot_aliases']):
@@ -544,6 +552,13 @@ def create_app(data_dir=None, *, start_workers=True, allow_remote=False):
     @app.get('/api/messages')
     async def messages(scope_id: str = 'web:default', limit: int = 80): return store.list_messages(scope_id, limit=min(max(limit, 1), 200))
 
+    @app.get('/api/time')
+    async def program_time():
+        from .timezones import config_zone
+        config = settings.get()
+        return {'now': datetime.now(timezone.utc).isoformat(), 'timezone': config_zone(config).key,
+                'awareness_enabled': config['time']['awareness_enabled']}
+
     @app.delete('/api/messages')
     async def clear_messages(scope_id: str = 'web:default'):
         store.clear_messages(scope_id)
@@ -552,25 +567,40 @@ def create_app(data_dir=None, *, start_workers=True, allow_remote=False):
 
     async def run_chat(request, payload, *, watch_disconnect=True):
         scope_id = str(payload.get('scope_id', 'web:default'))
-        scope = dict(store.get_scope(scope_id),always_reply=True,plan_enabled=False)
         if not scope_id.startswith('web:'):
             raise ValueError('聊天试玩仅写入本地对话，请创建本地对话；不会向 QQ 群发送')
-        text, images = str(payload.get('text', '')), payload.get('images') or []
-        references = app.state.resolve_attachments(scope_id, payload.get('attachments') or [])
+        scope = dict(store.get_scope(scope_id),always_reply=True,plan_enabled=False)
+        from .web_chat_input import chat_input
+        batch = chat_input(payload, max_images=settings.get()['context']['max_images'])
+        text, images = (batch['text'], batch['images']) if batch else (str(payload.get('text', '')), payload.get('images') or [])
+        references = app.state.resolve_attachments(scope_id, batch['attachments'] if batch else payload.get('attachments') or [])
         identity = chat.access.identity('local','mikubot')
-        observed = await chat.observe(scope_id,'owner',text,images,metadata={'platform':'web','is_owner':True,'trusted_identity':identity,
-            'attachments':[x['id'] for x in references]})
+        metadata={'platform':'web','is_owner':True,'trusted_identity':identity}
+        if batch:
+            originals=[]
+            for entry in batch['messages']:
+                originals.append(await chat.observe(scope_id,'owner',entry['text'],entry['images'],metadata={**metadata,
+                    'sent_at':entry['sent_at'],'received_at':entry['received_at'],'attachments':entry['attachments']}))
+            observed = originals[-1]
+            source_ids = [entry['id'] for entry in originals]
+            # Planner gets the combined question, but its identity and original
+            # message IDs are supplied by this authenticated server endpoint.
+            planning_message = dict(observed,content=text)
+        else:
+            observed = await chat.observe(scope_id,'owner',text,images,metadata={**metadata,'attachments':[x['id'] for x in references]})
+            source_ids = [observed['id']]
+            planning_message = observed
         if payload.get('mode') == 'computer':
             job = app.state.computer.submit(scope_id,'owner',identity,text,source_ids=[observed['id']],attachments=references)
             reply = f"已创建电脑任务 {job['id']}，可在当前聊天查看进度和审批。"
             message = store.add_message(scope_id,'assistant','assistant',reply,job_id=job['id'],source_ids=[observed['id']])
             return {'reply':reply,'message_id':message['id'],'job':job,'memories':[],'jargon':[],'usage':None}
-        plan = await chat.social.plan(scope,observed,direct=True)
+        plan = await chat.social.plan(scope,planning_message,direct=True)
         generation = plan.get('generation')
         if not plan.get('reply'):
             return {'reply': '', 'skipped': True, 'planner': plan, 'message': plan.get('reason', '本轮不回复')}
         task = asyncio.create_task(chat.respond(scope_id, 'owner', text, images=images, metadata={'platform': 'web', 'is_owner': True,'trusted_identity':identity,'reference_attachments':references,
-                                  'planner':plan, 'request_generation':generation,'existing_message_id':observed['id'],'merged_message_ids':[observed['id']]}))
+                                  'planner':plan, 'request_generation':generation,'existing_message_id':observed['id'],'merged_message_ids':source_ids}))
         try:
             while not task.done():
                 done, _ = await asyncio.wait({task}, timeout=.4)
@@ -596,7 +626,9 @@ def create_app(data_dir=None, *, start_workers=True, allow_remote=False):
         store.get_scope(scope_id)
         # Reject malformed/revoked references before accepting a stream. The
         # real lease is acquired in its producer, not by response middleware.
-        app.state.attachments.resolve(scope_id, payload.get('attachments') or [], acquire=False)
+        from .web_chat_input import chat_input
+        batch = chat_input(payload, max_images=settings.get()['context']['max_images'])
+        app.state.attachments.resolve(scope_id, batch['attachments'] if batch else payload.get('attachments') or [], acquire=False)
 
         @asynccontextmanager
         async def stream_lifecycle():

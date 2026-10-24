@@ -27,18 +27,20 @@
   experience.renderSettings=async()=>{
     const template=document.createElement('template');template.innerHTML=await settingsPage();
     template.content.querySelector('.settings-aside')?.remove();
-    for(const id of ['updates-section','qq-section','identity-section','computer-section','admins-section','output-section','planner-budget-section','memory-settings-section','context-section','exploration-section'])template.content.querySelector('#'+id)?.remove();
+    for(const id of ['model-section','providers-section','routing-section','updates-section','qq-section','identity-section','computer-section','admins-section','output-section','planner-budget-section','memory-settings-section','context-section','exploration-section'])template.content.querySelector('#'+id)?.remove();
+    template.content.querySelectorAll('section').forEach(node=>{if(node.querySelector('[data-form="routing"],[data-form="provider"]'))node.remove();});
     template.content.querySelectorAll('.settings-foldout').forEach(node=>{if(!node.querySelector('section,form'))node.remove();});
     return template.innerHTML.replace('<h1>设置与连接</h1>','<h1>系统设置</h1>').replace('连接模型与 QQ，管理预算，也照顾好本地数据。','管理登录与远程入口、预算和本地数据。').replace('<div class="settings-main">','<div class="settings-main"><section class="panel settings-section"><h2>机器人配置已集中到一页</h2><p>名称、人格、回复、QQ 接入和电脑权限都在这里调整。</p>'+button('打开机器人配置','go-persona','primary','settings')+'</section>');
   };
   experience.renderPersonas=async()=>{
     const tab=state.botTab || "basic";
-    const tabs=[["basic","基本配置"],["reply","回复与记忆"],["qq","QQ 连接"],["computer","电脑与管理员"],["personas","人格库"],["stickers","表情包"]];
+    const tabs=[["basic","基本配置"],["models","模型"],["reply","回复与记忆"],["qq","QQ 连接"],["computer","电脑与管理员"],["personas","人格库"],["stickers","表情包"]];
     let body;
-    if(tab==="basic")body=await experience.profilePanel()+identitySection()+timeAwarenessSection()+`<section class="panel settings-section"><h2>默认聊天模型</h2><p>${e(configuredModel().model || "尚未配置")}</p>${button("选择或连接模型","quick-model","primary","spark")}</section>`;
+    if(tab==="basic")body=await experience.profilePanel()+identitySection()+timeAwarenessSection()+`<section class="panel settings-section"><h2>默认聊天模型</h2><p>${e(configuredModel().model || "尚未配置")}</p>${button("配置模型与供应商","go-model-sources","primary","spark")}</section>`;
+    else if(tab==="models")body=await window.MikubotBotModels.render();
     else if(tab==="reply"){
       const settings=await settingsPage();
-      body=outputSection()+`<details class="panel settings-section"><summary>高级 · 判断预算与记忆检索</summary>${plannerSection()+section(settings,"memory-settings-section")+section(settings,"context-section")+explorationSection()}</details>`;
+      body=window.MikubotFeatures.debounceSection()+outputSection()+`<details class="panel settings-section"><summary>高级 · 判断预算与记忆检索</summary>${plannerSection()+section(settings,"memory-settings-section")+section(settings,"context-section")+explorationSection()}</details>`;
     }else if(tab==="stickers")body=await window.MikubotStickers.render();
     else if(tab==="personas")body=await library();
     else {

@@ -12,7 +12,7 @@ window.MikubotExperience = (() => {
   const safeLink = value => /^(https?:\/\/|\/(?!\/))/i.test(String(value || "")) ? String(value) : "";
   const safeId = id => encodeURIComponent(String(id || ""));
   const _pageRuntime={get liveSource(){return liveSource},set liveSource(value){liveSource=value},get watchedJob(){return watchedJob},set watchedJob(value){watchedJob=value},get renderedPage(){return renderedPage},set renderedPage(value){renderedPage=value},get pairTimer(){return pairTimer},set pairTimer(value){pairTimer=value},get attachments(){return attachments},set attachments(value){attachments=value},get attachmentScope(){return attachmentScope},set attachmentScope(value){attachmentScope=value},get distillDraft(){return distillDraft},set distillDraft(value){distillDraft=value},get currentJob(){return currentJob},set currentJob(value){currentJob=value},get pair(){return pair},set pair(value){pair=value}};
-  const {renderChat,sessionSidebar,attachmentChips,sendChat,releaseAttachments}=window.MikubotExperienceChat.create(_pageRuntime,{inactive,jobDetail:(...args)=>jobDetail(...args)});
+  const {renderChat,sessionSidebar,attachmentChips,sendChat,releaseAttachments,flushCollected,cancelCollected,close:closeChat}=window.MikubotExperienceChat.create(_pageRuntime,{inactive,jobDetail:(...args)=>jobDetail(...args)});
   const {jobDetail,renderJobs}=window.MikubotExperienceJobs.create(_pageRuntime,{jobNames,inactive,safeId,safeLink});
   const {renderSettings,localConnectorPanel,schedulerPanel,pollPairing}=window.MikubotExperienceConfig.create(_pageRuntime,{safeId});
   const {distillChooser,characterForm,generateForm,profilePanel,profileForm,profileBindForm,corpusForm,showDistillPreview}=window.MikubotExperiencePersona.create(_pageRuntime,{safeLink});
@@ -84,9 +84,11 @@ window.MikubotExperience = (() => {
   }
 
   async function handleAction(action,target) {
+    if(action === "flush-chat-debounce"){await flushCollected();return true;}
+    if(action === "cancel-chat-debounce"){await cancelCollected();toast("已取消收集，内容已放回输入框。");return true;}
     if(window.MikubotUpdates && await window.MikubotUpdates.handleAction(action,target))return true;
     const id = target.dataset.id;
-    if (action === "new-chat") { if (state.sending) throw new Error("请先等待当前回复或停止等待。"); await releaseAttachments(); const result = await api("/api/scopes",{method:"POST",body:{name:"新对话",kind:"web",private_reply_policy:"always"}}), item = result.scope || result; state.scope = item.id; state.draft="";state.images=[]; attachments=[]; localStorage.setItem("qunyu-scope",state.scope); await bootstrap(); await navigate("chat"); }
+    if (action === "new-chat") { if (state.sending || state.debouncePending) throw new Error("请先完成或取消当前回复与消息收集。"); await releaseAttachments(); const result = await api("/api/scopes",{method:"POST",body:{name:"新对话",kind:"web",private_reply_policy:"always"}}), item = result.scope || result; state.scope = item.id; state.draft="";state.images=[]; attachments=[]; localStorage.setItem("qunyu-scope",state.scope); await bootstrap(); await navigate("chat"); }
     else if (action === "start-distill") distillChooser();
     else if (action === "distill-character") characterForm();
     else if (action === "persona-generate") generateForm();
@@ -146,7 +148,10 @@ window.MikubotExperience = (() => {
     else if (action === "attachment-reuse") {
       if(state.sending || (target.dataset.scope && target.dataset.scope!==state.scope))throw new Error("请回到资料所属聊天，并等待本轮回复结束。");
       if(attachments.length>=5)throw new Error("一次最多引用5个附件。");
-      const item=await api(`/api/chat/attachments/${safeId(id)}?${query({scope_id:state.scope})}`);
+      const scopeId=state.scope,revision=_pageRuntime.attachmentRevision || 0;
+      const item=await api(`/api/chat/attachments/${safeId(id)}?${query({scope_id:scopeId})}`);
+      if(state.sending || scopeId!==state.scope || revision!==(_pageRuntime.attachmentRevision || 0))throw new Error("聊天或参考资料已变化，请重新选择资料，避免使用已释放的附件。");
+      if(attachments.length>=5 && !attachments.some(ref=>ref.id===id))throw new Error("一次最多引用5个附件。");
       if(!attachments.some(ref=>ref.id===id))attachments.push({id,name:item.name});attachmentScope=state.scope;closeModal();await renderPage();
     }
     else if (action === "attachment-cleanup") {
@@ -169,6 +174,8 @@ window.MikubotExperience = (() => {
       const config=state.botProfiles, id=data.id || 'profile_'+Date.now().toString(36);
       const values={...(config.items.find(p=>p.id===id)?.values || {}),...Object.fromEntries(['persona_id','model_id','activity','trigger_at','trigger_reply','trigger_name','plan_enabled','proactive_reply','always_reply','allow_tools','allow_mcp','use_persona_knowledge','private_always_reply','auto_memory','dictionary_learn','dictionary_use'].map(k=>[k,data[k]]))};
       for(const key of ["trigger_at","trigger_reply","trigger_name","plan_enabled","proactive_reply"])values[key]=data[key] === "" ? null : data[key] === "true";
+      if(data.debounce_enabled !== undefined)values.debounce_enabled=data.debounce_enabled === "" ? null : data.debounce_enabled === "true";
+      for(const key of ["debounce_seconds","debounce_max_wait_seconds"])if(data[key] !== undefined)values[key]=data[key] === "" ? null : Number(data[key]);
       const item={id,name:data.name,values}, items=config.items.some(p=>p.id===id) ? config.items.map(p=>p.id===id?item:p) : [...config.items,item];
       await api('/api/bot-profiles',{method:'PUT',body:{default_id:data.is_default?id:config.default_id,items}});closeModal();await bootstrap();toast('机器人配置已保存');
     }
@@ -257,5 +264,5 @@ window.MikubotExperience = (() => {
   const originalPersonas = () => globalThis.renderPersonas();
   return {profilePanel,renderOverview,renderChat,sendChat,renderJobs,renderSettings,renderHelp,renderPersonas:async()=>{
     const html=await originalPersonas();return html.replace(button("创造人格","new-persona","primary","plus"),button("直接生成","persona-generate","primary","spark")+button("蒸馏人格","start-distill","","spark")+button("手动创建","new-persona","","plus"));
-  },baseSettings:()=>globalThis.renderSettings(),afterRender,handleAction,handleSubmit,handleChange,handleInput,markdown,jobDetail,connectionResult,costLabel,close:()=>{clearTimeout(pairTimer);closeStream();}};
+  },baseSettings:()=>globalThis.renderSettings(),afterRender,handleAction,handleSubmit,handleChange,handleInput,markdown,jobDetail,connectionResult,costLabel,close:()=>{closeChat();clearTimeout(pairTimer);closeStream();}};
 })();

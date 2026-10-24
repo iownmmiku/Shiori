@@ -27,7 +27,7 @@ function stream(events,options={}){
     },async cancel(){cancelled=true;},releaseLock(){},get cancelled(){return cancelled;}
   })}};
 }
-function reset(){calls.length=0;writes.length=0;notices.length=0;state.scope='web:default';state.images=[];state.draft='';state.sending=false;}
+function reset(){calls.length=0;writes.length=0;notices.length=0;state.scope='web:default';state.images=[];state.draft='';state.sending=false;nodes.get('#chat-text').value='hello';}
 async function main(){
   response=stream([{type:'start'},{type:'delta',text:'你好<script>private</script>'},{type:'reset'},
     {type:'delta',text:'经过工具整理'},{type:'result',data:{reply:'最终回复'}}]);

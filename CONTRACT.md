@@ -1,10 +1,12 @@
-# mikubot 0.1.5 集成约定
+# mikubot 0.1.6 集成约定
 
-本文描述0.1.5源码集成约定，版本发布与下载以GitHub实际公开资产为准；旧版不保证具备本版新增接口。
+本文描述0.1.6源码集成约定，版本发布与下载以GitHub实际公开资产为准；旧版不保证具备本版新增接口。
 
 本文供当前源码开发与接入使用，运行时校验以 `mikubot/api.py`、`experience_api.py` 及对应服务为准。历史内部版本说明归档于 `docs/archive/`，不覆盖当前约定。产品名与核心包均为 `mikubot`；`qunyu` 仅为旧导入和启动兼容层，计划在 **0.3.0** 移除，新集成应直接使用 `mikubot`。
 
 ## 运行与认证
+
+0.1.6配置与消息处理见[使用说明](docs/CONFIGURATION_WORKFLOWS.md)：`settings.debounce`含`enabled/seconds/max_wait_seconds`，默认`false/3/30`；机器人配置与会话可用`debounce_enabled/debounce_seconds/debounce_max_wait_seconds`覆盖，空值继承。`GET /api/time`经过管理台认证，返回程序UTC时钟、配置时区和感知开关。`POST /api/chat`可接收1—8项`messages`原始输入，各项仅包含`text/images/attachments/sent_at`；合并来源、接收时刻、身份与授权由服务端生成，不接受客户端冒充。JSON与SSE共用同一校验和附件租约。客户端收集不等于跨客户端服务端等待队列。插件规范包导入、导出与回退接口见[插件说明](docs/PLUGINS.md)。
 
 Python 3.11–3.13（推荐3.12），FastAPI、SQLite；正式入口为 `python -m mikubot`，应用工厂为 `mikubot.api:create_app`。前端为 `mikubot/static` 中的 HTML/CSS/JS，无需用户构建。Windows 默认数据在 `%LOCALAPPDATA%\mikubot\data`，可用 `--data-dir` 指定位置；新默认目录全空时可复制旧版同级 `data`，不删除旧目录，不覆盖已有新数据。
 
@@ -79,6 +81,8 @@ Python 3.11–3.13（推荐3.12），FastAPI、SQLite；正式入口为 `python 
 ## 记忆、来源与备份
 
 同会话与用户 ID 构成身份边界，不按昵称合并。共享空间只共享已确认、明确可共享的记忆。任何派生回复、关系或工具上下文必须检查来源、版本、撤权和暂停状态。
+
+`context.recent_turns`默认24，范围1—100；近期窗口按用户轮次对齐，仍受发送历史消息数与字符上限限制。`max_history_messages`只限制对话模型的原文，不限制自动摘要的独立有界候选批次。时间召回保持规范消息与指纹不变，展示改写在校验后进行，并作为历史参考而非新用户轮次。`context_compressed=true`仅用于实际发送有效摘要的轮次；摘要无法容纳时恢复原文并报告false。提取游标采用created_at与插入顺序，首次无一天截断，分页前排除遗忘来源。详见[整改与验收边界](docs/HISTORY_PIPELINE_AUDIT.md)。
 
 完整应用备份含数据库、脱敏设置、人格知识、只读工具与后台任务历史。恢复后暂停、断开通道、清除密钥，历史审批无效、操作不重放。原始语料、附件、Skill ZIP、电脑工作目录及任意用户文件不应被视为已随应用备份打包，需另行保留。插件源码 `plugins/` 与工作目录产物、表情包 `stickers/library.sqlite3` 也需独立备份；表情包页面提供独立库导出。
 

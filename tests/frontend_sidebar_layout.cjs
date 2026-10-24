@@ -97,9 +97,11 @@ function main() {
   // 1. Default layout: pinned entries plus every page inside a group, no page lost.
   {
     const { api, pageNames } = boot(null);
+    assert.equal(api.isTemporary(), false, "a fresh layout is saved normally");
     const html = render(api, pageNames, "chat");
     assert.match(html, /data-page="chat"/);
     assert.match(html, /data-page="overview"/);
+    assert.match(html, /data-page="overview"[^>]*>[\s\S]{0,80}运行概览/, "the existing overview label is retained");
     assert.equal(count(html, "nav-group-head"), 4, "four built-in groups");
     for (const page of Object.keys(pageNames)) {
       if (page === "help") continue; // help lives in the sidebar footer, not the nav
@@ -468,6 +470,105 @@ function main() {
     assert.match(render(solo.api, pageNames, "chat"), /这个分类的页面都已隐藏/, "the placeholder explains hidden pages");
   }
 
+  // 8e. Version is untrusted too: Number() on an object that shadows toString
+  //     can throw before the sidebar (or the rest of bootstrap) renders.
+  {
+    const versions = [{ toString: 1 }, { valueOf: 1, toString: 1 }, [{ toString: 1 }], true, null, "not a version", "1e400", -1];
+    for (const version of versions) {
+      const initial = JSON.stringify({ version, groups: [], hidden: [] });
+      const { api, pageNames, store } = boot({ "mikubot-sidebar-layout-v1": initial });
+      assert.doesNotThrow(() => api.prepare(pageNames), "malformed version cannot abort prepare()");
+      assert.equal(api.isTemporary(), false, "malformed versions do not masquerade as a future schema");
+      assert.ok(render(api, pageNames, "chat").includes('data-page="tools"'), "the sidebar remains reachable");
+      assert.doesNotThrow(() => groupsView(api, pageNames), "the management dialog remains usable");
+      api.handleAction("sidebar-toggle-group", { dataset: { id: "model" } }, { pageNames });
+      assert.equal(JSON.parse(store.getItem(api.STORAGE_KEY)).version, api.VERSION, "malformed versions can be repaired by ordinary saving");
+    }
+    // Existing numeric-string layouts still use their intended migration path.
+    const v3 = boot({ "mikubot-sidebar-layout-v1": JSON.stringify({ version: "3", hidden: [], ungrouped: ["models"], groups: [
+      { id: "system", title: "系统", pages: ["logs"] },
+    ] }) });
+    const html = render(v3.api, v3.pageNames, "chat");
+    assert.deepEqual(looseOf(html), ["models"], "numeric-string versions keep their ungrouped choices");
+    assert.match(html, /<span class="nav-group-title">数据与日志<\/span>/, "numeric-string versions still migrate titles");
+  }
+
+  // 8f. Downgrading cannot destroy fields/pages owned by a newer layout schema.
+  //     Supported controls remain usable, but changes and reset are temporary.
+  {
+    for (const version of [99, "99"]) {
+      const initial = JSON.stringify({ version, futureOption: { enabled: true }, hidden: ["futurePage"], ungrouped: ["models"], groups: [
+        { id: "model", title: "未来工具", icon: "spark", pages: ["tools", "plugins", "futurePage"], futureColor: "blue", collapsed: true },
+      ] }, null, 2);
+      const { api, pageNames, store } = boot({ "mikubot-sidebar-layout-v1": initial });
+      assert.equal(api.isTemporary(), true, "the shell can identify a future layout before its first render");
+      const writes = [];
+      const setItem = store.setItem;
+      store.setItem = (key, value) => { writes.push([key, value]); setItem(key, value); };
+      assert.equal(expandedOf(render(api, pageNames, "chat"), "model"), false);
+      for (const html of [groupsView(api, pageNames), pagesView(api, pageNames)]) {
+        assert.match(html, /侧边栏存档来自较新版本（99）/, "both views explain compatibility mode");
+        assert.match(html, /不会覆盖原存档/, "the save behavior is explicit");
+        assert.match(html, /data-action="sidebar-reset">临时恢复默认<\/button>/, "reset cannot masquerade as a persisted change");
+      }
+      api.handleAction("sidebar-toggle-group", { dataset: { id: "model" } }, { pageNames });
+      assert.equal(expandedOf(render(api, pageNames, "chat"), "model"), true, "temporary folding still works");
+      api.handleChange({ value: "临时工具", dataset: { sidebarField: "title", id: "model" } }, { pageNames });
+      assert.match(render(api, pageNames, "chat"), /临时工具/, "temporary editing still works");
+      for (const [action, dataset] of [
+        ["sidebar-group-down", { id: "model" }], ["sidebar-group-visibility", { id: "memory" }],
+        ["sidebar-page-toggle", { targetPage: "models" }], ["sidebar-group-icon", { id: "model", icon: "shield" }],
+        ["sidebar-group-add", {}], ["sidebar-group-delete", { id: "memory" }],
+      ]) api.handleAction(action, { dataset }, { pageNames });
+      api.handleChange({ value: "", dataset: { sidebarField: "page-group", targetPage: "plugins" } }, { pageNames });
+      api.handleAction("sidebar-reset", { dataset: {} }, { pageNames });
+      assert.equal(api.isTemporary(), true, "temporary reset cannot advertise a normally saved layout");
+      assert.equal(groupsOf(render(api, pageNames, "chat")).size, 4, "temporary reset remains usable");
+      assert.equal(store.getItem(api.STORAGE_KEY), initial, "the original future JSON survives every mutation byte for byte");
+      assert.equal(writes.length, 0, "no save attempts target the future schema");
+      const reloaded = boot(store._dump());
+      assert.match(render(reloaded.api, reloaded.pageNames, "chat"), /未来工具/, "reload restores the original newer layout");
+    }
+  }
+
+  // 8g. Another browser tab can upgrade storage after prepare(). An old open
+  //     tab must re-check the schema before it tries to save its first change.
+  {
+    const { api, pageNames, store } = boot(null);
+    api.prepare(pageNames);
+    assert.equal(api.isTemporary(), false, "the already-open layout initially permits saving");
+    const upgraded = JSON.stringify({ version: 99, futureOption: "keep", groups: [], hidden: ["futurePage"] });
+    store.setItem(api.STORAGE_KEY, upgraded);
+    assert.equal(api.isTemporary(), true, "the shell detects a newer tab's schema before any mutation");
+    api.handleAction("sidebar-toggle-group", { dataset: { id: "model" } }, { pageNames });
+    assert.equal(store.getItem(api.STORAGE_KEY), upgraded, "a newer tab's layout is not overwritten");
+    assert.match(groupsView(api, pageNames), /不会覆盖原存档/, "the older tab reports its new temporary mode");
+    api.handleAction("sidebar-reset", { dataset: {} }, { pageNames });
+    assert.equal(store.getItem(api.STORAGE_KEY), upgraded, "reset also preserves the newer tab's layout");
+  }
+
+  // 8h. A title's change event fires on blur before an adjacent control's click.
+  //     Do not replace the management DOM and silently discard that next click.
+  {
+    const { api, pageNames, store } = boot(null);
+    let sidebarRenders = 0, dialogRenders = 0;
+    const target = { value: "  我的\n工具\t  ", dataset: { sidebarField: "title", id: "model" } };
+    const ctx = { pageNames, rerender: () => sidebarRenders++, rerenderManage: () => dialogRenders++ };
+    api.handleChange(target, ctx);
+    assert.equal(target.value, "我的 工具", "the existing input receives the normalized title");
+    assert.equal(sidebarRenders, 1, "the sidebar label refreshes immediately");
+    assert.equal(dialogRenders, 0, "blur does not replace the next click's management target");
+    assert.match(render(api, pageNames, "chat"), /我的 工具/, "the normalized title is visible");
+    assert.match(render(boot(store._dump()).api, pageNames, "chat"), /我的 工具/, "the title is persisted normally");
+    const before = expandedOf(render(api, pageNames, "chat"), "model");
+    api.handleAction("sidebar-toggle-group", { dataset: { id: "model" } }, ctx);
+    assert.equal(expandedOf(render(api, pageNames, "chat"), "model"), !before, "the next action succeeds on its first invocation");
+    target.value = "  ";
+    api.handleChange(target, ctx);
+    assert.equal(target.value, "我的 工具", "a blank edit visibly restores the prior valid title");
+    assert.equal(dialogRenders, 0, "blank edits also keep the management DOM stable");
+  }
+
   // 9. Unknown pages from a newer release are appended, not dropped.
   {
     const { api } = boot(null);
@@ -718,13 +819,13 @@ function main() {
   }
 
   // 11. Wiring: app.js consults the module, index.html ships it and the footer entry.
-  assert.match(appSource, /layout\.render\(\{ pageNames, current: state\.page/, "the module renders the navigation");
+  assert.match(appSource, /layout\.render\(\{ pageNames: sidebarPageNames, current: state\.page/, "the module renders the navigation using the visible sidebar pages");
   assert.match(appSource, /MikubotSidebar\?\.handleAction\?\.\(action,target,sidebarContext\(\)\)/);
   assert.match(appSource, /MikubotSidebar\?\.handleChange\?\.\(event\.target,sidebarContext\(\)\)/);
   assert.match(appSource, /open-sidebar-manage/);
   assert.match(appSource, /MikubotSidebar\.isPageVisible\(page\)/);
   assert.match(appSource, /MikubotSidebar\.isPageVisible\(state\.page\)/);
-  assert.match(appSource, /MikubotSidebar\?\.prepare\?\.\(pageNames\)/);
+  assert.match(appSource, /MikubotSidebar\?\.prepare\?\.\(sidebarPageNames\)/);
   assert.match(appSource, /kind === "sidebar-manage"/);
   assert.match(indexSource, /src="\/static\/sidebar-layout\.js\?v=/);
   assert.match(indexSource, /data-action="open-sidebar-manage"/);

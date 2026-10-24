@@ -24,6 +24,7 @@ import unicodedata
 from typing import Any, Awaitable, Callable
 from .settings import resolve_model
 from .db import message_fingerprint, utc_now
+from .timezones import reference_time
 
 
 HK = timezone(timedelta(hours=8))
@@ -241,7 +242,7 @@ def _rank_lexical(docs: list[_Document], query: str, user_id: str, zone=None) ->
     frequencies = Counter(term for doc in docs for term in doc.terms)
     average = sum(sum(doc.terms.values()) for doc in docs) / len(docs) or 1
     now = datetime.now(UTC)
-    window = _time_window(query, now,zone)
+    window = _time_window(query, reference_time(now),zone)
     known_subjects = {normalized(doc.record.get("subject") or "") for doc in docs}
     requested_subjects = {subject for subject in known_subjects if subject and _phrase_match(subject, query)}
     for doc in docs:
@@ -267,8 +268,12 @@ def _rank_lexical(docs: list[_Document], query: str, user_id: str, zone=None) ->
         elif re.search(r"我|本人|自己|\bmy\b|\bme\b", query):
             doc.person = 0.08 if str(record.get("user_id")) == user_id else -0.04
         if window:
-            occurred = next((_date(record.get(key)) for key in ("event_at", "occurred_at", "event_time_start", "valid_from", "created_at") if _date(record.get(key))), None)
-            doc.time = 0.12 if occurred and window[0] <= occurred < window[1] else -0.06
+            occurred = next((_date(record.get(key)) for key in ("event_at", "occurred_at", "event_time_start") if _date(record.get(key))), None)
+            end = _date(record.get('event_time_end'))
+            matches = bool(occurred and (occurred < window[1] and end > window[0] if end and end > occurred else window[0] <= occurred < window[1]))
+            # Old creation/update dates are provenance, not proof of when an
+            # event happened. Unknown dates remain neutral rather than guessed.
+            doc.time = 0.12 if matches else -0.06 if occurred else 0.0
         lexical = doc.bm25 / (doc.bm25 + 2.0) if doc.bm25 > 0 else 0.0
         doc.score = lexical + doc.importance + doc.recency + doc.person + doc.time
 

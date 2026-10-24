@@ -128,6 +128,8 @@ def reply_payload(content='ok'):
 @pytest.mark.anyio
 @pytest.mark.parametrize('configured,purpose,explicit,expected', [
     (0, 'chat', None, 1000),
+    (128, 'summary', None, 128),
+    (16000, 'summary', None, 1000),
     (0, 'distillation', 12000, 12000),
     (0, 'distillation', 16000, 16000),
     (8192, 'chat', None, 8192),

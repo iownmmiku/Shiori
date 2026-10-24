@@ -22,6 +22,9 @@ def local_instance(tmp_path):
             raw = json.dumps({'identity': state['identity']}).encode()
             self.send_response(200); self.send_header('Content-Length', str(len(raw))); self.end_headers(); self.wfile.write(raw)
         def do_POST(self):
+            # Consume the request before closing an HTTP/1.0 response. Leaving
+            # unread bytes can turn the intended 302 into a Windows TCP reset.
+            assert self.rfile.read(int(self.headers.get('Content-Length', '0'))) == b'{}'
             calls.append(('POST', self.path, self.headers.get('Authorization')))
             if state['post_redirect']:
                 self.send_response(302); self.send_header('Location', state['post_redirect']); self.end_headers(); return

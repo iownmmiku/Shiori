@@ -30,7 +30,13 @@ async def test_short_chat_extracts_once_and_cursor_survives_restart(tmp_path):
         await chat._extract('web:default','42',automatic=True)
         records=store.list_memories(scope_id='web:default')
         assert len(records)==1 and records[0]['status']=='active'
-        assert records[0]['occurred_at']==message['created_at']
+        from mikubot.timezones import message_anchor, config_zone, utc_timestamp
+        expected = _time_window('昨晚', message_anchor(message), config_zone(s))
+        assert records[0]['event_time_known'] is True
+        assert records[0]['event_time_start'] == utc_timestamp(expected[0])
+        assert records[0]['event_time_end'] == utc_timestamp(expected[1])
+        assert records[0]['reported_at'] == message['received_at']
+        assert 'occurred_at' not in records[0]
         assert chat.memory_lifecycle.pending('web:default','42')==[]
         await chat.close();store.close()
         store=Store(tmp_path);chat=ChatService(store,s,Model())

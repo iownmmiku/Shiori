@@ -229,6 +229,10 @@ def test_quiet_default_and_full_natural_chat_calendar(tmp_path, monkeypatch):
             fixed = real_datetime(2026, 10, 20, 12, tzinfo=timezone.utc)
             return fixed.astimezone(tz) if tz else fixed.replace(tzinfo=None)
     monkeypatch.setattr(timeparse, 'datetime', FixedDatetime)
+    # Receipt, original-message interpretation and future-time validation now
+    # share a clock; freezing only the parser would model a delayed replay.
+    monkeypatch.setattr('mikubot.timezones.datetime', FixedDatetime)
+    monkeypatch.setattr('mikubot.chat.datetime', FixedDatetime)
     store, settings, provider = Store(tmp_path), Settings(tmp_path), SummaryProvider()
     settings.update({'time': {'timezone': NY}})
     chat = ChatService(store, settings, provider)

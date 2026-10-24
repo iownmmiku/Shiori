@@ -7,7 +7,8 @@ const sandbox={window:{},state:{settings:{}},document:{addEventListener:(name,fn
   api:async(url,options)=>calls.push([url,options]),toast:()=>{},bootstrap:async()=>{}};
 vm.createContext(sandbox);vm.runInContext(fs.readFileSync(path.join(__dirname,'../mikubot/static/resource-settings.js'),'utf8'),sandbox);
 const ui=sandbox.window.MikubotResources;
-const html=ui.render();assert.match(html,/在线语义检索总等待/);assert.match(html,/request_max_mb/);assert.equal(inputs.size,18);
+const html=ui.render();assert.match(html,/在线语义检索总等待/);assert.match(html,/request_max_mb/);assert.equal(inputs.size,19);
+assert.match(html,/近期对话轮数/);assert.equal(inputs.get('context__recent_turns').value,'24');
 assert.match(html,/memory__background_indexing/);assert.match(html,/后台仍会调用嵌入模型并计费/);
 inputs.set('memory__background_indexing',{value:'false'});
 const form={querySelector:selector=>selector==='#resource-preset-note'?note:inputs.get(selector.match(/name="([^"]+)/)?.[1])};

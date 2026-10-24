@@ -93,5 +93,6 @@ function parseCustomParams(text) {
     throw new Error("自定义参数必须是有效的 JSON 对象。");
   }
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("自定义参数必须是有效的 JSON 对象。");
+  if (Object.values(value).some(item => typeof item === "number" && !Number.isFinite(item))) throw new Error("自定义参数中的数字必须是有限数字。");
   return value;
 }

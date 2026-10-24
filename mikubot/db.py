@@ -17,10 +17,11 @@ import re
 import sqlite3
 import threading
 import unicodedata
+from collections import OrderedDict
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
-from .timezones import config_zone
+from .timezones import config_zone, ingress_times
 
 
 UTC = timezone.utc
@@ -29,6 +30,7 @@ MEMORY_KINDS = {"fact", "preference", "event", "note"}
 MEMORY_STATUSES = {"active", "pending", "rejected", "archived", "superseded", "deleted"}
 JARGON_STATUSES = {"pending", "approved", "rejected", "disabled", "deleted"}
 TASK_STATUSES = {"pending", "running", "completed", "cancelled", "failed"}
+BLOCKED_SOURCE_CACHE_SCOPES = 128
 SECRET_FIELDS = {
     "api_key", "access_token", "password", "secret", "authorization",
     "client_secret", "refresh_token", "auth_token", "bootstrap_token",
@@ -187,6 +189,8 @@ class Store:
         self._memory_search_dirty = set()
         self._memory_revision = 0
         self._memory_search_warning = ''
+        self._blocked_source_cache = OrderedDict()
+        self._blocked_source_data_version = None
         self._conn = sqlite3.connect(self.path, check_same_thread=False, timeout=30)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
@@ -200,6 +204,11 @@ class Store:
                 role TEXT NOT NULL, created_at TEXT NOT NULL, data TEXT NOT NULL);
             CREATE INDEX IF NOT EXISTS messages_scope_time ON messages(scope_id, created_at);
             CREATE INDEX IF NOT EXISTS messages_time ON messages(created_at);
+            CREATE INDEX IF NOT EXISTS messages_extraction_cursor ON messages(scope_id,user_id,role,created_at);
+            CREATE INDEX IF NOT EXISTS messages_origin_time ON messages(scope_id,user_id,role,
+                COALESCE(json_extract(data,'$.sent_at'),json_extract(data,'$.received_at'),created_at));
+            CREATE INDEX IF NOT EXISTS messages_origin_day ON messages(scope_id,user_id,role,
+                julianday(COALESCE(json_extract(data,'$.sent_at'),json_extract(data,'$.received_at'),created_at)));
             CREATE TABLE IF NOT EXISTS memories (
                 id TEXT PRIMARY KEY, scope_id TEXT NOT NULL, user_id TEXT NOT NULL,
                 kind TEXT NOT NULL, status TEXT NOT NULL, visibility TEXT NOT NULL,
@@ -237,6 +246,31 @@ class Store:
         self._conn.commit()
         self._conn.execute("PRAGMA user_version=1")
         self._seed()
+        self._init_blocked_source_tracking()
+
+    def _init_blocked_source_tracking(self) -> None:
+        """Transaction-aware, connection-local invalidation; no backup migration.
+
+        Only scopes in the bounded LRU are tracked. TEMP triggers also cover
+        direct SQL on this connection, and their counters roll back with the
+        main write. Other connections are covered by PRAGMA data_version.
+        """
+        self._blocked_source_cache.clear()
+        self._blocked_source_data_version = None
+        self._conn.execute("CREATE TEMP TABLE IF NOT EXISTS blocked_source_revisions "
+                           "(scope_id TEXT PRIMARY KEY, revision INTEGER NOT NULL)")
+        self._conn.execute("DELETE FROM temp.blocked_source_revisions")
+        for table in ('memories', 'jargon'):
+            for operation in ('INSERT', 'UPDATE', 'DELETE'):
+                name = f'blocked_source_{table}_{operation.lower()}'
+                self._conn.execute(f'DROP TRIGGER IF EXISTS temp.{name}')
+                scope = ('scope_id IN (OLD.scope_id, NEW.scope_id)' if operation == 'UPDATE'
+                         else 'scope_id=' + ('OLD' if operation == 'DELETE' else 'NEW') + '.scope_id')
+                self._conn.execute(f"""CREATE TEMP TRIGGER {name}
+                    AFTER {operation} ON main.{table} BEGIN
+                    UPDATE blocked_source_revisions SET revision=revision+1 WHERE {scope};
+                    END""")
+        self._conn.commit()
 
     def _seed(self) -> None:
         # Keep the migration marker in an existing table so schema-1 backups
@@ -428,7 +462,7 @@ class Store:
             _choice(record["activity"], {"quiet", "balanced", "active"}, "activity")
             for field in ("enabled", "dictionary_understand", "dictionary_use", "auto_memory", "allow_tools", "always_reply", "expression_learn", "expression_use", "context_compress", "use_persona_knowledge"):
                 _boolean(record[field], field)
-            for field in ("trigger_at", "trigger_reply", "trigger_name", "plan_enabled", "proactive_reply"):
+            for field in ("trigger_at", "trigger_reply", "trigger_name", "plan_enabled", "proactive_reply", "debounce_enabled"):
                 for container in (record, record['settings']):
                     if container.get(field) is not None:
                         _boolean(container[field], field)
@@ -438,6 +472,13 @@ class Store:
                 if not isinstance(record['bot_aliases'], list) or len(record['bot_aliases']) > 12 or any(not isinstance(x, str) or not 1 <= len(x.strip()) <= 30 for x in record['bot_aliases']):
                     raise ValueError('bot_aliases 最多12个，每个1—30字')
             for container in (record, record['settings']):
+                for field, low, high in (('debounce_seconds', .1, 60), ('debounce_max_wait_seconds', 1, 300)):
+                    value = container.get(field)
+                    if value is not None and (type(value) not in (int, float) or not math.isfinite(value) or not low <= value <= high):
+                        raise ValueError(field + ' 超出范围')
+                if (container.get('debounce_seconds') is not None and container.get('debounce_max_wait_seconds') is not None
+                        and container['debounce_seconds'] > container['debounce_max_wait_seconds']):
+                    raise ValueError('消息防抖最长等待时间不能少于等待秒数')
                 for field, (lower, upper) in {
                     'planner_min_interval_ms': (0, 60000), 'planner_daily_calls': (0, 100000),
                     'planner_daily_tokens': (0, 10000000), 'planner_max_age_ms': (1000, 120000),
@@ -516,8 +557,12 @@ class Store:
         metadata = _data(metadata)
         if not content and not metadata:
             raise ValueError("消息不能为空")
+        # created_at remains the local insertion cursor for old databases.
+        # Platform send and local receipt are distinct provenance, not event dates.
+        times = ingress_times(metadata.get('sent_at'), received_at=metadata.get('received_at'))
+        metadata.update(times)
         record = {"id": str(uuid4()), "scope_id": scope_id, "user_id": user_id, "role": role,
-                  "content": content, "created_at": utc_now(), "metadata": metadata}
+                  "content": content, "created_at": utc_now(), **times, "metadata": metadata}
         with self._lock, self._conn:
             self.get_scope(scope_id)
             return self._write("messages", record, ("scope_id", "user_id", "role", "created_at"))
@@ -546,6 +591,18 @@ class Store:
 
     def get_message(self, id: str) -> dict:
         return self._get("messages", id)
+
+    def ordered_messages(self, ids, *, scope_id):
+        """Resolve canonical sources in the same order as list_messages."""
+        keys = list(dict.fromkeys(ids))
+        if not keys:
+            return []
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT data FROM messages WHERE scope_id=? AND id IN "
+                "(SELECT value FROM json_each(?)) ORDER BY created_at,rowid",
+                (scope_id, json.dumps(keys))).fetchall()
+        return [json.loads(row[0]) for row in rows]
 
     def _prepare_memory(self, record: dict) -> dict:
         for field in ("scope_id", "user_id", "content"):
@@ -651,14 +708,54 @@ class Store:
                                            (scope_id, str(user_id))).fetchall())
 
     def blocked_memory_sources(self, scope_id: str) -> set[str]:
-        """Project tombstones in SQLite without decoding entire memory bodies."""
+        """Return current source tombstones without rescanning on every token.
+
+        No result read inside a transaction can enter the cross-call cache:
+        SQLite reuses a revision after rollback, and total_changes does not
+        roll back. The TEMP revision instead follows committed changes to the
+        relevant scope, including writes which bypass Store methods.
+        """
         with self._lock:
-            rows = self._conn.execute("""SELECT j.value FROM memories m,
-                json_each(m.data,'$.blocked_source_ids') j WHERE m.scope_id=? AND j.type='text'
-                UNION SELECT j.value FROM jargon m,
-                json_each(m.data,'$.blocked_source_ids') j WHERE m.scope_id=? AND j.type='text'""",
-                (scope_id, scope_id)).fetchall()
-            return {row[0] for row in rows}
+            if self._conn.in_transaction:
+                return self._query_blocked_memory_sources(scope_id)
+            for _ in range(3):
+                data_version = self._conn.execute('PRAGMA data_version').fetchone()[0]
+                if data_version != self._blocked_source_data_version:
+                    self._blocked_source_cache.clear()
+                    with self._conn:
+                        self._conn.execute('DELETE FROM temp.blocked_source_revisions')
+                    self._blocked_source_data_version = data_version
+                if scope_id not in self._blocked_source_cache:
+                    with self._conn:
+                        if len(self._blocked_source_cache) >= BLOCKED_SOURCE_CACHE_SCOPES:
+                            expired, _ = self._blocked_source_cache.popitem(last=False)
+                            self._conn.execute('DELETE FROM temp.blocked_source_revisions WHERE scope_id=?', (expired,))
+                        self._conn.execute('INSERT OR IGNORE INTO temp.blocked_source_revisions VALUES (?,0)', (scope_id,))
+                    self._blocked_source_cache[scope_id] = None
+                revision = self._conn.execute(
+                    'SELECT revision FROM temp.blocked_source_revisions WHERE scope_id=?', (scope_id,)).fetchone()[0]
+                cached = self._blocked_source_cache[scope_id]
+                result = (cached[1] if cached is not None and cached[0] == revision
+                          else frozenset(self._query_blocked_memory_sources(scope_id)))
+                # A second connection can commit between the initial version
+                # check and the scan/cache read. Do not publish that old result.
+                if self._conn.execute('PRAGMA data_version').fetchone()[0] != data_version:
+                    continue
+                self._blocked_source_cache[scope_id] = (revision, result)
+                self._blocked_source_cache.move_to_end(scope_id)
+                return set(result)
+            # Continuous external writers must not make this authorization
+            # check spin indefinitely. A fresh SELECT retains the old method's
+            # snapshot semantics and is deliberately not cached.
+            return self._query_blocked_memory_sources(scope_id)
+
+    def _query_blocked_memory_sources(self, scope_id: str) -> set[str]:
+        rows = self._conn.execute("""SELECT j.value FROM memories m,
+            json_each(m.data,'$.blocked_source_ids') j WHERE m.scope_id=? AND j.type='text'
+            UNION SELECT j.value FROM jargon m,
+            json_each(m.data,'$.blocked_source_ids') j WHERE m.scope_id=? AND j.type='text'""",
+            (scope_id, scope_id)).fetchall()
+        return {row[0] for row in rows}
 
     def memory_property_records(self, scope_id, property_name, status=None, *, include_shared=False):
         if include_shared:
@@ -1026,6 +1123,20 @@ class Store:
             return {'mode': search.mode if search else ('sql_fallback' if self._memory_search_warning else 'uninitialized'),
                     'warning': self._memory_search_warning or (search.warning if search else ''),
                     'initialized': bool(search and search.initialized), 'revision': self._memory_revision}
+
+    def message_sources_current(self, scope_id: str, source_ids) -> bool:
+        """Check message existence/scope without decoding every historical body."""
+        keys = list(dict.fromkeys(source_ids))
+        if any(not isinstance(key, str) for key in keys):
+            return False
+        with self._lock:
+            for start in range(0, len(keys), 400):
+                part = keys[start:start + 400]
+                count = self._conn.execute('SELECT COUNT(*) FROM messages WHERE scope_id=? AND id IN ('
+                                           + ','.join('?' for _ in part) + ')', (scope_id, *part)).fetchone()[0]
+                if count != len(part):
+                    return False
+        return True
 
     def memory_accessible(self, scope_id: str, user_id: str, record_id: str, version: int | None = None, *, scope_allowed=None) -> bool:
         """Recheck consent, membership, privacy and dependency closure now."""
@@ -1628,7 +1739,13 @@ class Store:
                 if any(row[0] in {"trigger", "view"} for row in objects):
                     raise ValueError("备份不得含有触发器或视图")
                 signature = lambda rows: [(row[0], row[1], " ".join((row[2] or "").split())) for row in rows]
-                if signature(objects) != signature(current):
+                # Only these additive performance indexes may be absent from
+                # older schema-1 backups. Any present index must still match
+                # its exact trusted definition; no arbitrary schema is allowed.
+                history_indexes = {'messages_origin_day', 'messages_extraction_cursor'}
+                missing = history_indexes - {row[1] for row in objects if row[0] == 'index'}
+                expected = [row for row in current if not (row[0] == 'index' and row[1] in missing)]
+                if signature(objects) != signature(expected):
                     raise ValueError("备份数据库结构不兼容")
                 tables = {row[1] for row in objects if row[0] == "table"}
                 if tables != set(TABLES):
@@ -1649,9 +1766,13 @@ class Store:
                 if validate_only:
                     return {'valid': True}
                 source.backup(self._conn)
+                for row in current:
+                    if row[0] == 'index' and row[1] in missing:
+                        self._conn.execute(row[2])
                 self._conn.execute("PRAGMA journal_mode=WAL")
                 self._memory_search_dirty = None
                 self._memory_revision += 1
+                self._init_blocked_source_tracking()
                 self._seed()
                 return self.stats()
         except (sqlite3.DatabaseError, json.JSONDecodeError, TypeError) as exc:

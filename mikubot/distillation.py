@@ -21,7 +21,7 @@ from urllib.parse import urlsplit
 from .corpus import inspect_corpus as scan_corpus, corpus_chunks
 from .provider import estimate_tokens, ProviderStreamError, ProviderTimeoutError, ProviderConnectionError, ProviderOutputBudgetError
 from .tools import read_public, search_public
-from .character_catalog import CharacterCatalog
+from .character_catalog import CharacterCatalog, wiki_works, work_matches
 
 RESOURCE_DIR = Path(__file__).parent / 'resources' / 'csp'
 EXCLUDED_DOMAINS = ('zhihu.com', 'mp.weixin.qq.com', 'baike.baidu.com')
@@ -223,6 +223,12 @@ class DistillationService:
         selected = next((row for row in lookup['characters'] if row['id'] == payload.get('character_id')), None)
         if selected is None:
             raise ValueError('请选择本次检索返回的角色，候选已失效时请重新检索')
+        if lookup.get('work') and selected['id'].startswith(('moegirl-', 'wikipedia-')):
+            # Old saved lookups may contain labels copied from a search input.
+            # Require source evidence again before resuming or paying for work.
+            if not work_matches(wiki_works((selected.get('_page') or {}).get('text', '')),
+                                lookup['work'], selected.get('_work_aliases', ())):
+                raise ValueError('角色来源未能确认限定作品，请重新检索并核对角色；本次未调用蒸馏模型')
         budget.check()
         await _progress(progress, 'sources', f'正在自动整理 {selected["name"]} 的角色资料')
         checkpoint = _CHECKPOINT.get()

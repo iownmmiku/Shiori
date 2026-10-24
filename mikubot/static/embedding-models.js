@@ -37,7 +37,7 @@ window.MikubotEmbedding = (() => {
   async function handleAction(action,target){
     if(action==="model-type-tab" || action==="open-embedding-models"){
       currentTab=action==="open-embedding-models"?"embedding":target.dataset.id;
-      queryText="";if(state.page!=="models")await navigate("models");else await renderPage();
+      queryText="";if(state.page!=="persona" || state.botTab!=="models")await navigate("models");else await renderPage();
     }else if(action==="embedding-source"){selectedSource=target.dataset.id;queryText="";await renderPage();}
     else if(action==="new-embedding"){await load();setupModal();}
     else if(action==="discover-embedding"){

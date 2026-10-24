@@ -42,7 +42,7 @@ def main():
     parser.add_argument('exe', type=Path)
     parser.add_argument('--data-dir', required=True, type=Path)
     parser.add_argument('--port', type=int, default=18773)
-    parser.add_argument('--expect-version', default='0.1.5')
+    parser.add_argument('--expect-version', default='0.1.6')
     args = parser.parse_args()
     data, exe = args.data_dir.resolve(), args.exe.resolve()
     assert not data.exists(), 'Use a fresh disposable data directory'

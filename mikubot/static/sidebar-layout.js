@@ -14,9 +14,8 @@ window.MikubotSidebar = (() => {
   // newer ones keep whatever the user chose.
   const UNGROUPED_VERSION = 2;
   const PINNED = ["chat", "overview"];
-  // Pinned entries keep their own sidebar wording (the overview page title is
-  // "机器人概览", but the sidebar entry has always read "机器人管理").
-  const PINNED_LABELS = { chat: "聊天", overview: "机器人管理" };
+  // Pinned entries keep the shell's established sidebar wording.
+  const PINNED_LABELS = { chat: "聊天", overview: "运行概览" };
   const EXCLUDED = ["help"];
   const MAX_TITLE = 20;
   const MAX_GROUPS = 12;
@@ -52,6 +51,13 @@ window.MikubotSidebar = (() => {
     return text ? text.slice(0, MAX_TITLE) : fallback;
   };
   const cleanIcon = (value, fallback) => (ICON_CHOICES.includes(value) ? value : fallback);
+  // Parsed JSON can shadow valueOf/toString. Only coerce primitive version
+  // values, so a malformed preference cannot abort shell initialization.
+  const layoutVersion = value => {
+    if (typeof value !== "number" && typeof value !== "string") return 0;
+    const number = Number(value);
+    return Number.isFinite(number) && number >= 0 ? number : 0;
+  };
 
   function knownPages(pageNames) {
     return Object.keys(pageNames || {}).filter(key => !PINNED.includes(key) && !EXCLUDED.includes(key));
@@ -84,7 +90,7 @@ window.MikubotSidebar = (() => {
     // release has no ungrouped list, so it adopts the new defaults once rather
     // than silently keeping the old grouping. A layout from a NEWER release is
     // left alone: its structure is not ours to rewrite.
-    const savedVersion = Number(saved?.version) || 0;
+    const savedVersion = layoutVersion(saved?.version);
     // Structure migrations run for anything older than this build; the 未分类
     // defaults only apply to layouts that predate the feature, so a later bump
     // never undoes a page the user deliberately moved back into a category.
@@ -179,6 +185,9 @@ window.MikubotSidebar = (() => {
 
   let state = null;
   let signature = "";
+  // A downgraded build may display the pages it knows, but cannot safely
+  // serialize a newer schema. Keep its original storage untouched.
+  let futureVersion = 0;
   // The current page's group opens automatically once per page change, but a
   // manual collapse of that same group still wins until the user navigates.
   let autoExpanded = "";
@@ -188,14 +197,26 @@ window.MikubotSidebar = (() => {
     const next = knownPages(pageNames).sort().join(",");
     if (!state || next !== signature) {
       signature = next;
-      state = merge(pageNames, readSaved());
+      const saved = readSaved();
+      futureVersion = layoutVersion(saved?.version) > VERSION ? layoutVersion(saved.version) : 0;
+      state = merge(pageNames, saved);
     }
     return state;
   }
 
+  function isTemporary() {
+    // Another tab may have upgraded the preference since this page loaded.
+    const currentVersion = layoutVersion(readSaved()?.version);
+    if (currentVersion > VERSION) futureVersion = currentVersion;
+    return futureVersion > VERSION;
+  }
+
   function persist() {
     const store = storage();
-    try { if (store && typeof store.setItem === "function") store.setItem(STORAGE_KEY, JSON.stringify(state)); } catch {}
+    try {
+      if (isTemporary()) return;
+      if (store && typeof store.setItem === "function") store.setItem(STORAGE_KEY, JSON.stringify(state));
+    } catch {}
   }
 
   // Loads (or reloads) the layout for the given page map. Callers that need to
@@ -284,15 +305,18 @@ window.MikubotSidebar = (() => {
   function manageBody({ pageNames = {}, icon: iconFn, esc: escFn } = {}) {
     const e = value => esc(value, escFn);
     ensure(pageNames);
+    const temporary = isTemporary();
+    const compatibility = temporary ? `<p class="notice warning" role="status">侧边栏存档来自较新版本（${e(futureVersion)}）。当前调整和恢复默认仅在本次打开期间生效，不会覆盖原存档；请使用较新版本保存更改。</p>` : "";
+    const resetLabel = temporary ? "临时恢复默认" : "恢复默认";
     const hiddenCount = knownPages(pageNames).filter(isHidden).length;
     // Toggle buttons rather than role=tab: the panels are re-rendered instead of
     // being kept in the DOM, so tab semantics (arrow keys, aria-controls) would be
     // a promise this markup cannot keep. aria-pressed is honest and complete.
     const tabs = `<div class="manage-tabs" role="group" aria-label="管理侧边栏视图"><button type="button" class="manage-tab ${manageView === "groups" ? "active" : ""}" data-action="sidebar-manage-view" data-view="groups" aria-pressed="${manageView === "groups"}">管理分类</button><button type="button" class="manage-tab ${manageView === "pages" ? "active" : ""}" data-action="sidebar-manage-view" data-view="pages" aria-pressed="${manageView === "pages"}">管理页面${hiddenCount ? `<span class="manage-tab-badge">${hiddenCount} 隐藏</span>` : ""}</button></div>`;
     if (manageView === "pages") {
-      return `<div class="sidebar-manage">${tabs}<p class="help-caption">眼睛控制这个页面是否出现在侧边栏；右侧下拉框决定它属于哪个分类。隐藏只影响本机浏览器，功能与数据都保留。</p><div class="sidebar-manage-pages expanded">${pageRows(pageNames, e)}</div><div class="section-actions"><button type="button" class="btn ghost" data-action="sidebar-reset">恢复默认</button></div></div>`;
+      return `<div class="sidebar-manage">${tabs}${compatibility}<p class="help-caption">眼睛控制这个页面是否出现在侧边栏；右侧下拉框决定它属于哪个分类。隐藏只影响本机浏览器，功能与数据都保留。</p><div class="sidebar-manage-pages expanded">${pageRows(pageNames, e)}</div><div class="section-actions"><button type="button" class="btn ghost" data-action="sidebar-reset">${resetLabel}</button></div></div>`;
     }
-    return `<div class="sidebar-manage">${tabs}<p class="help-caption">拖动顺序按钮调整分类位置；图标按钮可更换分类图标。这里只影响本机浏览器，不会修改机器人配置。</p><div class="sidebar-manage-list">${groupRows(pageNames, iconFn, e)}</div><div class="section-actions"><button type="button" class="btn" data-action="sidebar-group-add">＋ 新增分类</button><button type="button" class="btn ghost" data-action="sidebar-reset">恢复默认</button></div></div>`;
+    return `<div class="sidebar-manage">${tabs}${compatibility}<p class="help-caption">拖动顺序按钮调整分类位置；图标按钮可更换分类图标。这里只影响本机浏览器，不会修改机器人配置。</p><div class="sidebar-manage-list">${groupRows(pageNames, iconFn, e)}</div><div class="section-actions"><button type="button" class="btn" data-action="sidebar-group-add">＋ 新增分类</button><button type="button" class="btn ghost" data-action="sidebar-reset">${resetLabel}</button></div></div>`;
   }
 
   function moveGroup(id, delta) {
@@ -405,7 +429,13 @@ window.MikubotSidebar = (() => {
     const id = target.dataset.id || "";
     if (field === "title") {
       const group = state.groups.find(item => item.id === id);
-      if (group) { group.title = cleanTitle(target.value, group.title); persist(); ctx.rerender?.(); ctx.rerenderManage?.(); }
+      if (group) {
+        group.title = cleanTitle(target.value, group.title);
+        target.value = group.title;
+        persist(); ctx.rerender?.();
+        // A blur-triggered change precedes the next button's click. Replacing
+        // the dialog here would remove that target and swallow the click.
+      }
       return true;
     }
     if (field === "page-group") {
@@ -453,5 +483,5 @@ window.MikubotSidebar = (() => {
     return closed;
   }
 
-  return { STORAGE_KEY, VERSION, PINNED, EXCLUDED, DEFAULT_GROUPS, ICON_CHOICES, prepare, isHidden, isPageVisible, render, manageBody, handleAction, handleChange, closeIconPickers, _merge: merge, _view: () => manageView };
+  return { STORAGE_KEY, VERSION, PINNED, EXCLUDED, DEFAULT_GROUPS, ICON_CHOICES, prepare, isTemporary, isHidden, isPageVisible, render, manageBody, handleAction, handleChange, closeIconPickers, _merge: merge, _view: () => manageView };
 })();
