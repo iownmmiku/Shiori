@@ -209,12 +209,18 @@ def _parse_feed(text, base_url):
     return entries
 
 
-def _read_public(url: str):
+def _read_public(url: str, *, before_send=None):
     for _ in range(4):
+        if before_send:
+            before_send()
         parsed, host, port, addresses = public_addresses(url)
+        if before_send:
+            before_send()
         connection = _PinnedHTTPS(host, port, addresses[0]) if parsed.scheme == 'https' else http.client.HTTPConnection(addresses[0], port, timeout=12)
         path = quote(parsed.path or '/', safe='/%:@!$&\'()*+,;=-._~') + ('?' + quote(parsed.query, safe='/%:@!$&\'()*+,;=-._~?') if parsed.query else '')
         try:
+            if before_send:
+                before_send()
             connection.request('GET', path, headers={'Host': host if parsed.port is None else f'{host}:{port}', 'User-Agent': 'mikubot (+local assistant)', 'Accept': 'text/html,text/plain,application/json,application/rss+xml,application/atom+xml', 'Accept-Encoding': 'identity'})
             response = connection.getresponse()
             if response.status in (301, 302, 303, 307, 308):
@@ -358,7 +364,7 @@ def _search_result_url(value):
         return ''
 
 
-async def search_public(query):
+async def search_public(query, *, fetch=None):
     if not query.strip() or len(query) > 300:
         raise ValueError('搜索内容需为 1—300 个字符')
     channels = [
@@ -367,9 +373,10 @@ async def search_public(query):
         ('duckduckgo_html', 'https://html.duckduckgo.com/html/?q=' + quote(query)),
     ]
     failures = []
+    fetch = fetch or read_public
     for channel, address in channels:
         try:
-            page = await asyncio.wait_for(read_public(address), timeout=6)
+            page = await asyncio.wait_for(fetch(address), timeout=6)
             body = str(page.get('text') or '')
             if (not page.get('feed_items') and len(body) < 100) or any(x in body.lower() for x in ('verify you are human', 'unusual traffic', '请完成验证', 'anomaly-modal')):
                 raise ValueError('搜索渠道需要验证或暂不可用')

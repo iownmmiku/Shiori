@@ -352,15 +352,13 @@ class OneBotBridge:
                 self._diagnostics.mark('duplicate_message', scope_id=scope_id, user_id=user_id, emit=False)
                 return
             # Preserve deduplication across bridge restarts using stored provenance.
-            for message in self.store.list_messages(scope_id, limit=200):
-                meta = message.get('metadata') or {}
-                if str(meta.get('platform_message_id', '')) == platform_id and str(meta.get('onebot_self_id', '')) == event_key[0]:
-                    self._seen[event_key] = time.monotonic()
-                    self._diagnostics.mark('duplicate_message', scope_id=scope_id, user_id=user_id, emit=False)
-                    return
+            duplicate = self.store.onebot_message_seen(scope_id, platform_id, event_key[0])
             self._seen[event_key] = time.monotonic()
             while len(self._seen) > 4096:
                 self._seen.popitem(last=False)
+            if duplicate:
+                self._diagnostics.mark('duplicate_message', scope_id=scope_id, user_id=user_id, emit=False)
+                return
         text, images, mentions, reply_id = self._message(payload)
         if any(image.startswith('onebot-image:') for image in images):
             resolved=[]
@@ -543,13 +541,16 @@ class OneBotBridge:
             # Once handed to the transport a cancelled send has unknown delivery,
             # even if the caller has not yet received the connector's echo.
             dispatched = True
-            if hasattr(socket, 'send_json'):
-                await socket.send_json(action)
-            else:
-                await socket.send(json.dumps(action, ensure_ascii=False))
-            write_finished = time.perf_counter()
             timeout = float(self._config().get('action_timeout_seconds', 30))
-            result = await asyncio.wait_for(future, max(0.01, min(timeout, 60)))
+            # Backpressure can stall the write itself. One deadline bounds both
+            # dispatch and its receipt; an uncertain write is never replayed.
+            async with asyncio.timeout(max(0.01, min(timeout, 60))):
+                if hasattr(socket, 'send_json'):
+                    await socket.send_json(action)
+                else:
+                    await socket.send(json.dumps(action, ensure_ascii=False))
+                write_finished = time.perf_counter()
+                result = await future
             confirmed = bool(result and result.get('status') == 'ok' and result.get('retcode') == 0
                              and isinstance(result.get('data'), dict) and result['data'].get('message_id') is not None)
             if not confirmed:

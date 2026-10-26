@@ -41,6 +41,7 @@ if (-not $InstallerOnly) {
 Copy-Item -LiteralPath (Join-Path $taskRoot 'README.md') -Destination (Join-Path $taskOutput '使用说明.md')
 Copy-Item -LiteralPath (Join-Path $taskRoot 'RELEASE_NOTES.md') -Destination (Join-Path $taskOutput '版本说明.md')
 Copy-Item -LiteralPath (Join-Path $taskRoot 'README.md') -Destination (Join-Path $taskOutput 'README.md')
+Copy-Item -LiteralPath (Join-Path $taskRoot 'mikubot\resources\stop-portable.cmd') -Destination (Join-Path $taskOutput '退出 mikubot.cmd')
 Copy-Item -LiteralPath (Join-Path $taskRoot 'RELEASE_NOTES.md') -Destination (Join-Path $taskOutput 'RELEASE_NOTES.md')
 if (Test-Path -LiteralPath (Join-Path $taskRoot 'TEST_REPORT.md')) {
     Copy-Item -LiteralPath (Join-Path $taskRoot 'TEST_REPORT.md') -Destination (Join-Path $taskOutput '测试报告.md')

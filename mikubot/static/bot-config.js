@@ -9,14 +9,8 @@
     const template=document.createElement("template");template.innerHTML=html;
     return template.content.querySelector(`#${id}`)?.outerHTML || "";
   }
-  function admission(sectionName,prefix) {
-    const config=state.settings[sectionName] || {};
-    return `<div class="admission-policy" data-policy-prefix="${prefix}">${select(prefix+"_chat_policy","聊天接收规则",[["blacklist","黑名单：接收未被屏蔽的聊天（推荐）"],["whitelist","白名单：只接收指定聊天"]],config.chat_policy || "whitelist","data-full")}<p class="help-caption">黑名单可留空，不用逐个填写聊天。旧白名单会保留，切换黑名单后开始接收其他未屏蔽的聊天。</p><details class="details blocked-list"><summary>管理屏蔽列表（可留空）</summary>${textarea(prefix+"_blocked_users",sectionName==="onebot"?"屏蔽的 QQ 号":"屏蔽的用户 OpenID",(config.blocked_users || []).join("\n"),"每行一个。允许聊天不会授予管理员权限。")}${textarea(prefix+"_blocked_groups",sectionName==="onebot"?"屏蔽的 QQ 群号":"屏蔽的群 OpenID",(config.blocked_groups || []).join("\n"),"也可以在“群与会话”中一键屏蔽。")}</details></div>`;
-  }
   function enhanceQQ(html) {
-    const output=html.replace('<div id="onebot-fields">','<div id="onebot-fields">'+admission("onebot","onebot"))
-      .replace('<div id="official-fields">','<div id="official-fields">'+admission("qq_official","official"));
-    const template=document.createElement("template");template.innerHTML=output;
+    const template=document.createElement("template");template.innerHTML=html;
     const grid=template.content.querySelector('#onebot-fields>.form-grid');
     if(grid){
       const lists=['owner_ids','allowed_groups'].map(name=>grid.querySelector(`[name="${name}"]`)?.closest('.field')).filter(Boolean);
@@ -34,10 +28,11 @@
   };
   experience.renderPersonas=async()=>{
     const tab=state.botTab || "basic";
-    const tabs=[["basic","基本配置"],["models","模型"],["reply","回复与记忆"],["qq","QQ 连接"],["computer","电脑与管理员"],["personas","人格库"],["stickers","表情包"]];
+    const tabs=[["basic","基本配置"],["models","模型"],["search","网页搜索"],["reply","回复与记忆"],["qq","QQ 连接"],["computer","电脑与管理员"],["personas","人格库"],["stickers","表情包"]];
     let body;
     if(tab==="basic")body=await experience.profilePanel()+identitySection()+timeAwarenessSection()+`<section class="panel settings-section"><h2>默认聊天模型</h2><p>${e(configuredModel().model || "尚未配置")}</p>${button("配置模型与供应商","go-model-sources","primary","spark")}</section>`;
     else if(tab==="models")body=await window.MikubotBotModels.render();
+    else if(tab==="search")body=await window.MikubotWebSearch.render();
     else if(tab==="reply"){
       const settings=await settingsPage();
       body=window.MikubotFeatures.debounceSection()+outputSection()+`<details class="panel settings-section"><summary>高级 · 判断预算与记忆检索</summary>${plannerSection()+section(settings,"memory-settings-section")+section(settings,"context-section")+explorationSection()}</details>`;
@@ -62,7 +57,7 @@
       if(!item)throw new Error("聊天已不存在，请刷新。");
       if(!id.startsWith("web:")){
         const [platform,kind,account]=id.split(":"), key=platform==="qqofficial"?"qq_official":"onebot", cfg=state.settings[key] || {};
-        const list=(cfg.chat_policy || "whitelist")==="blacklist" ? "blocked_" : "allowed_";
+        const list=(cfg.chat_policy || "blacklist")==="blacklist" ? "blocked_" : "allowed_";
         const field=list+(kind==="group"?"groups":"users"), values=new Set(cfg[field] || []);
         const add=list==="blocked_"?!blocked:blocked;
         if(add)values.add(account);else values.delete(account);

@@ -18,6 +18,34 @@ from .profiles import DEFAULT_PROFILES
 from .timezones import config_zone
 
 
+SEARCH_ENDPOINTS = {
+    'tavily': 'https://api.tavily.com/search',
+    'deepseek': 'https://api.deepseek.com/v1/tools/search',
+    'brave': 'https://api.search.brave.com/res/v1/web/search',
+}
+
+
+def validate_search_endpoint(value):
+    if not isinstance(value, str) or not 1 <= len(value) <= 2000 or any(ord(char) < 33 for char in value):
+        raise ValueError('搜索服务地址须为公开 HTTPS 地址')
+    try:
+        parsed = urlsplit(value)
+        host = (parsed.hostname or '').rstrip('.').encode('idna').decode().lower()
+        if (parsed.scheme != 'https' or not host or parsed.username is not None or parsed.password is not None
+                or parsed.query or parsed.fragment or parsed.port not in (None, 443)
+                or host == 'localhost' or host.endswith(('.localhost', '.local', '.internal'))):
+            raise ValueError()
+        try:
+            address = ipaddress.ip_address(host)
+        except ValueError:
+            address = None
+        if address is not None and not address.is_global:
+            raise ValueError()
+    except (ValueError, UnicodeError):
+        raise ValueError('搜索服务地址须为公开 HTTPS 地址，不能包含凭据、查询参数或内部地址') from None
+    return value
+
+
 DEFAULTS = {
     'bot_profiles': DEFAULT_PROFILES,
     'model': {'base_url': '', 'model': '', 'api_key': '', 'vision': False,
@@ -50,6 +78,9 @@ DEFAULTS = {
     'computer': {'enabled':False, 'runtime':'docker', 'workspace':'', 'max_steps':12, 'timeout_seconds':60, 'max_output_chars':16000, 'approval_mode':'automatic', 'allow_external_tools':False},
     'providers': [],
     'provider_sources': [],
+    'search': {'enabled': True, 'provider': 'public', 'timeout_seconds': 12,
+               'max_results': 5, 'daily_calls': 100, 'fallback_public': False},
+    'search_providers': [],
     'mcp_servers': [],
     'identity': {'name':'初音未来','aliases':['初音','miku'], 'respond_to_at':True,'respond_to_reply':True,'respond_to_name':True,
                  'planner_enabled':True,'proactive_enabled':True},
@@ -290,6 +321,10 @@ class Settings:
                 self._data[section][key] = self._decode_secret(self._data[section].get(key, ''))
             except Exception as exc:
                 raise ValueError('配置密钥无法读取') from exc
+        for item in self._data.get('search_providers', []):
+            if not isinstance(item, dict):
+                raise ValueError('搜索服务配置无效')
+            item['api_key'] = self._decode_secret(item.get('api_key', ''))
         providers = self._data.get('providers', [])
         sources = self._data.get('provider_sources', [])
         self._data['provider_sources'] = []
@@ -332,7 +367,7 @@ class Settings:
         except ValueError:
             self._data['model']['base_url'] = ''
             self.warning = '模型地址含不支持的凭据或参数，已清空；请使用独立 API 密钥字段重新配置'
-        self._data = self.update({}, dry_run=True)
+        self._data = self.update({'search_providers': self._data['search_providers']}, dry_run=True)
         if self.warning:
             self._preserve_original()
             self._data['paused'] = True
@@ -389,6 +424,8 @@ class Settings:
         for item in data['providers']:
             item['api_key_set'] = bool(item.pop('api_key', ''))
         for item in data['provider_sources']:
+            item['api_key_set'] = bool(item.pop('api_key', ''))
+        for item in data['search_providers']:
             item['api_key_set'] = bool(item.pop('api_key', ''))
         for item in data['mcp_servers']:
             item['token_set'] = bool(item.pop('token', ''))
@@ -449,7 +486,43 @@ class Settings:
             for section in DEFAULTS:
                 if section not in patch:
                     continue
-                if section == 'mcp_servers':
+                if section == 'search_providers':
+                    items = patch[section]
+                    if not isinstance(items, list) or len(items) > len(SEARCH_ENDPOINTS):
+                        raise ValueError('搜索服务最多配置三个预设供应商')
+                    previous = {item['id']: dict(item) for item in updated['search_providers']}
+                    seen = set()
+                    for item in items:
+                        if (not isinstance(item, dict) or set(item) - {'id', 'base_url', 'api_key', 'clear_api_key', 'api_key_set'}
+                                or not isinstance(item.get('id'), str) or item['id'] not in SEARCH_ENDPOINTS or item['id'] in seen):
+                            raise ValueError('搜索服务 ID 须为唯一的 tavily、deepseek 或 brave')
+                        key = item['id']
+                        seen.add(key)
+                        prior = previous.get(key, {})
+                        value = {'id': key, 'base_url': prior.get('base_url') or SEARCH_ENDPOINTS[key],
+                                 'api_key': prior.get('api_key', '')}
+                        for field in ('base_url', 'api_key'):
+                            if field in item:
+                                if not isinstance(item[field], str):
+                                    raise ValueError('搜索服务地址与密钥须为字符串')
+                                if field == 'base_url':
+                                    value[field] = item[field] or SEARCH_ENDPOINTS[key]
+                                    validate_search_endpoint(value[field])
+                                elif item[field].strip():
+                                    if any(ord(char) < 32 or ord(char) == 127 for char in item[field]):
+                                        raise ValueError('搜索服务密钥格式无效')
+                                    value[field] = item[field].strip()
+                        for field in ('clear_api_key', 'api_key_set'):
+                            if field in item and type(item[field]) is not bool:
+                                raise ValueError('搜索服务密钥开关须为布尔值')
+                        if item.get('clear_api_key'):
+                            value['api_key'] = ''
+                        validate_search_endpoint(value['base_url'])
+                        if len(value['api_key']) > 4000 or any(ord(char) < 32 or ord(char) == 127 for char in value['api_key']):
+                            raise ValueError('搜索服务密钥格式无效')
+                        previous[key] = value
+                    updated[section] = list(previous.values())
+                elif section == 'mcp_servers':
                     items = patch[section]
                     if not isinstance(items, list) or len(items) > 8:
                         raise ValueError('MCP 服务最多 8 个')
@@ -510,6 +583,8 @@ class Settings:
                 elif isinstance(DEFAULTS[section], dict):
                     if not isinstance(patch[section], dict):
                         raise ValueError('配置段必须为对象')
+                    if section == 'search' and set(patch[section]) - set(DEFAULTS['search']):
+                        raise ValueError('搜索设置包含不支持的字段')
                     for key, value in patch[section].items():
                         if key not in DEFAULTS[section]:
                             continue
@@ -525,6 +600,20 @@ class Settings:
                 else:
                     updated[section] = bool(patch[section])
             model = updated['model']
+            search = updated['search']
+            if set(search) != set(DEFAULTS['search']):
+                raise ValueError('搜索设置包含不支持的字段')
+            if type(search['enabled']) is not bool or type(search['fallback_public']) is not bool:
+                raise ValueError('搜索开关须为布尔值')
+            if search['provider'] not in ('public', *SEARCH_ENDPOINTS):
+                raise ValueError('搜索服务须为 public、tavily、deepseek 或 brave')
+            for key, low, high in (('timeout_seconds', 1, 60), ('max_results', 1, 10), ('daily_calls', 0, 100000)):
+                if type(search[key]) is not int or not low <= search[key] <= high:
+                    raise ValueError(f'搜索 {key} 须为 {low}—{high} 的整数')
+            for item in updated['search_providers']:
+                if not isinstance(item, dict) or not isinstance(item.get('id'), str) or item['id'] not in SEARCH_ENDPOINTS:
+                    raise ValueError('搜索服务配置无效')
+                validate_search_endpoint(item.get('base_url'))
             source_ids = {x['id'] for x in updated['provider_sources']}
             for item in updated['providers']:
                 if not isinstance(item['source_id'],str) or (item['source_id'] and item['source_id'] not in source_ids):
@@ -800,6 +889,8 @@ class Settings:
         for provider in raw['providers']:
             provider['api_key'] = _protect(provider['api_key'])
         for source in raw['provider_sources']:
+            source['api_key'] = _protect(source['api_key'])
+        for source in raw['search_providers']:
             source['api_key'] = _protect(source['api_key'])
         for server in raw['mcp_servers']:
             server['token'] = _protect(server['token'])

@@ -70,17 +70,32 @@ class ContextEngine:
             return chat_allowed(cfg, 'qqofficial' if section == 'qq_official' else 'onebot', 'group', parts[2])
         return parts[1] == 'private' and private_allowed(cfg, 'qqofficial' if section == 'qq_official' else 'onebot', parts[2])
 
-    def _projection(self, scope_id, user_id, *, memory_ids=None):
+    def _projection(self, scope_id, user_id, *, memory_ids=None, jargon_ids=None):
         blocked = self.store.blocked_memory_sources(scope_id)
-        memories = {record["id"]: record for record in self.store.visible_memories(scope_id, user_id,
-                    scope_allowed=lambda origin: self._permission(origin, user_id), record_ids=memory_ids) if self._reference_allowed(record, scope_id, user_id)}
         scope = self.store.get_scope(scope_id)
-        jargon = {record["id"]: record for record in self.store.list_jargon(scope_id=scope_id, status="approved")
-                  if record.get("entry_type", "jargon") == "expression"
-                  and scope.get("expression_use", False) and record.get("use_allowed", False)}
-        if scope.get("dictionary_understand", True):
-            jargon.update({record["id"]: record for record in self.store.list_jargon(scope_id=scope_id, status="approved")
-                           if record.get("entry_type", "jargon") != "expression"})
+        automatic_digest = bool(_config(self.settings).get('context', {}).get('enabled', False)
+                                and scope.get('context_compress', False))
+        memories = {record["id"]: record for record in self.store.visible_memories(scope_id, user_id,
+                    scope_allowed=lambda origin: self._permission(origin, user_id), record_ids=memory_ids)
+                    if self._reference_allowed(record, scope_id, user_id)
+                    and (automatic_digest or record.get('property') != 'conversation_digest' or record.get('manual_digest'))}
+        candidates = (self.store.list_jargon(scope_id=scope_id, status="approved") if jargon_ids is None
+                      else self.store.list_jargon(status="approved", record_ids=jargon_ids))
+        jargon, origins = {}, {}
+        for record in candidates:
+            expression = record.get('entry_type', 'jargon') == 'expression'
+            if (not self.store.jargon_visible(scope_id, record)
+                    or (expression and not (scope.get('expression_use', False) and record.get('use_allowed', False)))
+                    or (not expression and not scope.get('dictionary_understand', True))):
+                continue
+            origin = record['scope_id']
+            if origin not in origins:
+                origins[origin] = (self._permission(origin, user_id), self.store.blocked_memory_sources(origin))
+            allowed, withdrawn = origins[origin]
+            source_ids = record.get('source_ids', [])
+            if not allowed or set(source_ids) & withdrawn or not self.store.message_sources_current(origin, source_ids):
+                continue
+            jargon[record['id']] = record
         return blocked, memories, jargon
 
     def _manifest(self, scope_id, user_id, history, *, projection=None):
@@ -96,7 +111,7 @@ class ContextEngine:
         if projection is None:
             # Only memory IDs referenced by this history and its source closure
             # are needed. Ordinary messages must not load every saved fact.
-            memory_ids, seen, pending = set(), set(), list(history)
+            memory_ids, jargon_ids, seen, pending = set(), set(), set(), list(history)
             while pending:
                 record = pending.pop()
                 if not isinstance(record, dict) or record.get('id') in seen:
@@ -106,6 +121,8 @@ class ContextEngine:
                 if not isinstance(metadata, dict): continue
                 versions = metadata.get('memory_versions', {})
                 if isinstance(versions, dict): memory_ids.update(versions)
+                versions = metadata.get('jargon_versions', {})
+                if isinstance(versions, dict): jargon_ids.update(versions)
                 for field in ('context_source_ids', 'source_ids'):
                     values = metadata.get(field) or []
                     if not isinstance(values, list): continue
@@ -116,7 +133,7 @@ class ContextEngine:
                         ancestor = load(key)
                         if ancestor and ancestor.get('scope_id') == scope_id:
                             pending.append(ancestor)
-            projection = self._projection(scope_id, user_id, memory_ids=memory_ids)
+            projection = self._projection(scope_id, user_id, memory_ids=memory_ids, jargon_ids=jargon_ids)
         blocked, memories, jargon = projection
         public = scope_id.startswith(("qq:group:", "qqofficial:group:"))
         valid, sources, memory_versions, jargon_versions = [], {}, {}, {}
@@ -202,13 +219,12 @@ class ContextEngine:
             if not current or current.get("version") != summary.get("version"):
                 # A concurrent invalidation must not discard still-valid raw
                 # messages merely because they were covered a moment earlier.
-                restored = []
-                for record_id in summary.get("covered_message_ids", []):
-                    try:
-                        restored.append(self.store.get_message(record_id))
-                    except KeyError:
-                        pass
-                valid, sources, memories, jargon = self._manifest(scope_id, user_id, restored + valid)
+                # Older digests saved covered IDs through a set, so their order
+                # is not a timeline. Resolve the whole fallback in canonical
+                # database order, including insertion order for timestamp ties.
+                restored = self.store.ordered_messages(
+                    [*summary.get("covered_message_ids", []), *(record['id'] for record in valid)], scope_id=scope_id)
+                valid, sources, memories, jargon = self._manifest(scope_id, user_id, restored)
                 summary = None
             else:
                 memories.update(current.get("dependencies", {}))
@@ -242,6 +258,53 @@ class ContextEngine:
             return self._denied()
         return self._result(scope_id, str(user_id), records, reason='retrieved')
 
+    def reference_guard(self, scope_id, user_id, records):
+        """Prepare provenance once, then recheck rows and live authority cheaply.
+
+        The complete legacy ancestor graph is still validated during preparation.
+        Every subsequent call reads its exact rows and fresh dependency projection;
+        new unrelated traffic cannot invalidate it, and there is no TTL window in
+        which an edited, deleted, expired or withdrawn source can be reused.
+        """
+        user_id = str(user_id)
+        if not self._permission(scope_id, user_id):
+            return lambda: False
+        valid, sources, memories, jargon = self._manifest(scope_id, user_id, records)
+        if len(valid) != len(records):
+            return lambda: False
+        fingerprints = {key: message_fingerprint(record) for key, record in sources.items()}
+        snapshot = self.store.message_source_snapshot(scope_id, fingerprints)
+        if snapshot is None:
+            return lambda: False
+        # Many historical replies cite the same knowledge. Keep each dependency
+        # combination once while retaining the original reference policy callback.
+        knowledge = {}
+        for record in sources.values():
+            metadata = record.get('metadata') or {}
+            if metadata.get('knowledge_refs'):
+                value = {key: metadata[key] for key in ('persona_id', 'knowledge_refs') if key in metadata}
+                knowledge[json.dumps(value, sort_keys=True)] = value
+
+        def current():
+            if (not self._permission(scope_id, user_id)
+                    or not self.store.message_source_snapshot_current(scope_id, snapshot)):
+                return False
+            blocked, visible_memories, visible_jargon = self._projection(scope_id, user_id,
+                                                                       memory_ids=memories, jargon_ids=jargon)
+            if set(snapshot) & blocked:
+                return False
+            if any(visible_memories.get(key, {}).get('version') != version for key, version in memories.items()):
+                return False
+            if (not _config(self.settings).get('context', {}).get('enabled', False)
+                    and any(record.get('property') == 'conversation_digest' and not record.get('manual_digest')
+                            for record in visible_memories.values())):
+                return False
+            if any(visible_jargon.get(key, {}).get('version') != version for key, version in jargon.items()):
+                return False
+            return all(self._reference_allowed(reference, scope_id, user_id) for reference in knowledge.values())
+
+        return current
+
     async def _build(self, scope_id, user_id, history, *, max_chars=None, force=False):
         history = list(history)
         if not self._permission(scope_id, user_id):
@@ -252,7 +315,8 @@ class ContextEngine:
         if not force and not (context_cfg.get("enabled", False) and scope.get("context_compress", False)):
             return self._result(scope_id, user_id, history, reason="disabled")
         existing = self._latest_summary(scope_id, user_id)
-        covered = set(existing.get("covered_message_ids", [])) if existing else set()
+        covered_ids = existing.get("covered_message_ids", []) if existing else []
+        covered = set(covered_ids)
         remaining = [record for record in history if record["id"] not in covered]
         threshold = _integer(context_cfg.get("trigger_messages", scope.get("context_threshold_messages")), 60, 2, MAX_HISTORY)
         char_threshold = _integer(context_cfg.get("max_chars", scope.get("context_threshold_chars")), 18000, 1000, 200000)
@@ -338,7 +402,8 @@ class ContextEngine:
                 "derived": True, "manual_digest": force, "status": "active", "content": text, "confidence": 0.7, "importance": 0.35,
                 "source_ids": sorted(sources), "source_fingerprints": fingerprints, "dependencies": memories, "jargon_dependencies": jargon,
                 "knowledge_refs": knowledge_refs, "persona_id":scope.get('persona_id','default'),
-                "covered_message_ids": list(dict.fromkeys(list(covered) + [record["id"] for record in selected])),
+                "covered_message_ids": [record['id'] for record in self.store.ordered_messages(
+                    [*covered_ids, *(record['id'] for record in selected)], scope_id=scope_id)],
                 "participants": sorted({record["user_id"] for record in sources.values() if record["role"] == "user"}),
                 "event_time_start": min(record["created_at"] for record in sources.values()), "event_time_end": max(record["created_at"] for record in sources.values()),
                 "summary_of": existing["id"] if existing else None})

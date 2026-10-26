@@ -46,18 +46,54 @@ class DesktopShell:
         self.data_dir = Path(data_dir)
         self.stop = stop
         self.keep_in_tray = keep_in_tray
+        self.tray_available = None
         self.hidden = hidden
         self.window = None
         self.exiting = threading.Event()
         self.ready = threading.Event()
+        self._show_requested = threading.Event()
         self._navigation_handlers = []
         self._startup_error = None
 
     def show(self):
-        if self.ready.wait(10) and self.window and not self.exiting.is_set():
-            self.window.show()
-            self.window.restore()
-            # show/restore activate the native form; a minimized window is visible again.
+        if self.exiting.is_set():
+            return
+        self._show_requested.set()
+        self.hidden = False
+        if self.window:
+            self.window.hidden = False
+
+    def on_tray_visibility(self, available):
+        self.keep_in_tray = available
+        if not available:
+            self.show()
+
+    def _can_hide_in_tray(self):
+        return self.keep_in_tray and (self.tray_available is None or self.tray_available())
+
+    def _show_when_created(self, native_created):
+        # WinForms fires both before_show and shown before its initial Hide().
+        # Wait for the end of that sequence off the GUI thread, without dropping
+        # requests made during slow WebView startup or before self.window exists.
+        while not self.exiting.is_set():
+            if native_created.wait(.1):
+                break
+        if self.exiting.is_set():
+            return
+        if self.hidden and not self._can_hide_in_tray():
+            self.show()
+        while not self.exiting.is_set():
+            if not self._show_requested.wait(.1):
+                continue
+            self._show_requested.clear()
+            if self.exiting.is_set():
+                return
+            try:
+                self.window.show()
+                if not self.exiting.is_set():
+                    self.window.restore()
+            except Exception:
+                logging.exception('桌面窗口显示失败')
 
     def refresh_auth(self):
         if self.ready.wait(10) and self.window and not self.exiting.is_set():
@@ -73,7 +109,7 @@ class DesktopShell:
                 logging.exception('桌面窗口退出失败')
 
     def _closing(self):
-        if self.keep_in_tray and not self.exiting.is_set():
+        if not self.exiting.is_set() and self._can_hide_in_tray():
             self.window.hide()
             return False
         self.exiting.set()
@@ -121,7 +157,7 @@ class DesktopShell:
             raise RuntimeError('桌面窗口必须在主线程启动')
         try:
             import webview
-            from webview.platforms.winforms import _is_chromium
+            from webview.platforms.winforms import _is_chromium, _main_window_created
             if not _is_chromium():
                 raise DesktopUnavailable('未检测到 WebView2 Runtime 或 .NET Framework 4.6.2。')
         except DesktopUnavailable:
@@ -134,7 +170,8 @@ class DesktopShell:
         webview.settings['REMOTE_DEBUGGING_PORT'] = None
         self.window = webview.create_window('mikubot', self.url, width=1240, height=820,
                                             min_size=(900, 620), background_color='#f5faf9',
-                                            js_api=None, text_select=True, hidden=self.hidden)
+                                            js_api=None, text_select=True,
+                                            hidden=bool(self.hidden and self._can_hide_in_tray()))
         self.window.events.closing += self._closing
         def protect():
             try:
@@ -145,6 +182,8 @@ class DesktopShell:
                 threading.Thread(target=self.close, daemon=True).start()
         self.window.events.before_show += protect
         self.window.events.before_show += self.ready.set
+        threading.Thread(target=self._show_when_created, args=(_main_window_created,),
+                         name='mikubot-window-show', daemon=True).start()
 
         if server_alive:
             def watch_server():

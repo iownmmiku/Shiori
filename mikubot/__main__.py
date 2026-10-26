@@ -267,6 +267,7 @@ def _run_instance(data, args, parser):
             for value in (settings.token, cfg['model'].get('api_key'), cfg['onebot'].get('access_token'),
                           cfg['qq_official'].get('app_secret'), *(x.get('api_key') for x in cfg.get('providers', [])),
                           *(x.get('api_key') for x in cfg.get('provider_sources', [])),
+                          *(x.get('api_key') for x in cfg.get('search_providers', [])),
                           *(x.get('token') for x in cfg.get('mcp_servers', []))):
                 if value:
                     text = text.replace(value, '[已脱敏]')
@@ -323,7 +324,7 @@ def _run_instance(data, args, parser):
             image = tray_image()
             def toggle_pause(*_):
                 settings.update({'paused': not settings.get()['paused']})
-            icon = pystray.Icon('mikubot', image, 'mikubot · 本地 AI 群友', menu=pystray.Menu(
+            native_icon = pystray.Icon('mikubot', image, 'mikubot · 本地 AI 群友', menu=pystray.Menu(
                 pystray.MenuItem('打开主界面' if shell else '在浏览器打开', open_ui, default=True),
                 pystray.MenuItem('在浏览器打开', lambda *_: webbrowser.open(url), visible=bool(shell)),
                 pystray.MenuItem('暂停机器人', toggle_pause, checked=lambda _: settings.get()['paused']),
@@ -331,25 +332,12 @@ def _run_instance(data, args, parser):
                 pystray.MenuItem('查看运行日志', lambda *_: os.startfile(str(data / 'runtime.log'))),
                 pystray.MenuItem('重置 WebUI 密码', reset_password),
                 pystray.MenuItem('退出 mikubot', quit_app)))
-            tray_ready = threading.Event()
-            def tray_setup(tray_icon):
-                tray_icon.visible = True
-                tray_ready.set()
-            def tray_run(tray_icon):
-                try:
-                    tray_icon.run(setup=tray_setup)
-                except Exception:
-                    logging.exception('系统托盘停止工作，主窗口关闭后将完整退出。')
-                finally:
-                    if shell:
-                        shell.keep_in_tray = False
-                        if not shell.exiting.is_set():
-                            shell.show()
-            threading.Thread(target=tray_run, args=(icon,), daemon=True).start()
-            if not tray_ready.wait(3):
-                icon.stop()
+            from .system_tray import SystemTray
+            icon = SystemTray(native_icon, on_visibility=shell.on_tray_visibility if shell else None)
+            if not icon.start():
                 raise RuntimeError('系统托盘未能就绪')
             if shell:
+                shell.tray_available = icon.is_available
                 shell.keep_in_tray = True
                 shell.hidden = bool(args.minimized)
         except Exception:

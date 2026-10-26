@@ -97,6 +97,7 @@ async def test_reply_queries_share_one_semantic_deadline(tmp_path):
     chat = object.__new__(ChatService)
     chat.store, chat.memory = store, engine
     chat.settings = SimpleNamespace(get=lambda: cfg)
+    chat.social = SimpleNamespace(_allowed=lambda scope_id: True)
     try:
         # Build the lexical index before timing the shared online budget.
         await engine._rank_async('web:default', 'owner', cfg, '咖啡')

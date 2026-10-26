@@ -41,7 +41,7 @@ class Provider:
             await self.blocker.wait()
         if kwargs['purpose'] == 'planner':
             payload = json.loads(messages[-1]['content'])
-            text = payload['history'][-1]['text']
+            text = payload['current_message_text']
             signals = payload['signals']
             reply = any(signals.values()) or text.endswith(('?', '？'))
             result = {'action': 'reply' if reply else 'skip', 'target_message_id': payload['current_message_id'],
@@ -242,7 +242,7 @@ async def test_topic_move_during_model_reply_suppresses_old_unsolicited_answer(s
     store.upsert_scope({'id': 'qq:group:202', 'activity': 'active', 'merge_window_ms': 0, 'plan_enabled': True})
     chat.blocker = asyncio.Event()
     first = asyncio.create_task(bridge.handle_event(event(1, '电脑显示器如何维修？')))
-    await chat.entered.wait()
+    await asyncio.wait_for(chat.entered.wait(), 3)
     for index, text in enumerate(['今晚火锅菜单', '牛肉羊肉都想吃', '餐厅已经预定好了']):
         await bridge.handle_event(event(10 + index, text, user=404 + index % 2))
     chat.blocker.set()

@@ -79,7 +79,7 @@ async def test_memory_command_owns_only_its_original_and_chat_has_one_model_call
         command = next(item for item in originals if item['content'].startswith('记住'))
         assert memories[0]['source_ids'] == [command['id']]
         assert len(model.calls) == 1 and model.calls[0][-1]['content'] == '今天聊什么'
-        references = next(item['content'] for item in model.calls[0] if 'completed_commands' in str(item['content']) and '以下是当前允许' in str(item['content']))
+        references = next(item['content'] for item in model.calls[0] if str(item['content']).startswith('【本轮回复计划与命令回执】'))
         receipts = json.loads(references.split('\n', 1)[1])['completed_commands']
         assert receipts == [{'source_id': command['id'], 'reply': '已记住：我喜欢咖啡\n可在记忆页纠正或删除。'}]
         assert '已记住：我喜欢咖啡' in result['reply'] and '今天聊聊音乐吧。' in result['reply']

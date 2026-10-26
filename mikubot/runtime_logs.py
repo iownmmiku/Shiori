@@ -17,7 +17,7 @@ def install_logs(app, settings, store, data_dir):
     def redact(text):
         cfg = settings.get()
         secrets = [settings.token, cfg['model'].get('api_key'), cfg['onebot'].get('access_token'), cfg['qq_official'].get('app_secret')]
-        secrets += [x.get('api_key') for x in [*cfg.get('providers',[]), *cfg.get('provider_sources',[])]]
+        secrets += [x.get('api_key') for x in [*cfg.get('providers',[]), *cfg.get('provider_sources',[]), *cfg.get('search_providers',[])]]
         secrets += [x.get('token') for x in cfg.get('mcp_servers',[])]
         value = str(text)
         for secret in secrets:

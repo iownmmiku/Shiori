@@ -31,4 +31,4 @@ desktop = ["pystray==0.19.5; sys_platform == 'win32'", "pywebview==6.2.1; sys_pl
 include = ["mikubot*", "qunyu*"]
 
 [tool.setuptools.package-data]
-mikubot = ["static/*", "static/assets/brand/*", "resources/*.ps1", "resources/csp/*", "resources/csp/references/*"]
+mikubot = ["static/*", "static/assets/brand/*", "resources/*.ps1", "resources/*.cmd", "resources/csp/*", "resources/csp/references/*"]

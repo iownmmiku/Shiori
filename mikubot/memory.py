@@ -942,8 +942,9 @@ class MemoryEngine:
     def profile(self, scope_id: str, user_id: str) -> dict:
         return self.store.profile(scope_id, str(user_id))
 
-    def ingest_candidates(self, records: list[dict], *, scope_id: str, user_id: str, source_ids: list[str]) -> list[dict]:
-        return self.store.ingest_memory_candidates(records, scope_id=scope_id, user_id=str(user_id), source_ids=source_ids)
+    def ingest_candidates(self, records: list[dict], *, scope_id: str, user_id: str, source_ids: list[str], before_write=None) -> list[dict]:
+        return self.store.ingest_memory_candidates(records, scope_id=scope_id, user_id=str(user_id),
+                                                   source_ids=source_ids, before_write=before_write)
 
     def conflicts(self, id: str) -> list[dict]:
         return self.store.memory_conflicts(id)
@@ -1053,41 +1054,58 @@ class MemoryEngine:
     def _related(self, scope_id, user_id, seeds, limit=4, with_hash=False):
         if not seeds or limit <= 0:
             return []
-        relations = self.store.memory_property_records(scope_id, 'memory_relation', 'active', include_shared=True)
-        if not relations:
-            return []
-        roots = [item['id'] for item in relations] + [item['id'] for item in seeds]
-        roots += [key for item in relations for key in (item.get('from_id'), item.get('to_id')) if key]
-        current = self._visible(scope_id, user_id, record_ids=roots)
-        edges = [item for item in current.values() if item.get("property") == "memory_relation"]
-        adjacency = {}
-        for edge in edges:
-            for left, right in ((edge["from_id"], edge["to_id"]), (edge["to_id"], edge["from_id"])):
-                adjacency.setdefault(left, []).append((right, edge))
+        current = self._visible(scope_id, user_id, record_ids=[item['id'] for item in seeds[:4]])
         seen = {item["id"] for item in seeds}
-        queue = [(item["id"], [item["id"]], {item["id"]: item["version"]}, 0) for item in seeds[:4] if item["id"] in current]
+        queue = [(item["id"], [item["id"]], {item["id"]: item["version"]}, 0) for item in seeds[:4]
+                 if item["id"] in current and current[item['id']]['version'] == item['version']]
         result = []
         while queue and len(result) < limit:
             node_id, path, versions, depth = queue.pop(0)
             if depth >= 2:
                 continue
-            for endpoint_id, edge in sorted(adjacency.get(node_id, []), key=lambda item: item[1]["id"]):
-                if endpoint_id in seen or endpoint_id not in current:
-                    continue
-                seen.add(endpoint_id)
-                endpoint = current[endpoint_id]
-                new_path = path + [edge["id"], endpoint_id]
-                deps = {**versions, edge["id"]: edge["version"], endpoint_id: endpoint["version"]}
-                result.append({**endpoint, "memory_id": endpoint_id, "chunk_index": 0,
-                    **({'_validation_hash': _record_hash(endpoint)} if with_hash else {}),
-                    "content": endpoint["content"][:CHUNK_SIZE], "excerpt": endpoint["content"][:CHUNK_SIZE],
-                    "content_truncated": len(endpoint["content"]) > CHUNK_SIZE,
-                    "original_content_length": len(endpoint["content"]), "related": True,
-                    "reason": f"已审核关系：{edge['label']}（{depth + 1} 跳）", "path_ids": new_path,
-                    "memory_versions": deps, "retrieval": {"mode": "relation", "hops": depth + 1,
-                        "reasons": ["通过当前可见的已审核关系检索"], "citation": {"memory_id": endpoint_id, "version": endpoint["version"]}}})
-                queue.append((endpoint_id, new_path, deps, depth + 1))
-                if len(result) >= limit:
+            after_id = None
+            page_size = 32
+            while len(result) < limit:
+                config = self._config()
+                edges = self.store.memory_relations_for_node(scope_id, user_id, node_id,
+                    after_id=after_id, limit=page_size, scope_allowed=lambda origin: self._permission(origin, config))
+                if not edges:
+                    break
+                roots = set(versions) | {edge['id'] for edge in edges}
+                roots.update(key for edge in edges for key in (edge.get('from_id'), edge.get('to_id')) if key)
+                current = self._visible(scope_id, user_id, record_ids=roots)
+                if any(key not in current or current[key]['version'] != version for key, version in versions.items()):
+                    break
+                for candidate in edges:
+                    edge = current.get(candidate['id'])
+                    if not edge or edge.get('property') != 'memory_relation':
+                        continue
+                    if edge.get('from_id') == node_id:
+                        endpoint_id = edge.get('to_id')
+                    elif edge.get('to_id') == node_id:
+                        endpoint_id = edge.get('from_id')
+                    else:
+                        continue
+                    if endpoint_id in seen or endpoint_id not in current:
+                        continue
+                    seen.add(endpoint_id)
+                    endpoint = current[endpoint_id]
+                    new_path = path + [edge["id"], endpoint_id]
+                    deps = {**versions, edge["id"]: edge["version"], endpoint_id: endpoint["version"]}
+                    result.append({**endpoint, "memory_id": endpoint_id, "chunk_index": 0,
+                        **({'_validation_hash': _record_hash(endpoint)} if with_hash else {}),
+                        "content": endpoint["content"][:CHUNK_SIZE], "excerpt": endpoint["content"][:CHUNK_SIZE],
+                        "content_truncated": len(endpoint["content"]) > CHUNK_SIZE,
+                        "original_content_length": len(endpoint["content"]), "related": True,
+                        "reason": f"已审核关系：{edge['label']}（{depth + 1} 跳）", "path_ids": new_path,
+                        "memory_versions": deps, "retrieval": {"mode": "relation", "hops": depth + 1,
+                            "reasons": ["通过当前可见的已审核关系检索"], "citation": {"memory_id": endpoint_id, "version": endpoint["version"]}}})
+                    queue.append((endpoint_id, new_path, deps, depth + 1))
+                    if len(result) >= limit:
+                        break
+                # Invalid or already-seen edges must not hide later valid ones.
+                after_id = edges[-1]['id']
+                if len(edges) < page_size:
                     break
         return result
 

@@ -113,6 +113,7 @@ class ToolActions:
         secrets = [getattr(self.settings, 'token', ''), cfg['model'].get('api_key'), cfg['onebot'].get('access_token'), cfg['qq_official'].get('app_secret')]
         secrets += [x.get('api_key') for x in cfg.get('providers', [])] + [x.get('token') for x in cfg.get('mcp_servers', [])]
         secrets += [x.get('api_key') for x in cfg.get('provider_sources', [])]
+        secrets += [x.get('api_key') for x in cfg.get('search_providers', [])]
         def clean(item):
             if isinstance(item, str):
                 for secret in secrets:

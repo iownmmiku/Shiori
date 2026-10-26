@@ -26,7 +26,8 @@ from .chat import ChatService
 from .db import Store
 from .provider import Provider
 from .settings import Settings, resolve_model, DEFAULTS
-from .tools import calculate, read_public, search_public
+from .search import SearchError
+from .tools import calculate, read_public
 
 
 def create_app(data_dir=None, *, start_workers=True, allow_remote=False):
@@ -84,6 +85,7 @@ def create_app(data_dir=None, *, start_workers=True, allow_remote=False):
     app = FastAPI(title='mikubot', version=__version__, lifespan=lifespan, docs_url=None, redoc_url=None)
     install_profiles(app, store, settings)
     app.state.store, app.state.settings, app.state.chat = store, settings, chat
+    app.state.search = chat.search
     app.state.provider, app.state.bridge, app.state.scheduler = provider, router, scheduler
     app.state.onebot, app.state.official = onebot, official
     from .learning_dashboard import install_learning_dashboard
@@ -221,6 +223,10 @@ def create_app(data_dir=None, *, start_workers=True, allow_remote=False):
     @app.exception_handler(ValueError)
     async def bad_value(request, exc):
         return JSONResponse({'detail': str(exc)}, status_code=400)
+
+    @app.exception_handler(SearchError)
+    async def bad_search(request, exc):
+        return JSONResponse({'detail': str(exc), 'code': exc.code}, status_code=400)
 
     @app.exception_handler(KeyError)
     async def missing(request, exc):
@@ -758,8 +764,7 @@ def create_app(data_dir=None, *, start_workers=True, allow_remote=False):
 
     @app.get('/api/context/status')
     async def context_status(scope_id: str = 'web:default', user_id: str = 'owner'):
-        summaries = [x for x in store.visible_memories(scope_id, user_id) if x.get('property') == 'conversation_digest' and x.get('user_id') == user_id]
-        latest = max(summaries, key=lambda x: x['created_at']) if summaries else None
+        latest = await asyncio.to_thread(chat.context._latest_summary, scope_id, user_id)
         return {'summary': latest, 'source_count': len(latest.get('source_ids', [])) if latest else 0,
                 'covered_count': len(latest.get('covered_message_ids', [])) if latest else 0,
                 'last_compacted_at': latest.get('created_at') if latest else None,
@@ -948,7 +953,18 @@ def create_app(data_dir=None, *, start_workers=True, allow_remote=False):
     async def read(payload: dict = Body(...)): return await read_public(str(payload.get('url', '')))
 
     @app.post('/api/tools/search')
-    async def search(payload: dict = Body(...)): return await search_public(str(payload.get('query', '')))
+    async def search(payload: dict = Body(...)):
+        return await chat.search.search(payload.get('query', ''))
+
+    @app.get('/api/search/status')
+    async def search_status():
+        return await asyncio.to_thread(chat.search.status)
+
+    @app.post('/api/search/test')
+    async def search_test(payload: dict = Body(...)):
+        # This is a real query, governed by the same saved configuration and
+        # durable quota as conversational and background searches.
+        return await chat.search.search(payload.get('query', ''))
 
     @app.post('/api/files')
     async def upload(file: UploadFile = File(...), scope_id: str = Form('web:default')):
@@ -1020,7 +1036,7 @@ def create_app(data_dir=None, *, start_workers=True, allow_remote=False):
                 jobs_history=json.loads(archive.read('jobs_history.json')) if 'jobs_history.json' in archive.namelist() else {'version':1,'jobs':[]}
                 RunManager.validate_history(jobs_history)
                 cfg = json.loads(archive.read('settings.json')) if 'settings.json' in archive.namelist() else {}
-                if not isinstance(cfg, dict) or any(section in cfg and not isinstance(cfg[section], dict) for section in ('model', 'onebot', 'qq_official', 'budget', 'memory', 'routing', 'context', 'identity', 'output', 'exploration','planner','access','computer','webui')):
+                if not isinstance(cfg, dict) or any(section in cfg and not isinstance(cfg[section], dict) for section in ('model', 'onebot', 'qq_official', 'budget', 'memory', 'routing', 'context', 'identity', 'output', 'exploration','planner','access','computer','webui','search')):
                     raise ValueError('备份设置格式不正确')
                 cfg['paused'] = True
                 cfg.setdefault('computer',{})['enabled']=False
@@ -1032,6 +1048,13 @@ def create_app(data_dir=None, *, start_workers=True, allow_remote=False):
                 cfg.setdefault('routing', dict(DEFAULTS['routing']))
                 cfg['providers'] = [{**item, 'api_key': '', 'clear_api_key': True} for item in cfg.get('providers', [])]
                 cfg['provider_sources'] = [{**item, 'api_key':'', 'clear_api_key':True} for item in cfg.get('provider_sources', [])]
+                # Search-provider updates merge by ID; explicitly clear keys
+                # already on this machine even when restoring an older backup.
+                search_sources = {item['id']: item for item in [
+                    *settings.get().get('search_providers', []), *cfg.get('search_providers', [])]}
+                cfg['search_providers'] = [{**item, 'api_key':'', 'clear_api_key':True} for item in search_sources.values()]
+                if cfg.get('search', {}).get('provider', 'public') != 'public':
+                    cfg['search']['enabled'] = False
                 cfg['mcp_servers'] = [{**item, 'token': '', 'clear_token':True,'enabled':False} for item in cfg.get('mcp_servers', [])]
                 settings.update(cfg, dry_run=True)
                 previous = settings.get()

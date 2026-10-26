@@ -92,7 +92,7 @@ def source_files(root: Path) -> list[Path]:
                 static = tree == 'mikubot' and relative.parts[0] == 'static'
                 allowed = (path.suffix.casefold() in types
                            or (static and path.suffix.casefold() in STATIC_TYPES)
-                           or (resource and (path.suffix.casefold() in {'.md', '.ps1'} or name in RESOURCE_NOTICES))
+                           or (resource and (path.suffix.casefold() in {'.md', '.ps1', '.cmd'} or name in RESOURCE_NOTICES))
                            or (tree == 'third_party/pystray' and name in {'COPYING', 'COPYING.LGPL'}))
                 if not allowed:
                     continue

@@ -20,6 +20,9 @@ LOCAL_TZ = timezone(timedelta(hours=8))
 MAX_ITEMS = 800
 MAX_FILE_BYTES = 5 * 1024 * 1024
 MAX_BLOCKED_URLS = 3000
+MAX_EXPLORATION_REJECTIONS = 12
+MAX_EXPLORATION_DIAGNOSTIC_BYTES = 128 * 1024
+EXPLORATION_RESULT_REASONS = frozenset({'collected', 'no_relevant_sources', 'no_sources', 'cancelled', 'error'})
 DEFAULT_SOURCES = {'allowed_domains': [], 'blocked_domains': [], 'rss_urls': [], 'manual_urls': [], 'use_bing': True}
 
 TOPIC_GROUPS = {
@@ -32,6 +35,9 @@ TOPIC_GROUPS = {
 }
 TOPIC_STOPWORDS = {'the', 'a', 'an', 'of', 'for', 'and', 'on', 'in', 'about', '最新', '近期', '相关', '资讯', '新闻', '知识', '了解', '介绍'}
 RECOMMENDATION_MARKERS = ('为你推荐', '猜你喜欢', '相关推荐', '相关阅读', '推荐阅读', '更多推荐', '相关搜索', '特别推荐')
+NAVIGATION_LABELS = {'首页', '主页', '登录', '注册', '搜索', '菜单', '导航', '返回', '上一页', '下一页',
+                     '联系我们', '关于我们', '隐私政策', '用户协议', '网站地图', '分享', '收藏', '点赞',
+                     'home', 'login', 'sign in', 'sign up', 'menu', 'search', 'next', 'previous'}
 
 
 def _fold(value):
@@ -42,6 +48,44 @@ def _occurrences(term, text):
     if re.fullmatch(r'[a-z0-9 ]+', term):
         return len(re.findall(r'(?<![a-z0-9])' + re.escape(term) + r'(?![a-z0-9])', text))
     return text.count(term)
+
+
+def _interest_focuses(interest):
+    """Split coordinated topics, preserving quoted titles and short names.
+
+    A connector inside a name such as 千与千寻 has a one-character side;
+    和平精英 has no left side. Neither is a coordinated pair. Quotes let longer
+    titles containing a connector remain an explicit single topic as well.
+    """
+    value = str(interest).strip()
+    pairs = {'《': '》', '「': '」', '『': '』', '“': '”', '"': '"'}
+    stack, positions = [], []
+    for index, char in enumerate(value):
+        if stack and char == stack[-1]:
+            stack.pop()
+            continue
+        if char in pairs:
+            stack.append(pairs[char])
+            continue
+        if not stack:
+            positions.append(index)
+    available = set(positions)
+    for match in re.finditer(r'以及|还有|\band\b|\bor\b|[与和及、，,；;]', value, re.I):
+        if not all(index in available for index in range(match.start(), match.end())):
+            continue
+        left, right = value[:match.start()].strip(), value[match.end():].strip()
+        lexical = lambda text: len(re.findall(r'[\w\u4e00-\u9fff]', text))
+        if lexical(left) < 2 or lexical(right) < 2:
+            continue
+        return list(dict.fromkeys([*_interest_focuses(left), *_interest_focuses(right)]))[:12]
+    return [value] if value else []
+
+
+def _eligible_focuses(interest, excluded):
+    """Apply authored exclusions to each coordinated subject independently."""
+    terms = [str(value).strip().casefold() for value in excluded if str(value).strip()]
+    return [focus for focus in _interest_focuses(interest)
+            if not any(term in focus.casefold() for term in terms)]
 
 
 def _topic_groups(interest):
@@ -61,20 +105,51 @@ def _topic_groups(interest):
     for sequence in re.findall(r'[\u4e00-\u9fff]+', remaining):
         if len(sequence) == 1:
             continue
-        tokens = [sequence] if len(sequence) <= 4 else [sequence[index:index + 2] for index in range(len(sequence) - 1)]
-        groups.extend((token,) for token in tokens if token not in TOPIC_STOPWORDS)
+        # A long phrase is one anchor. Its overlapping character pairs are
+        # evidence of coverage, not independent requirements to be ANDed.
+        if sequence not in TOPIC_STOPWORDS:
+            groups.append((sequence,))
     return groups[:12]
 
 
+def _anchor_hits(group, text):
+    matched = [term for term in group if _occurrences(term, text)]
+    if matched:
+        return matched, sum(_occurrences(term, text) for term in matched)
+    if len(group) != 1:
+        return [], 0
+    phrase = group[0]
+    if (len(phrase) < 4 or not re.fullmatch(r'[\u4e00-\u9fff]+', phrase)
+            or re.search('[与和及]', phrase)):
+        return [], 0
+    pairs = set(phrase[index:index + 2] for index in range(len(phrase) - 1))
+    hits = sorted(term for term in pairs if term in text)
+    # Keep the final content anchor: 常松的音乐 cannot stand in for 常松的鞋带.
+    if phrase[-2:] not in hits or len(hits) < max(2, (len(pairs) * 2 + 4) // 5):
+        return [], 0
+    return hits, max(_occurrences(term, text) for term in hits)
+
+
 def _main_text(title, text):
-    """Ignore short navigation, repeated page titles and recommendation tails."""
+    """Keep short prose paragraphs while removing menus and recommendation tails."""
     folded_title = _fold(title)
     paragraphs = []
     for line in str(text).splitlines():
         value = line.strip()
-        if any(value.startswith(marker) for marker in RECOMMENDATION_MARKERS):
+        heading = re.sub(r'^[\s*•·\-–—]+', '', value)
+        if any(heading.startswith(marker) for marker in RECOMMENDATION_MARKERS):
             break
-        if len(value) < 20 or _fold(value) == folded_title:
+        folded = _fold(value)
+        menu = [part for part in re.split(r'\s+|[|｜›»>·]', folded) if part]
+        prose = bool(re.search(r'[。！？!?；;.]', value))
+        navigation = (len(menu) >= 3 and all(len(part) <= 10 for part in menu)
+            and (re.search(r'[|｜›»>·]', value) or not prose
+                and (sum(part in NAVIGATION_LABELS for part in menu) >= 2
+                     or all(re.fullmatch(r'[\u4e00-\u9fff]{1,4}', part) for part in menu))))
+        if (not value or folded == folded_title or folded in NAVIGATION_LABELS
+                or navigation):
+            continue
+        if len(value) < (8 if prose else 10):
             continue
         paragraphs.append(value)
     return '\n'.join(paragraphs)[:6000]
@@ -94,32 +169,41 @@ def assess_topic_relevance(interest, title, text):
                           r'|(?:账号|帐号)\s*[:：].{0,80}密码\s*[:：]')
     if re.search(credential_pattern, combined, flags=re.S):
         return {'relevant': False, 'reason': '疑似账号凭据分享或低质量密码列表', 'matched_terms': [], 'score': 0, 'main_text': ''}
-    groups = _topic_groups(interest)
-    if not groups or len(main) < 40:
+    focuses = _interest_focuses(interest)
+    if not focuses or len(main) < 40:
+        return {'relevant': False, 'reason': '缺少可核对的主题词或实质正文', 'matched_terms': [], 'score': 0, 'main_text': ''}
+    choices = [_assess_focus(focus, title, main) for focus in focuses]
+    admitted = [result for result in choices if result['relevant']]
+    return max(admitted or choices, key=lambda result: result['score'])
+
+
+def _assess_focus(focus, title, main):
+    groups = _topic_groups(focus)
+    if not groups:
         return {'relevant': False, 'reason': '缺少可核对的主题词或实质正文', 'matched_terms': [], 'score': 0, 'main_text': ''}
     title_folded, body = _fold(title), _fold(main)
     body_hits, title_hits, matched_terms = [], [], []
     total_occurrences = 0
     for group in groups:
-        in_body = [term for term in group if _occurrences(term, body)]
+        in_body, occurrences = _anchor_hits(group, body)
         if in_body:
             body_hits.append(group)
             matched_terms.extend(in_body)
-            total_occurrences += sum(_occurrences(term, body) for term in in_body)
-        if any(_occurrences(term, title_folded) for term in group):
+            total_occurrences += occurrences
+        if _anchor_hits(group, title_folded)[0]:
             title_hits.append(group)
-    required = 1 if len(groups) == 1 else max(2, (len(groups) + 1) // 2)
+    required = len(groups) if len(groups) <= 3 else max(2, (len(groups) + 1) // 2)
     paragraphs = main.splitlines()
-    relevant_chars = sum(len(line) for line in paragraphs if any(_occurrences(term, _fold(line)) for term in matched_terms))
+    relevant_chars = sum(len(line) for line in paragraphs if any(_anchor_hits(group, _fold(line))[0] for group in groups))
     density = relevant_chars / max(1, len(main))
     score = min(6, total_occurrences) + min(4, len(title_hits) * 3)
     admitted = len(body_hits) >= required and (
-        bool(title_hits) and score >= 4 and (total_occurrences >= 2 or density >= .25)
+        bool(title_hits) and score >= 4 and density >= .25
         or not title_hits and total_occurrences >= 3 and density >= .4)
     return {'relevant': admitted,
             'reason': '标题与正文主题吻合' if admitted and title_hits else '正文多处涉及兴趣主题' if admitted else '网页主段与兴趣主题关联不足',
             'matched_terms': sorted(set(matched_terms))[:12], 'score': score,
-            'main_text': main if admitted else ''}
+            'main_text': main if admitted else '', 'matched_focus': focus if admitted else ''}
 
 
 def _now():
@@ -313,6 +397,14 @@ class PersonaKnowledge:
             cursor = value.get('cursor', 0)
             if isinstance(cursor, bool) or not isinstance(cursor, int) or not 0 <= cursor <= 1000000:
                 raise ValueError('人格探索主题位置无效')
+            focus_cursors = value.get('focus_cursors', {})
+            if (not isinstance(focus_cursors, dict) or len(focus_cursors) > 12
+                    or any(not isinstance(topic, str) or not re.fullmatch(r'[0-9a-f]{16}', topic)
+                           or type(position) is not int or not 0 <= position <= 1000000
+                           for topic, position in focus_cursors.items())):
+                raise ValueError('人格探索子主题位置无效')
+            if not isinstance(value.get('last_focus', ''), str) or len(value.get('last_focus', '')) > 160:
+                raise ValueError('人格探索子主题无效')
             for field in ('last_attempt_at', 'last_success_at'):
                 if value.get(field):
                     if not isinstance(value[field], str):
@@ -324,6 +416,8 @@ class PersonaKnowledge:
                         raise ValueError('人格探索日期无效') from exc
             if not isinstance(value.get('last_message', ''), str) or len(value.get('last_message', '')) > 1000:
                 raise ValueError('人格探索记录无效')
+            if 'last_result' in value:
+                PersonaKnowledge._validate_result(value['last_result'])
             for field in ('searches',):
                 if isinstance(value.get(field, 0), bool) or not isinstance(value.get(field, 0), int) or value.get(field, 0) < 0:
                     raise ValueError('人格探索预算无效')
@@ -340,6 +434,34 @@ class PersonaKnowledge:
                 if not isinstance(key, str) or len(key) > 100:
                     raise ValueError('人格来源标识无效')
                 _source_rules(values)
+
+    @staticmethod
+    def _validate_result(result):
+        fields = {'at', 'interest', 'query', 'created', 'updated', 'pending', 'filtered', 'failures',
+                  'reason', 'rejections', 'truncated'}
+        if not isinstance(result, dict) or set(result) != fields:
+            raise ValueError('人格探索诊断结构无效')
+        for key, limit in (('at', 50), ('interest', 160), ('query', 300)):
+            if not isinstance(result[key], str) or len(result[key]) > limit:
+                raise ValueError('人格探索诊断字段无效')
+        try:
+            if datetime.fromisoformat(result['at']).tzinfo is None:
+                raise ValueError()
+        except ValueError as exc:
+            raise ValueError('人格探索诊断日期无效') from exc
+        if not isinstance(result['reason'], str) or result['reason'] not in EXPLORATION_RESULT_REASONS or type(result['truncated']) is not bool:
+            raise ValueError('人格探索诊断结果无效')
+        for key in ('created', 'updated', 'pending', 'filtered', 'failures'):
+            if type(result[key]) is not int or not 0 <= result[key] <= 1000000:
+                raise ValueError('人格探索诊断数量无效')
+        entries = result['rejections']
+        if not isinstance(entries, list) or len(entries) > MAX_EXPLORATION_REJECTIONS:
+            raise ValueError('人格探索过滤记录过多')
+        for item in entries:
+            if (not isinstance(item, dict) or set(item) != {'url', 'reason'}
+                    or not isinstance(item['url'], str) or not _url(item['url'])
+                    or not isinstance(item['reason'], str) or not 1 <= len(item['reason']) <= 180):
+                raise ValueError('人格探索过滤记录无效')
 
     @staticmethod
     def _migrate(state):
@@ -572,6 +694,16 @@ class PersonaKnowledge:
                 enabled = bool(cfg.get('exploration', {}).get('enabled') and persona.get('exploration_enabled')
                                and persona.get('interests')) and not self._error
                 schedule['enabled'] = enabled
+                schedule['disabled_reason'] = (
+                    'degraded' if self._error else 'paused' if cfg.get('paused') else
+                    'global_disabled' if not cfg.get('exploration', {}).get('enabled') else
+                    'persona_disabled' if not persona.get('exploration_enabled') else
+                    'no_interests' if not persona.get('interests') else
+                    'excluded_topics' if not any(_eligible_focuses(interest, persona.get('excluded_topics', []))
+                        for interest in persona.get('interests', [])) else
+                    'daily_limit' if searches >= _number(cfg.get('exploration', {}).get('daily_searches'), 6, 0, 100)
+                    or not schedule['remaining_searches'] else '')
+                schedule.pop('next_attempt_at', None)
                 if enabled:
                     last = schedule.get('last_attempt_at')
                     schedule['next_attempt_at'] = (datetime.fromisoformat(last) + interval).isoformat() if last else self._local_now().isoformat()
@@ -627,17 +759,33 @@ class PersonaKnowledge:
             if count >= daily_limit or persona_count >= cfg['daily_searches']:
                 return {'created': 0, 'items': [], 'skipped': True, 'message': '今日全局或该人格的探索次数已用完。'}
             generation = self._generation
-            interest = interests[_number(schedule.get('cursor'), 0, 0, 1000000) % len(interests)]
             excluded = [str(value).strip().casefold() for value in persona.get('excluded_topics', []) if str(value).strip()]
-            if any(value in interest.casefold() for value in excluded):
-                return {'created': 0, 'items': [], 'skipped': True, 'message': '当前兴趣属于排除主题，请调整兴趣列表。'}
+            start = _number(schedule.get('cursor'), 0, 0, 1000000) % len(interests)
+            focus_cursors = schedule.get('focus_cursors', {})
+            for offset in range(len(interests)):
+                position = (start + offset) % len(interests)
+                interest = interests[position]
+                focuses = _eligible_focuses(interest, excluded)
+                if focuses:
+                    topic_key = hashlib.sha256(interest.encode('utf-8')).hexdigest()[:16]
+                    focus_position = _number(focus_cursors.get(topic_key), 0, 0, 1000000) % len(focuses)
+                    focus = focuses[focus_position]
+                    break
+            else:
+                return {'created': 0, 'items': [], 'skipped': True, 'reason': 'excluded_topics',
+                        'message': '所有兴趣主题均已排除，请调整兴趣或排除主题列表。'}
             moment = self._local_now()
-            query = f'{interest} 最新资讯 {moment.year:04d}年{moment.month:02d}月'[:300]
+            suffix = f' 最新资讯 {moment.year:04d}年{moment.month:02d}月'
+            query = focus[:128 - len(suffix)] + suffix
             rules = self.sources(persona_id)
             def reserve():
+                current_keys = {hashlib.sha256(value.encode('utf-8')).hexdigest()[:16] for value in interests}
+                positions = {key: value for key, value in focus_cursors.items() if key in current_keys}
+                positions[topic_key] = (focus_position + 1) % len(focuses)
                 self._state['budget'] = {'day': day, 'searches': count + 1}
                 self._state['personas'][persona_id] = {**schedule, 'day': day, 'searches': persona_count + 1,
-                    'last_attempt_at': self._local_now().isoformat(), 'cursor': (schedule.get('cursor', 0) + 1) % 1000000,
+                    'last_attempt_at': self._local_now().isoformat(), 'cursor': (position + 1) % len(interests),
+                    'focus_cursors': positions, 'last_focus': focus,
                     'last_message': '正在探索公开网页。'}
             self._mutate(reserve)
             self._running_persona = persona_id
@@ -667,7 +815,10 @@ class PersonaKnowledge:
                         except Exception:
                             failures += 1
                 if not self._permitted(persona_id, manual, fingerprint, generation):
-                    return {'created': 0, 'items': [], 'skipped': True, 'message': '探索期间配置改变或暂停，已丢弃结果。'}
+                    message = '探索期间配置改变或暂停，已丢弃结果。'
+                    diagnostic = self._exploration_result(interest, query, failures=failures, reason='cancelled')
+                    self._finish(persona_id, message, result=diagnostic)
+                    return {'created': 0, 'items': [], 'skipped': True, 'message': message, 'last_result': diagnostic}
                 links = list(dict.fromkeys(_url(url) for url in links if _url(url)))
                 candidates = []
                 for url in links[:cfg['max_results'] * 3]:
@@ -759,7 +910,11 @@ class PersonaKnowledge:
                     except Exception:
                         failures += 1
                 if not self._permitted(persona_id, manual, fingerprint, generation):
-                    return {'created': 0, 'items': [], 'skipped': True, 'message': '探索期间配置改变或暂停，已丢弃结果。'}
+                    message = '探索期间配置改变或暂停，已丢弃结果。'
+                    diagnostic = self._exploration_result(interest, query, rejected=rejected,
+                        failures=failures, reason='cancelled')
+                    self._finish(persona_id, message, result=diagnostic)
+                    return {'created': 0, 'items': [], 'skipped': True, 'message': message, 'last_result': diagnostic}
                 self._cross_reference(candidates)
                 for record in candidates:
                     def save_item():
@@ -811,16 +966,33 @@ class PersonaKnowledge:
                     message += f' {failures} 个来源未能读取或保存。'
                 if rejected:
                     message += f' 已过滤 {len(rejected)} 个不符合主题或来源规则的网页。'
-                self._finish(persona_id, message, success=bool(results))
+                cancelled = not self._permitted(persona_id, manual, fingerprint, generation)
+                if cancelled:
+                    message = '探索已停止，已完成的条目保留。 ' + message
+                reason = 'cancelled' if cancelled else 'collected' if results else 'no_relevant_sources' if rejected else 'no_sources'
+                diagnostic = self._exploration_result(interest, query, created=created, updated=updated, pending=pending,
+                    rejected=rejected, failures=failures, reason=reason)
+                self._finish(persona_id, message, success=bool(results), result=diagnostic)
                 return {'created': created, 'updated': updated, 'pending': pending, 'items': results, 'message': message,
-                        'skipped': not bool(results), 'reason': 'no_relevant_sources' if not results else 'collected',
-                        'filtered': len(rejected), 'rejections': rejected, 'searches_today': self.status()['searches_today']}
+                        'skipped': not bool(results), 'reason': reason,
+                        'filtered': len(rejected), 'rejections': diagnostic['rejections'], 'last_result': diagnostic,
+                        'searches_today': self.status()['searches_today']}
             except asyncio.CancelledError:
+                diagnostic = self._exploration_result(interest, query, created=created, updated=updated,
+                    pending=sum(item['status'] == 'pending' for item in results), rejected=rejected,
+                    failures=failures, reason='cancelled')
+                try:
+                    self._finish(persona_id, '探索已取消；已完成的条目保留。', result=diagnostic)
+                except (OSError, ValueError):
+                    pass  # Preserve cancellation even if writing diagnostics fails.
                 raise
             except Exception:
                 message = '搜索渠道暂不可用或读取超时，本次没有生成知识。'
-                self._finish(persona_id, message)
-                return {'created': created, 'items': results, 'message': message, 'skipped': True}
+                diagnostic = self._exploration_result(interest, query, created=created, updated=updated,
+                    pending=sum(item['status'] == 'pending' for item in results), rejected=rejected,
+                    failures=failures, reason='error')
+                self._finish(persona_id, message, result=diagnostic)
+                return {'created': created, 'items': results, 'message': message, 'skipped': True, 'last_result': diagnostic}
             finally:
                 self._running_persona = ''
 
@@ -856,12 +1028,46 @@ class PersonaKnowledge:
                 item['status'] = 'pending'
                 item['review_reasons'].append('相似主题的不同来源给出了不一致的活动日期')
 
-    def _finish(self, persona_id, message, success=False):
+    def _exploration_result(self, interest, query, *, created=0, updated=0, pending=0, rejected=(), failures=0, reason):
+        entries = []
+        for item in rejected[:MAX_EXPLORATION_REJECTIONS]:
+            address = _url(item.get('url', ''))
+            if not address:
+                continue
+            # Diagnostic links do not need tracking/authentication query values.
+            parsed = urlsplit(address)
+            address = urlunsplit((parsed.scheme, parsed.netloc, parsed.path, '', ''))
+            entries.append({'url': address, 'reason': str(item.get('reason') or '来源未通过检查')[:180]})
+        return {'at': self._local_now().isoformat(), 'interest': str(interest)[:160], 'query': str(query)[:300],
+                'created': created, 'updated': updated, 'pending': pending, 'filtered': len(rejected),
+                'failures': failures, 'reason': reason, 'rejections': entries, 'truncated': len(rejected) > len(entries)}
+
+    def _trim_diagnostics(self):
+        records = [(key, value['last_result']) for key, value in self._state['personas'].items() if 'last_result' in value]
+        records.sort(key=lambda item: datetime.fromisoformat(item[1]['at']).timestamp())
+        sizes = [len(json.dumps(result, ensure_ascii=False).encode('utf-8')) for _, result in records]
+        total = sum(sizes)
+        file_bytes = len(json.dumps(self._state, ensure_ascii=False, separators=(',', ':')).encode('utf-8'))
+        for (key, _), size in zip(records, sizes):
+            if total <= MAX_EXPLORATION_DIAGNOSTIC_BYTES and file_bytes <= MAX_FILE_BYTES:
+                break
+            schedule = self._state['personas'][key]
+            result = schedule.pop('last_result')
+            # Removing the field also removes its JSON key and, if needed, a comma.
+            file_bytes -= len(json.dumps(result, ensure_ascii=False, separators=(',', ':')).encode('utf-8'))
+            file_bytes -= len('"last_result":') + bool(schedule)
+            total -= size
+
+    def _finish(self, persona_id, message, success=False, *, result=None):
         def finish():
             schedule = self._state['personas'].setdefault(persona_id, {})
             schedule['last_message'] = message
+            if result is not None:
+                self._validate_result(result)
+                schedule['last_result'] = copy.deepcopy(result)
             if success:
                 schedule['last_success_at'] = self._local_now().isoformat()
+            self._trim_diagnostics()
         self._mutate(finish)
         self.store.add_event('knowledge_exploration', message, persona_id=persona_id)
 

@@ -236,6 +236,7 @@ window.MikubotExperience = (() => {
   }
 
   async function handleChange(target) {
+    if(typeof updateAdmissionPolicy === "function" && updateAdmissionPolicy(target))return true;
     if(window.MikubotUpdates && await window.MikubotUpdates.handleChange(target))return true;
     if(target.name === "selected_account"){const form=target.closest("form");$('[name="account_id"]',form).value=target.value;return true;}
     if(target.id === "chat-mode"){state.chatMode=target.value;if(target.value === "computer" && !state.settings.computer?.enabled)toast("电脑任务尚未开启，请在机器人设置中开启并指定工作目录。",true);state.draft=$("#chat-text")?.value || state.draft;await renderPage();return true;}

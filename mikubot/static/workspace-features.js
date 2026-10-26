@@ -47,7 +47,7 @@ function timeAwarenessSection() {
 
 function debounceSection() {
   const cfg=state.settings.debounce || {};
-  return `<section class="panel settings-section" id="debounce-section"><h2>等你说完再回复</h2><p>连续短消息集中处理，新消息会重新计时；群聊按发送者分别收集。@、点名和私聊也遵守此设置。</p><form data-form="debounce">${toggle("enabled","开启消息防抖","默认关闭。开启后，连续补充的话和图片会一起交给机器人，不再叠加群聊集中判断窗口。",cfg.enabled ?? false)}<div class="form-grid">${field("seconds","等待时间（秒）",cfg.seconds ?? 3,"number","从最后一条新消息开始计算。","min=\"0.1\" max=\"60\" step=\"0.1\"")}</div><details class="details"><summary>高级 · 最长等待保护</summary>${field("max_wait_seconds","持续发言最长收集（秒）",cfg.max_wait_seconds ?? 30,"number","防止一直有新消息时永远不回复；不得短于等待时间。","min=\"1\" max=\"300\" step=\"0.1\"")}</details><p class="help-caption">已经开始生成或发送的回复会继续完成。停止命令立即生效。本地网页等待期间可点击立即回复或取消，刷新页面会放弃尚未提交的消息。</p><div class="section-actions"><button type="submit" class="btn primary">保存防抖设置</button></div></form></section>`;
+  return `<section class="panel settings-section" id="debounce-section"><h2>等你说完再回复</h2><p>连续短消息集中处理，新消息会重新计时；群聊按发送者分别收集。@、点名和私聊也遵守此设置。</p><form data-form="debounce">${toggle("enabled","开启消息防抖","默认关闭。开启后，连续补充的话和图片会一起交给机器人，不再叠加群聊集中判断窗口。",cfg.enabled ?? false)}<div class="form-grid">${field("seconds","等待时间（秒）",cfg.seconds ?? 3,"number","从最后一条新消息开始计算。","min=\"0.1\" max=\"60\" step=\"0.1\"")}</div><details class="details"><summary>高级 · 最长等待保护</summary>${field("max_wait_seconds","持续发言最长收集（秒）",cfg.max_wait_seconds ?? 30,"number","防止一直有新消息时永远不回复；不得短于等待时间。","min=\"1\" max=\"300\" step=\"0.1\"")}</details><p class="help-caption">已经开始生成或发送的回复会继续完成；同一成员等待处理的后续补充会继续合并。一次回答仍可按“回复分段”设置发送多段，输入防抖不会强制改成一条气泡。停止命令立即生效。本地网页等待期间可点击立即回复或取消，刷新页面会放弃尚未提交的消息。</p><div class="section-actions"><button type="submit" class="btn primary">保存防抖设置</button></div></form></section>`;
 }
 
 function debounceFields(values={}) {
@@ -80,7 +80,75 @@ function plannerSection() {
 
 function explorationSection() {
   const exploration = state.settings.exploration || {};
-  return `<section class="panel settings-section" id="exploration-section"><div class="section-title"><span>${icon("globe")}</span><div><h2>人格兴趣与定期探索</h2><p>获取公开的兴趣资讯与热梗，为人格积累带来源的知识。</p></div></div><form data-form="exploration">${toggle("enabled","开启定期联网探索","默认关闭。各人格还需单独启用；仅搜索其兴趣主题，不发送聊天私事。",exploration.enabled ?? false)}<div class="form-grid" style="margin-top:17px">${field("interval_hours","探索间隔（小时）",exploration.interval_hours ?? 24,"number","按人格分别记录上次尝试，重启不补发积压任务。","min=\"1\" max=\"720\" step=\"1\"")}${field("daily_searches","每天最多搜索次数",exploration.daily_searches ?? 6,"number","所有人格共用，按 UTC+8 自然日计数；失败尝试也计入。0 表示禁止搜索。","min=\"0\" max=\"100\" step=\"1\"")}${field("max_results","每次最多读取网页",exploration.max_results ?? 4,"number","减少重复抓取；搜索渠道验证失败时显示真实原因。","min=\"1\" max=\"8\" step=\"1\"")}${field("valid_days","知识有效天数",exploration.valid_days ?? 90,"number","到期后保留可管理的原条目，但不再用于回答。","min=\"1\" max=\"365\" step=\"1\"")}</div><p class="help-caption">网络笔记区分原文发布、采集日期与有效期。模型整理计入模型预算；模型不可用时只保存标明的原文摘录；弱来源、未知日期与模型整理先进入待审。探索不会自动发到群聊。</p><div class="section-actions"><button type="submit" class="btn primary">保存探索设置</button>${button("查看人格知识","go-persona-knowledge","ghost","globe")}</div></form></section>`;
+  return `<section class="panel settings-section" id="exploration-section"><div class="section-title"><span>${icon("globe")}</span><div><h2>人格兴趣与定期探索</h2><p>获取公开的兴趣资讯与热梗，为人格积累带来源的知识。</p></div></div><form data-form="exploration">${toggle("enabled","开启定期联网探索","默认关闭。各人格还需单独启用；仅搜索其兴趣主题，不发送聊天私事。",exploration.enabled ?? false)}<div class="form-grid" style="margin-top:17px">${field("interval_hours","探索间隔（小时）",exploration.interval_hours ?? 24,"number","按人格分别记录上次尝试，重启不补发积压任务。","min=\"1\" max=\"720\" step=\"1\"")}${field("daily_searches","每天最多搜索次数",exploration.daily_searches ?? 6,"number","所有人格共用，按设置的时区跨日；失败尝试也计入。0 表示禁止搜索。","min=\"0\" max=\"100\" step=\"1\"")}${field("max_results","每次最多读取网页",exploration.max_results ?? 4,"number","减少重复抓取；搜索渠道验证失败时显示真实原因。","min=\"1\" max=\"8\" step=\"1\"")}${field("valid_days","知识有效天数",exploration.valid_days ?? 90,"number","到期后保留可管理的原条目，但不再用于回答。","min=\"1\" max=\"365\" step=\"1\"")}</div><p class="help-caption">网络笔记区分原文发布、采集日期与有效期。模型整理计入模型预算；模型不可用时只保存标明的原文摘录；弱来源、未知日期与模型整理先进入待审。探索不会自动发到群聊。</p><div class="section-actions"><button type="submit" class="btn primary">保存探索设置</button>${button("查看人格知识","go-persona-knowledge","ghost","globe")}</div></form></section>`;
+}
+
+function explorationTime(value) {
+  const date = typeof value === "string" && value.length <= 100 ? new Date(value) : null;
+  if(!date || !Number.isFinite(date.getTime()))return {label:"时间未记录",historical:false};
+  let zone = state.settings?.time?.timezone || "Asia/Shanghai";
+  try { new Intl.DateTimeFormat("zh-CN",{timeZone:zone}).format(date); }
+  catch { zone = "Asia/Shanghai"; }
+  const day = instant => new Intl.DateTimeFormat("en-CA",{timeZone:zone,year:"numeric",month:"2-digit",day:"2-digit"}).format(instant);
+  const historical = day(date) !== day(new Date());
+  const label = new Intl.DateTimeFormat("zh-CN",{timeZone:zone,year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:false}).format(date);
+  return {label:`${label}（${zone}）`,historical};
+}
+
+function explorationRunState(persona,status,schedule) {
+  const reasons = {
+    global_disabled:"全局定期探索已关闭；此人格不会自动探索。",
+    persona_disabled:"此人格的定期探索已关闭。",
+    no_interests:"此人格尚未设置兴趣主题。",
+    excluded_topics:"全部兴趣焦点都命中排除主题，请调整兴趣或排除主题。",
+    paused:"程序已暂停，自动探索暂不运行。",
+    degraded:"人格知识状态异常，自动探索已停止。",
+    daily_limit:"今日探索额度已用完，预算恢复后再检查。"
+  };
+  let reason = Object.prototype.hasOwnProperty.call(reasons,schedule.disabled_reason) ? schedule.disabled_reason : "";
+  if(!reason) {
+    if(status.degraded)reason = "degraded";
+    else if(status.paused)reason = "paused";
+    else if(status.enabled === false)reason = "global_disabled";
+    else if(persona.exploration_enabled === false)reason = "persona_disabled";
+    else if(!Array.isArray(persona.interests) || !persona.interests.length)reason = "no_interests";
+    else if(status.daily_searches === 0 || schedule.remaining_searches === 0 || Number.isFinite(status.daily_searches) && status.searches_today >= status.daily_searches)reason = "daily_limit";
+  }
+  if(reason === "daily_limit" && status.daily_searches === 0)return "全局每日探索额度为 0，自动探索已停止。";
+  if(reason === "daily_limit" && schedule.effective_config?.daily_searches === 0)return "此人格每日探索额度为 0，自动探索已停止。";
+  return reasons[reason] || (schedule.enabled === false ? "自动探索未开启，请核对全局与人格设置。" : "");
+}
+
+function explorationDiagnostics(schedule={},latest) {
+  const record = latest && typeof latest === "object" && !Array.isArray(latest) ? latest : schedule.last_result;
+  const result = record && typeof record === "object" && !Array.isArray(record) ? record : null;
+  const time = explorationTime(result?.at || schedule.last_attempt_at);
+  const history = time.historical ? '<strong>历史结果，非今日执行</strong> · 今日次数按配置时区单独计算。' : "此处显示最近一次探索结果，今日次数见上方。";
+  if(!result) {
+    if(!schedule.last_message && !schedule.last_attempt_at)return '<section class="interest-diagnostics"><h3>最近探索</h3><p class="help-caption">尚无探索记录。</p></section>';
+    return `<section class="interest-diagnostics"><h3>最近探索</h3><p>最近尝试：${e(time.label)}</p><p class="help-caption">${history}</p>${schedule.last_message ? `<p class="record-text">${e(String(schedule.last_message).slice(0,1000))}</p>` : ""}<p class="help-caption">此记录未保留逐页详情，过滤原因未记录。</p></section>`;
+  }
+  const labels = {collected:"已取得公开资料",no_relevant_sources:"未取得通过主题与来源校验的资料",no_sources:"未发现可用的网页来源",cancelled:"探索已取消",error:"探索未完成"};
+  const outcome = Object.prototype.hasOwnProperty.call(labels,result.reason) ? labels[result.reason] : "结果分类未记录";
+  const count = name => Number.isSafeInteger(result[name]) && result[name] >= 0 ? result[name] : "未记录";
+  const details = (Array.isArray(result.rejections) ? result.rejections : []).slice(0,12).filter(item=>item && typeof item === "object" && !Array.isArray(item));
+  const boundedText = (value,max) => typeof value === "string" ? value.slice(0,max) : "";
+  const url = value => {
+    if(typeof value !== "string" || value.length > 3000 || /[\u0000-\u0020\u007f]/.test(value))return "";
+    const safe = safeKnowledgeURL(value);
+    return safe === "#" ? "" : safe;
+  };
+  const reasons = new Map();
+  for(const item of details) {
+    const reason = boundedText(item.reason,300) || "原因未记录";
+    reasons.set(reason,(reasons.get(reason) || 0)+1);
+  }
+  const limited = result.truncated === true || Array.isArray(result.rejections) && result.rejections.length > 12;
+  const interest = boundedText(result.interest,160), queryText = boundedText(result.query,300);
+  return `<section class="interest-diagnostics"><h3>最近探索 · ${e(outcome)}</h3><p>实际时间：${e(time.label)}</p><p class="help-caption">${history}</p><div class="record-meta"><span>新增 ${e(count("created"))}</span><span>更新 ${e(count("updated"))}</span><span>待审 ${e(count("pending"))}</span><span>过滤 ${e(count("filtered"))}</span><span>读取或保存失败 ${e(count("failures"))}</span></div>${interest ? `<p class="help-caption">本轮兴趣：${e(interest)}</p>` : ""}<details class="details interest-rejection-details"><summary>查询与逐页过滤原因${details.length ? ` · ${details.length} 条明细` : ""}</summary><p class="record-text">实际查询：${e(queryText || "未记录")}</p>${reasons.size ? `<p class="help-caption">已保留明细的原因汇总：${[...reasons].map(([reason,total])=>`${e(reason)}（${total}）`).join("；")}</p>` : ""}${details.length ? `<ul class="review-reasons">${details.map(item=>{
+    const link = url(item.url);
+    return `<li>${link ? `<a href="${e(link)}" target="_blank" rel="noopener noreferrer">${e(link)}</a>` : "来源地址不可展示"}<p>${e(boundedText(item.reason,300) || "原因未记录")}</p></li>`;
+  }).join("")}</ul>` : `<p class="help-caption">${count("filtered") === 0 ? "本轮没有过滤记录。" : "逐页过滤详情未记录。"}</p>`}${limited ? '<p class="help-caption">只保留或展示有界明细，部分条目未展示；总数以上方汇总为准。</p>' : ""}</details></section>`;
 }
 
 async function renderPersonaKnowledge() {
@@ -89,9 +157,11 @@ async function renderPersonaKnowledge() {
   state.knowledgePersona = selected.id;
   const [records,status] = await Promise.all([api(`/api/knowledge?${query({persona_id:selected.id,status:state.filters.status || ""})}`),api("/api/knowledge/status")]);
   state.personaKnowledge = rows(records);
+  state.personaKnowledgeStatus = status;
   const items = state.personaKnowledge, schedule = status.personas?.[selected.id] || {}, effective = schedule.effective_config || {};
-  const nextPlan = status.paused ? "恢复运行后检查" : !schedule.enabled ? "未开启定期探索" : status.searches_today >= status.daily_searches || schedule.remaining_searches === 0 ? "明日预算恢复后检查" : new Date(schedule.next_attempt_at).getTime() <= Date.now() ? "下次检查时尝试" : fmt(schedule.next_attempt_at,true);
-  return heading("CURIOSITY WITH SOURCES","它感兴趣的事，也有自己的资料库。","公开资料先核对来源与日期，待审内容不会用于回答。",button("指定网页","explore-persona-urls","","link") + button("探索一次","explore-persona","primary","globe",`data-id="${e(selected.id)}"`)) + `<section class="panel settings-section"><div class="persona-knowledge-selector">${select("knowledge_persona","查看人格",state.personas.map(item => [item.id,item.name]),selected.id,"id=\"knowledge-persona\"")}<div><h3>${e(selected.name)}的兴趣</h3><p class="help-caption">${e((selected.interests || []).join(" · ") || "还未设置兴趣主题")}</p></div>${button("兴趣与频率","edit-persona","small","edit",`data-id="${e(selected.id)}"`)}${button("来源规则","knowledge-source-rules","small","shield")}</div><div class="record-meta"><span>全局今日 ${e(status.searches_today ?? 0)} / ${e(status.daily_searches ?? 0)}</span><span>该人格 ${e(schedule.searches_today ?? 0)} / ${e(effective.daily_searches ?? status.daily_searches ?? 0)}</span><span>有效 ${e(status.items ?? 0)} · 待审 ${e(status.pending ?? 0)}</span><span>容量 ${e(status.capacity_used ?? 0)} / ${e(status.capacity ?? 800)}</span><span>下次 · ${e(nextPlan)}</span></div>${schedule.last_message ? `<p class="help-caption">${e(schedule.last_message)}</p>` : ""}</section>${status.degraded ? notice(status.error || "人格知识暂不可用，探索已停止。","warning") : notice("采集日期不代表新闻发生日期。未知或过旧日期、弱来源、模型整理及日期冲突会进入待审。删除或拒绝会屏蔽该来源并释放条目容量；手动解除屏蔽后才可重新探索。")}<div id="persona-exploration-result" aria-live="polite"></div><div class="toolbar"><div class="filter-tabs">${[["","全部"],["active","可使用"],["pending","待审核"],["rejected","已拒绝"],["deleted","已删除"]].map(([key,title]) => `<button class="filter-tab ${(state.filters.status || "") === key ? "active" : ""}" data-action="filter" data-status="${e(key)}">${e(title)}</button>`).join("")}</div></div>${items.length ? `<div class="record-grid">${items.map(knowledgeCard).join("")}</div>` : empty("globe","还没有这类公开笔记","设置兴趣并探索公开资料；取得真实内容后才会形成笔记。","knowledge-source-rules","配置资料来源")}`;
+  const disabled = explorationRunState(selected,status,schedule), next = new Date(schedule.next_attempt_at).getTime();
+  const nextPlan = disabled ? "自动探索暂不运行" : Number.isFinite(next) && next > Date.now() ? explorationTime(schedule.next_attempt_at).label : "下次检查时尝试";
+  return heading("CURIOSITY WITH SOURCES","它感兴趣的事，也有自己的资料库。","公开资料先核对来源与日期，待审内容不会用于回答。",button("指定网页","explore-persona-urls","","link") + button("探索一次","explore-persona","primary","globe",`data-id="${e(selected.id)}"`)) + `<section class="panel settings-section"><div class="persona-knowledge-selector">${select("knowledge_persona","查看人格",state.personas.map(item => [item.id,item.name]),selected.id,"id=\"knowledge-persona\"")}<div><h3>${e(selected.name)}的兴趣</h3><p class="help-caption">${e((selected.interests || []).join(" · ") || "还未设置兴趣主题")}</p></div>${button("兴趣与频率","edit-persona","small","edit",`data-id="${e(selected.id)}"`)}${button("来源规则","knowledge-source-rules","small","shield")}${button("全局探索设置","interest-global-settings","ghost small","settings")}</div><div class="record-meta"><span>全局今日 ${e(status.searches_today ?? 0)} / ${e(status.daily_searches ?? 0)}</span><span>该人格 ${e(schedule.searches_today ?? 0)} / ${e(effective.daily_searches ?? status.daily_searches ?? 0)}</span><span>有效 ${e(status.items ?? 0)} · 待审 ${e(status.pending ?? 0)}</span><span>容量 ${e(status.capacity_used ?? 0)} / ${e(status.capacity ?? 800)}</span><span>下次 · ${e(nextPlan)}</span></div>${disabled ? `<p class="help-caption" role="status">${e(disabled)}</p>` : ""}</section>${status.degraded ? notice(status.error || "人格知识暂不可用，探索已停止。","warning") : notice("采集日期不代表新闻发生日期。未知或过旧日期、弱来源、模型整理及日期冲突会进入待审。删除或拒绝会屏蔽该来源并释放条目容量；手动解除屏蔽后才可重新探索。")}<div id="persona-exploration-result" aria-live="polite">${explorationDiagnostics(schedule)}</div><div class="toolbar"><div class="filter-tabs">${[["","全部"],["active","可使用"],["pending","待审核"],["rejected","已拒绝"],["deleted","已删除"]].map(([key,title]) => `<button class="filter-tab ${(state.filters.status || "") === key ? "active" : ""}" data-action="filter" data-status="${e(key)}">${e(title)}</button>`).join("")}</div></div>${items.length ? `<div class="record-grid">${items.map(knowledgeCard).join("")}</div>` : empty("globe","还没有这类公开笔记","设置兴趣并探索公开资料；取得真实内容后才会形成笔记。","knowledge-source-rules","配置资料来源")}`;
 }
 
 function knowledgeCard(item) {
@@ -102,7 +172,7 @@ function knowledgeCard(item) {
 
 async function knowledgeSourcesModal() {
   const rules = await api(`/api/knowledge/sources?${query({persona_id:state.knowledgePersona})}`);
-  openModal("公开资料来源","每个人格独立设置。空允许域名表示可以收集各域名，但新来源需审核。",`<div class="form-grid">${textarea("allowed_domains","允许域名",rules.allowed_domains.join("\n"),"每行一个域名。近期、有发布日期的原文摘录可以直接采用；模型整理仍需审核。")}${textarea("blocked_domains","屏蔽域名",rules.blocked_domains.join("\n"),"包括其子域名；优先于允许列表。")}${textarea("rss_urls","RSS / Atom 订阅地址",rules.rss_urls.join("\n"),"每行一个公开 HTTP/HTTPS 地址；发现文章后仍逐条读取原文。")}${textarea("manual_urls","固定公开网页",rules.manual_urls.join("\n"),"每行一个，定期探索会读取。")}</div>${toggle("use_bing","使用公开搜索发现网页","关闭后只探索订阅源与固定网页。",rules.use_bing)}`,"knowledge-sources",{persona_id:state.knowledgePersona});
+  openModal("公开资料来源","每个人格独立设置。空允许域名表示可以收集各域名，但新来源需审核。",`<div class="form-grid">${textarea("allowed_domains","允许域名",rules.allowed_domains.join("\n"),"每行一个域名。近期、有发布日期的原文摘录可以直接采用；模型整理仍需审核。")}${textarea("blocked_domains","屏蔽域名",rules.blocked_domains.join("\n"),"包括其子域名；优先于允许列表。")}${textarea("rss_urls","RSS / Atom 订阅地址",rules.rss_urls.join("\n"),"每行一个公开 HTTP/HTTPS 地址；发现文章后仍逐条读取原文。")}${textarea("manual_urls","固定公开网页",rules.manual_urls.join("\n"),"每行一个，定期探索会读取。")}</div>${toggle("use_bing","使用已配置的网页搜索发现网页","沿用机器人配置中的搜索服务与额度；关闭后只探索订阅源与固定网页。",rules.use_bing)}`,"knowledge-sources",{persona_id:state.knowledgePersona});
 }
 
 function knowledgeEditModal(item) {
@@ -128,7 +198,15 @@ async function explorePersona(target) {
   if (!persona?.interests?.length) { toast("请先给这个人格设置兴趣主题。",true); if (persona) personaModal(persona); return; }
   if (state.settings.paused) { toast("当前已暂停，请恢复运行后探索。",true); return; }
   const original = target.innerHTML; target.disabled = true; target.innerHTML = '<span class="spinner small"></span>正在寻找公开资料…';
-  try { const result = await api("/api/knowledge/explore",{method:"POST",body:{persona_id:personaId}}); toast(result.message || "本次探索已结束"); if (state.page === "personaKnowledge" && state.knowledgePersona === personaId) { await renderPage(); if ($("#persona-exploration-result")) $("#persona-exploration-result").innerHTML = notice(result.message || "本次探索已结束",result.created || result.updated ? "" : "warning"); } }
+  try {
+    const result = await api("/api/knowledge/explore",{method:"POST",body:{persona_id:personaId}});
+    toast(result.message || "本次探索已结束");
+    if (state.page === "personaKnowledge" && state.knowledgePersona === personaId) {
+      await renderPage();
+      const area = $("#persona-exploration-result");
+      if(area && result.last_result)area.innerHTML = explorationDiagnostics(state.personaKnowledgeStatus?.personas?.[personaId] || {},result.last_result);
+    }
+  }
   finally { if (target.isConnected) { target.disabled = false; target.innerHTML = original; } }
 }
 
@@ -167,6 +245,14 @@ async function presetModal(scopeId) {
 }
 
 async function handleAction(action,target) {
+  if(action === "interest-global-settings") {
+    state.botTab = "reply";
+    await navigate("persona");
+    const section = $("#exploration-section"), details = section?.closest?.("details");
+    if(details)details.open = true;
+    section?.scrollIntoView?.({behavior:"smooth",block:"start"});
+    return true;
+  }
   if(action === "browser-time-zone") {
     const zone=Intl.DateTimeFormat().resolvedOptions().timeZone;
     const form=target.closest("form");
@@ -239,5 +325,5 @@ async function handleSubmit(kind,form) {
   return true;
 }
 
-return {scopeModal,identitySection,timeAwarenessSection,debounceSection,debounceFields,outputSection,plannerSection,explorationSection,renderPersonaKnowledge,safeKnowledgeURL,explorePersona,renderGroups,memoryToolsPanel,personaExtras,handleAction,handleSubmit,afterRender};
+return {scopeModal,identitySection,timeAwarenessSection,debounceSection,debounceFields,outputSection,plannerSection,explorationSection,explorationRunState,explorationDiagnostics,renderPersonaKnowledge,safeKnowledgeURL,explorePersona,renderGroups,memoryToolsPanel,personaExtras,handleAction,handleSubmit,afterRender};
 })();

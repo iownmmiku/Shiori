@@ -28,7 +28,7 @@ def install_experience(app, store, settings, provider, chat, router, data_dir, r
     runs = RunManager(data_dir, redact=chat.tool_actions._redact)
     computer = ComputerService(store, settings, provider, access, runs, data_dir, scope_allowed=lambda scope_id: chat.social._allowed(scope_id))
     computer.chat=chat
-    distillation = DistillationService(provider, data_dir)
+    distillation = DistillationService(provider, data_dir, search_fn=chat.search.search)
     runs.register('computer', computer.run, computer.guard)
     def distill_guard(job):
         return not settings.get().get('paused') and access.is_admin(job['identity'])

@@ -74,7 +74,9 @@ async function api(path, options = {}) {
     let detail = result.detail || result.error || `请求失败（${response.status}）`;
     if (typeof detail !== "string") detail = JSON.stringify(detail);
     if (response.status === 401) { state.authenticated = false; showAuth(); }
-    throw new Error(detail);
+    const error = new Error(detail);
+    if (typeof result.code === "string" && /^[a-z_]{1,64}$/.test(result.code)) error.code = result.code;
+    throw error;
   }
   if (raw) return response;
   if (response.status === 204) return {};
@@ -389,6 +391,7 @@ document.addEventListener("click",async event => {
   const action = target.dataset.action, id = target.dataset.id, item = state.records.find(record => record.id === id);
   try {
     if (await window.MikubotLearning?.handleAction(action,target)) return;
+    if (await window.MikubotWebSearch?.handleAction(action,target)) return;
     if (await window.MikubotBotModels?.handleAction(action,target)) return;
     if (await window.MikubotEmbedding?.handleAction(action,target)) return;
     if (await window.MikubotPages.handleAction(action,target)) return;
@@ -483,6 +486,7 @@ document.addEventListener("submit",async event => {
   if ($("#modal-error",form)) $("#modal-error",form).hidden = true;
   try {
     if (await window.MikubotLearning?.handleSubmit(kind,form)) return;
+    if (await window.MikubotWebSearch?.handleSubmit(kind,form)) return;
     if (await window.MikubotBotModels?.handleSubmit(kind,form)) return;
     if (await window.MikubotPages.handleSubmit(kind,form)) return;
     if (await window.MikubotEmbedding?.handleSubmit(kind,form)) return;
@@ -518,6 +522,7 @@ document.addEventListener("input",event => {
 document.addEventListener("change",async event => {
   if(event.target.id === "time-zone-preset" && event.target.value){const form=event.target.closest("form");$('[name="timezone"]',form).value=event.target.value;return;}
   if (window.MikubotSidebar?.handleChange?.(event.target,sidebarContext())) return;
+  try { if (await window.MikubotWebSearch?.handleChange(event.target)) return; } catch (error) { toast(error.message,true); return; }
   try { if (await window.MikubotEmbedding?.handleChange(event.target)) return; } catch (error) { toast(error.message,true); return; }
   try { if (await window.MikubotPages.handleChange(event.target)) return; } catch (error) { toast(error.message,true); return; }
   try { if (await window.MikubotExperience.handleChange(event.target)) return; } catch (error) { toast(error.message,true); return; }

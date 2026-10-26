@@ -18,7 +18,8 @@ from .settings import (resolve_model, MAX_OUTPUT_TOKENS, CUSTOM_PARAM_RESERVED,
                        CUSTOM_PARAM_MAX_ABS, CUSTOM_PARAM_MAX_STRING, CUSTOM_PARAM_MAX_JSON,
                        CUSTOM_PARAM_MAX_COUNT)
 from .timezones import config_zone, day_bounds, refresh_dispatch_time
-from .model_stream import receive_chat, ModelStreamError, IncompleteModelStreamError
+from .model_stream import (receive_chat, ModelStreamError, IncompleteModelStreamError,
+                           usage_token_count, preserve_completed_body)
 from .chat_preview import emit_preview, preview_active
 from .timing import add_duration
 
@@ -31,6 +32,13 @@ class ProviderError(ValueError):
 
 class ProviderStreamError(ProviderError):
     """Incomplete transport result; callers may retry side-effect-free analysis."""
+
+
+class ProviderContentFilterError(ProviderError):
+    """The upstream refused the request; do not relay its body or retry elsewhere."""
+    def __init__(self, *, usage=None):
+        super().__init__('模型服务对本次请求触发了内容过滤，未采用返回内容或执行工具。')
+        self.usage = usage
 
 
 class ProviderOutputBudgetError(ProviderError):
@@ -57,7 +65,7 @@ class ProviderRateLimitError(ProviderError):
 
 
 def is_budget_exceeded(exc):
-    if isinstance(exc, (ProviderTimeoutError, ProviderConnectionError, ProviderRateLimitError, ProviderOutputBudgetError)):
+    if isinstance(exc, (ProviderTimeoutError, ProviderConnectionError, ProviderRateLimitError, ProviderOutputBudgetError, ProviderContentFilterError)):
         return False
     if isinstance(exc, ProviderBudgetExceededError):
         return True
@@ -127,8 +135,12 @@ class _PriorityGate:
         self.busy = self.active>0
 
     def counts(self):
-        return {'foreground': sum(p == 0 and not e['future'].done() for p, _, e in self.queue),
-                'background': sum(p > 0 and not e['future'].done() for p, _, e in self.queue)}
+        # Planner has an intermediate priority but remains foreground work:
+        # it must not consume background capacity or disappear from its status.
+        return {'foreground': sum(not e.get('background', p > 0) and not e['future'].done()
+                                  for p, _, e in self.queue),
+                'background': sum(e.get('background', p > 0) and not e['future'].done()
+                                  for p, _, e in self.queue)}
 
 
 class _ModelScheduler:
@@ -136,6 +148,8 @@ class _ModelScheduler:
 
     A queued request owns no scarce resource. Ready foreground work therefore
     bypasses both a saturated model and background work awaiting another slot.
+    Replies precede queued planning, and planning precedes background learning;
+    requests already holding their slots are never preempted.
     The existing gates remain read-only scheduling/status views here; standalone
     _PriorityGate users keep their original acquire/release behavior.
     """
@@ -179,13 +193,13 @@ class _ModelScheduler:
             entry['future'].set_result(None)
         self._views()
 
-    async def acquire(self, key, background):
+    async def acquire(self, key, background, *, priority=0):
         self.provider._provider_locks.setdefault(key, _PriorityGate())
         self._configure()
         self.counter += 1
         entry = {'key': key, 'background': background, 'granted': False, 'released': False,
                  'future': asyncio.get_running_loop().create_future()}
-        item = (10 if background else 0, self.counter, entry)
+        item = (10 if background else priority, self.counter, entry)
         self.waiting.append(item)
         self._drain()
         if not entry['granted']:
@@ -313,7 +327,11 @@ class Provider:
     async def _provider_slot(self, candidate, purpose='chat'):
         started = time.monotonic()
         try:
-            entry = await self._scheduler.acquire(candidate.get('id', 'default'), purpose in BACKGROUND_PURPOSES)
+            key = candidate.get('id', 'default')
+            if purpose == 'planner':
+                entry = await self._scheduler.acquire(key, False, priority=5)
+            else:
+                entry = await self._scheduler.acquire(key, purpose in BACKGROUND_PURPOSES)
         finally:
             # A cancelled/expired waiter still spent time in the queue, even
             # though it never reserved budget or obtained a dispatch slot.
@@ -451,7 +469,7 @@ class Provider:
 
     async def _settle(self, reservation, record=None, *, uncertain=False):
         async with self._call_lock:
-            pending = self._reservations.pop(reservation, None)
+            pending = self._reservations.get(reservation)
             if pending is None:
                 return  # One request settles once, including repeated cleanup.
             if record is not None:
@@ -461,6 +479,9 @@ class Provider:
                 # the provider billed nothing. Retain the reservation estimate
                 # as explicit unknown usage instead of silently freeing budget.
                 self.store.record_usage({**pending, 'estimated': True, 'unconfirmed': True, 'latency_ms': 0})
+            # Keep the reservation if persistence fails: unknown consumption
+            # must not silently become available budget after a database error.
+            self._reservations.pop(reservation, None)
 
     async def complete(self, messages, *, tools=None, config=None, purpose='chat', scope_id='web:default', max_tokens=None, before_send=None):
         primary = dict(config) if config is not None else self.resolve(purpose, scope_id)
@@ -658,7 +679,8 @@ class Provider:
         uncertain_fallback = bool(cfg.get('timeout_fallback', False)) and purpose in ('chat', 'planner', 'summary') and not any(
             message.get('role') == 'tool' or message.get('tool_calls') for message in messages)
         try:
-            async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
+            async with httpx.AsyncClient(timeout=timeout, follow_redirects=False,
+                    event_hooks={'response': [preserve_completed_body]}) as client:
                 response = None
                 for attempt in range(5):
                     self._check_reserved_limits(reservation)
@@ -728,14 +750,39 @@ class Provider:
                 raise ProviderError(f'模型服务返回 {response.status_code}：{reason}。', retryable=response.status_code == 429 or 500 <= response.status_code <= 599)
             try:
                 data = response.json()
-                message = data['choices'][0]['message']
-                if not isinstance(message, dict):
+                choice = data['choices'][0]
+                if not isinstance(choice, dict):
                     raise ValueError()
+                finish_reason = choice.get('finish_reason')
+                message = choice.get('message')
+                filtered = (finish_reason == 'content_filter'
+                            or isinstance(message, dict) and bool(message.get('refusal')))
+                if data.get('error') and not filtered:
+                    raise ValueError()
+                if not isinstance(message, dict):
+                    if not filtered:
+                        raise ValueError()
+                    message = {}
                 raw_usage = data.get('usage') or {}
                 if not isinstance(raw_usage, dict):
-                    raise ValueError()
-                input_tokens = self._usage_count(raw_usage.get('prompt_tokens'), estimate_tokens(messages, payload.get('tools')))
-                output_tokens = self._usage_count(raw_usage.get('completion_tokens'), estimate_tokens([message]))
+                    if not filtered:
+                        raise ValueError()
+                    raw_usage = {}
+                usage_incomplete = any(raw_usage.get(key) is None for key in ('prompt_tokens', 'completion_tokens'))
+                def usage_value(key, fallback):
+                    nonlocal usage_incomplete
+                    try:
+                        return self._usage_count(raw_usage.get(key), fallback)
+                    except ValueError:
+                        if not filtered:
+                            raise
+                        usage_incomplete = True
+                        return fallback
+                input_tokens = usage_value('prompt_tokens', estimate_tokens(messages, payload.get('tools')))
+                # A policy stop with no trustworthy usage must not be treated as
+                # free. Keep the reserved estimate, marked as unconfirmed.
+                output_estimate = self._reservations.get(reservation, {}).get('output_tokens', max_tokens) if filtered else estimate_tokens([message])
+                output_tokens = usage_value('completion_tokens', output_estimate)
             except (ValueError, KeyError, IndexError, TypeError) as exc:
                 raise ProviderError('服务返回内容不是兼容的聊天响应，请检查 API 地址。') from exc
             cost = (input_tokens * float(cfg.get('input_price', 0)) + output_tokens * float(cfg.get('output_price', 0))) / 1000000
@@ -743,15 +790,24 @@ class Provider:
                       'input_tokens': input_tokens, 'output_tokens': output_tokens, 'cost': cost,
                       'cost_known':bool(cfg.get('input_price') or cfg.get('output_price')),
                       'request_id': self._reservations.get(reservation, {}).get('request_id'), 'ttft_ms': ttft_ms,
-                      'estimated': 'prompt_tokens' not in raw_usage or 'completion_tokens' not in raw_usage,
+                      'estimated': usage_incomplete,
                       'queue_wait_ms': _queue_wait_ms.get(),
                       'latency_ms': round((time.monotonic() - started) * 1000)}
+            if filtered:
+                if usage_incomplete:
+                    record['unconfirmed'] = True
+                self.store.add_event('model_content_filter', '模型返回内容过滤标记，未采用正文或执行工具',
+                    scope_id=scope_id, purpose=purpose, provider_id=cfg.get('id', 'default'),
+                    reason='content_filter' if finish_reason == 'content_filter' else 'refusal',
+                    output_tokens=output_tokens, usage_confirmed=not usage_incomplete)
+                if purpose == 'chat':
+                    emit_preview('reset')
+                raise ProviderContentFilterError(usage=record)
             if message.get('tool_calls') and not payload.get('tools'):
                 raise ProviderError('实际请求未允许工具，服务返回的工具调用未执行。')
             content = message.get('content') or ''
             if isinstance(content, list):
                 content = '\n'.join(str(x.get('text', '')) for x in content if isinstance(x, dict))
-            finish_reason=data['choices'][0].get('finish_reason')
             if finish_reason=='length':
                 self.store.add_event('model_output_budget','模型正常结束，但输出额度耗尽，未采用截断内容或执行工具',
                     scope_id=scope_id,purpose=purpose,provider_id=cfg.get('id','default'),
@@ -772,9 +828,7 @@ class Provider:
     def _usage_count(value, fallback):
         if value is None:
             return fallback
-        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0 or int(value) != value:
-            raise ValueError('模型用量须为非负整数')
-        return int(value)
+        return usage_token_count(value)
 
     async def list_models(self, config=None):
         cfg = config or self.resolve()

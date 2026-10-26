@@ -133,12 +133,16 @@ def test_knowledge_backup_restore_preserves_public_sources_budget_and_persona(cl
     archive = zipfile.ZipFile(io.BytesIO(response.content))
     state = json.loads(archive.read('persona_knowledge.json'))
     assert state['items'][0]['id'] == item['id'] and state['budget']['searches'] == 1
+    detail = state['personas']['researcher']['last_result']
+    assert detail['reason'] == 'collected' and detail['created'] == 1
+    assert state['personas']['researcher']['focus_cursors']
     assert c.delete('/api/knowledge/' + item['id']).status_code == 200
     restored = c.post('/api/backup/restore', files={'file': ('v5.zip', response.content, 'application/zip')})
     assert restored.status_code == 200, restored.text
     assert c.get('/api/settings').json()['paused']
     assert c.get('/api/knowledge', params={'persona_id': 'researcher'}).json()[0]['id'] == item['id']
     assert c.get('/api/knowledge/status').json()['searches_today'] == 1
+    assert c.get('/api/knowledge/status').json()['personas']['researcher']['last_result'] == detail
 
 
 def test_invalid_knowledge_backup_precheck_keeps_database_settings_and_file(client):

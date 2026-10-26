@@ -203,6 +203,9 @@ class Store:
                 id TEXT PRIMARY KEY, scope_id TEXT NOT NULL, user_id TEXT NOT NULL,
                 role TEXT NOT NULL, created_at TEXT NOT NULL, data TEXT NOT NULL);
             CREATE INDEX IF NOT EXISTS messages_scope_time ON messages(scope_id, created_at);
+            CREATE INDEX IF NOT EXISTS messages_onebot_provenance ON messages(scope_id,
+                CAST(json_extract(data,'$.metadata.platform_message_id') AS TEXT),
+                COALESCE(CAST(json_extract(data,'$.metadata.onebot_self_id') AS TEXT),'')) WHERE role='user';
             CREATE INDEX IF NOT EXISTS messages_time ON messages(created_at);
             CREATE INDEX IF NOT EXISTS messages_extraction_cursor ON messages(scope_id,user_id,role,created_at);
             CREATE INDEX IF NOT EXISTS messages_origin_time ON messages(scope_id,user_id,role,
@@ -242,6 +245,7 @@ class Store:
             CREATE INDEX IF NOT EXISTS usage_time ON usage(created_at);
             CREATE TABLE IF NOT EXISTS events (
                 id TEXT PRIMARY KEY, created_at TEXT NOT NULL, kind TEXT NOT NULL, data TEXT NOT NULL);
+            CREATE INDEX IF NOT EXISTS events_kind_time ON events(kind, created_at);
         """)
         self._conn.commit()
         self._conn.execute("PRAGMA user_version=1")
@@ -583,6 +587,16 @@ class Store:
                 f"SELECT data FROM messages WHERE {' AND '.join(clauses)} ORDER BY created_at DESC,rowid DESC LIMIT ?", (*params, limit)
             ).fetchall()
             return [json.loads(row[0]) for row in reversed(rows)]
+
+    def onebot_message_seen(self, scope_id: str, platform_message_id: str, self_id: str) -> bool:
+        """Check durable ingress provenance without loading a recent history window."""
+        if not platform_message_id:
+            return False
+        with self._lock:
+            return self._conn.execute("""SELECT 1 FROM messages WHERE scope_id=? AND role='user'
+                AND CAST(json_extract(data,'$.metadata.platform_message_id') AS TEXT)=?
+                AND COALESCE(CAST(json_extract(data,'$.metadata.onebot_self_id') AS TEXT),'')=?
+                LIMIT 1""", (scope_id, str(platform_message_id), str(self_id))).fetchone() is not None
 
     def clear_messages(self, scope_id: str) -> dict:
         with self._lock, self._conn:
@@ -992,7 +1006,7 @@ class Store:
 
         return [record for record in records if record['id'] in selected_ids and allowed(record, set())]
 
-    def profile_preferences(self, scope_id: str, user_id: str, limit: int = 3) -> list[dict]:
+    def profile_preferences(self, scope_id: str, user_id: str, limit: int = 3, *, scope_allowed=None) -> list[dict]:
         """Bounded chat projection; no full profile or summary allocation."""
         limit = _limit(limit, 50)
         with self._lock:
@@ -1000,6 +1014,10 @@ class Store:
             space = scope.get('memory_space')
             origins = list(dict.fromkeys([scope_id] + [s['id'] for s in self.list_scopes()
                 if space and s.get('memory_space') == space and s.get('enabled', True)]))
+            if scope_allowed is not None:
+                origins = [origin for origin in origins if scope_allowed(origin)]
+            if not origins or not scope.get('enabled', True):
+                return []
             marks = ','.join('?' for _ in origins)
             offset, result = 0, []
             while len(result) < limit:
@@ -1015,9 +1033,40 @@ class Store:
                     updated_at DESC, id DESC LIMIT 32 OFFSET ?""", (*origins, user_id, utc_now(), utc_now(), scope_id,
                         int(scope_id.startswith(('qq:group:', 'qqofficial:group:'))), offset)).fetchall()
                 if not rows: break
-                result.extend(self._allowed_memories(scope_id, user_id, roots=[json.loads(row['data']) for row in rows]))
+                result.extend(self._allowed_memories(scope_id, user_id, scope_allowed=scope_allowed,
+                    roots=[json.loads(row['data']) for row in rows]))
                 offset += len(rows)
             return result[:limit]
+
+    def memory_relations_for_node(self, scope_id, user_id, node_id, *, after_id=None, limit=32, scope_allowed=None):
+        """Page adjacent edges before decoding; callers still validate their closure.
+
+        Keyset pagination lets an invalid first page yield to later valid edges
+        without loading every unrelated relationship in the shared space.
+        """
+        limit = _limit(limit, 128)
+        node_id = _text(node_id, 'node_id')
+        if after_id is not None:
+            after_id = _text(after_id, 'after_id')
+        with self._lock:
+            boundary = self._memory_candidate_boundary(scope_id, str(user_id), scope_allowed)
+            if not boundary.origins:
+                return []
+            clauses = ["status='active'", "json_extract(data,'$.property')='memory_relation'",
+                'scope_id IN (' + ','.join('?' for _ in boundary.origins) + ')',
+                "(visibility='group' OR (visibility='private' AND user_id=? AND ?=0))",
+                "(scope_id=? OR (visibility='group' AND json_extract(data,'$.shareable') IS 1))",
+                "(valid_from IS NULL OR valid_from='' OR valid_from<=?)",
+                "(valid_to IS NULL OR valid_to='' OR valid_to>?)",
+                "(json_extract(data,'$.from_id')=? OR json_extract(data,'$.to_id')=?)"]
+            params = [*boundary.origins, str(user_id), int(boundary.public_group), scope_id,
+                      boundary.now, boundary.now, node_id, node_id]
+            if after_id is not None:
+                clauses.append('id>?')
+                params.append(after_id)
+            rows = self._conn.execute('SELECT data FROM memories WHERE ' + ' AND '.join(clauses)
+                + ' ORDER BY id LIMIT ?', (*params, limit)).fetchall()
+            return [_memory_view(json.loads(row[0])) for row in rows]
 
     def visible_memories(self, scope_id: str, user_id: str, *, scope_allowed=None, record_ids=None) -> list[dict]:
         """Authoritative current projection shared by lexical/semantic readers."""
@@ -1137,6 +1186,43 @@ class Store:
                 if count != len(part):
                     return False
         return True
+
+    def message_source_snapshot(self, scope_id: str, fingerprints) -> dict[str, str] | None:
+        """Bind validated canonical sources to their exact stored representation.
+
+        Canonical fingerprints retain legacy JSON compatibility at preparation
+        time. Subsequent guards can compare raw hashes without decoding every
+        ancestor again; no permission decision is cached by this snapshot.
+        """
+        keys = list(fingerprints)
+        if any(not isinstance(key, str) for key in keys):
+            return None
+        with self._lock:
+            rows = self._conn.execute(
+                'SELECT id,data FROM messages WHERE scope_id=? AND id IN '
+                '(SELECT value FROM json_each(?))', (scope_id, json.dumps(keys))).fetchall()
+        if len(rows) != len(keys):
+            return None
+        result = {}
+        for key, raw in rows:
+            record = json.loads(raw)
+            if record.get('scope_id') != scope_id or message_fingerprint(record) != fingerprints[key]:
+                return None
+            result[key] = hashlib.sha256(raw.encode('utf-8')).hexdigest()
+        return result
+
+    def message_source_snapshot_current(self, scope_id: str, snapshot) -> bool:
+        """Re-read a fixed source set in one query; edits/deletions fail closed."""
+        keys = list(snapshot)
+        if any(not isinstance(key, str) for key in keys):
+            return False
+        with self._lock:
+            rows = self._conn.execute(
+                'SELECT id,data FROM messages WHERE scope_id=? AND id IN '
+                '(SELECT value FROM json_each(?))', (scope_id, json.dumps(keys))).fetchall()
+        return (len(rows) == len(keys)
+                and all(hashlib.sha256(raw.encode('utf-8')).hexdigest() == snapshot[key]
+                        for key, raw in rows))
 
     def memory_accessible(self, scope_id: str, user_id: str, record_id: str, version: int | None = None, *, scope_allowed=None) -> bool:
         """Recheck consent, membership, privacy and dependency closure now."""
@@ -1280,7 +1366,7 @@ class Store:
             return self._save_memory(record)
 
     def ingest_memory_candidates(self, records: list[dict], *, scope_id: str, user_id: str,
-                                 source_ids: list[str]) -> list[dict]:
+                                 source_ids: list[str], before_write=None) -> list[dict]:
         """Accept model suggestions only against actual, authorized user input."""
         if not isinstance(records, list) or len(records) > 30:
             raise ValueError("候选记忆必须为列表且每批最多 30 条")
@@ -1288,7 +1374,15 @@ class Store:
         sources = _strings(source_ids, "source_ids")
         if not sources:
             raise ValueError("候选记忆必须附真实用户消息来源")
+        if before_write is not None and not callable(before_write):
+            raise ValueError('候选写入权限检查无效')
+        def check():
+            if before_write is not None and not before_write():
+                raise PermissionError('记忆整理来源或权限已变更，未提交本批候选')
         with self._lock, self._conn:
+            if not self._conn.in_transaction:
+                self._conn.execute('BEGIN IMMEDIATE')
+            check()
             for source_id in sources:
                 try:
                     source = self._get("messages", source_id)
@@ -1326,14 +1420,27 @@ class Store:
                 prepared.append(probe)
             result = []
             for item in prepared:
+                check()
                 duplicate = next((old for old in existing if old["content"] == item["content"]
                                   and old["source_ids"] == item["source_ids"] and old.get("property", "") == item.get("property", "")), None)
                 if duplicate:
                     result.append(duplicate)
                 else:
-                    created = self.create_memory(item)
+                    # Keep the batch in this transaction. Calling create_memory
+                    # here would enter its own connection context and commit a
+                    # prefix before a later permission check can roll it back.
+                    now = utc_now()
+                    record = {'scope_id': scope_id, 'user_id': user_id, 'kind': 'fact', 'subject': '',
+                              'source_ids': [], 'status': 'active', 'visibility': 'group' if scope_id.startswith(('qq:group:', 'qqofficial:group:')) else 'private',
+                              'confidence': 1.0, 'importance': .5, 'pinned': False, 'shareable': False,
+                              'valid_from': None, 'valid_to': None, 'supersedes': None, 'dependencies': {}, **item,
+                              'id': str(uuid4()), 'version': 1, 'created_at': now, 'updated_at': now}
+                    self._prepare_memory(record)
+                    self.get_scope(scope_id)
+                    created = self._save_memory(record)
                     existing.append(created)
                     result.append(created)
+            check()
             return result
 
     def _prepare_jargon(self, record: dict) -> dict:
@@ -1368,8 +1475,14 @@ class Store:
             self.get_scope(record["scope_id"])
             return self._save_jargon(record)
 
-    def list_jargon(self, scope_id: str | None = None, q: str = "", status: str | None = None) -> list[dict]:
+    def list_jargon(self, scope_id: str | None = None, q: str = "", status: str | None = None, *, record_ids=None) -> list[dict]:
         clauses, params = self._filters(scope_id, status, JARGON_STATUSES)
+        if record_ids is not None:
+            keys = list(dict.fromkeys(record_ids))
+            if any(not isinstance(key, str) for key in keys):
+                raise ValueError('词条 ID 须为字符串')
+            clauses.append('id IN (SELECT value FROM json_each(?))')
+            params.append(json.dumps(keys))
         if status is None:
             clauses.append("status!='deleted'")
         return self._search_text(self._list("jargon", clauses, params, "updated_at DESC,rowid DESC"), q, ("term", "meaning", "topic", "example"))
@@ -1742,7 +1855,7 @@ class Store:
                 # Only these additive performance indexes may be absent from
                 # older schema-1 backups. Any present index must still match
                 # its exact trusted definition; no arbitrary schema is allowed.
-                history_indexes = {'messages_origin_day', 'messages_extraction_cursor'}
+                history_indexes = {'messages_origin_day', 'messages_extraction_cursor', 'messages_onebot_provenance', 'events_kind_time'}
                 missing = history_indexes - {row[1] for row in objects if row[0] == 'index'}
                 expected = [row for row in current if not (row[0] == 'index' and row[1] in missing)]
                 if signature(objects) != signature(expected):

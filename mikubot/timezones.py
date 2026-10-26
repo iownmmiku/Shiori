@@ -127,7 +127,7 @@ def refresh_dispatch_time(messages, settings=None, *, purpose='chat', for_transp
                     payload['current_time'] = clock
                 else:
                     payload.pop('current_time', None)
-                item['content'] = json.dumps(payload, ensure_ascii=False)
+                item['content'] = json.dumps(payload, ensure_ascii=False, separators=(',', ':'))
         if for_transport:
             item.pop('_mikubot_clock', None)
         updated.append(item)
