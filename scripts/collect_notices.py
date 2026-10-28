@@ -12,7 +12,7 @@ destination.mkdir(parents=True, exist_ok=True)
 rows = ['# Bundled Python dependencies', '', 'License texts are retained in the subdirectories below. This index is generated from installed package metadata.', '']
 for dist in sorted(metadata.distributions(), key=lambda d: d.metadata['Name'].lower()):
     name = dist.metadata['Name']
-    if name.casefold() == 'mikubot':
+    if name.casefold() == 'shiori':
         continue  # The application is not a bundled third-party dependency.
     safe_name = re.sub(r'[^a-zA-Z0-9._-]', '_', name)
     copied = []

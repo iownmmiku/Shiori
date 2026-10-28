@@ -7,7 +7,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 
-const root = path.join(__dirname, "..", "mikubot", "static");
+const root = path.join(__dirname, "..", "shiori", "static");
 const source = fs.readFileSync(path.join(root, "sidebar-layout.js"), "utf8");
 const appSource = fs.readFileSync(path.join(root, "app.js"), "utf8");
 const indexSource = fs.readFileSync(path.join(root, "index.html"), "utf8");
@@ -38,7 +38,7 @@ function boot(storageValue, pageNames = PAGE_NAMES) {
   const sandbox = { window: {}, localStorage: store, console, document };
   vm.createContext(sandbox);
   vm.runInContext(source, sandbox, { filename: "sidebar-layout.js" });
-  return { api: sandbox.window.MikubotSidebar, store, pageNames, pickers };
+  return { api: sandbox.window.ShioriSidebar, store, pageNames, pickers };
 }
 
 const render = (api, pageNames, current) => api.render({ pageNames, current, icon, esc: escape });
@@ -147,7 +147,7 @@ function main() {
       { id: "automation", title: "自动化", icon: "clock", pages: ["tasks", "jobs"] },
       { id: "system", title: "系统", icon: "settings", pages: ["settings", "logs", "statistics", "diagnostics"] },
     ] });
-    const upgraded = boot({ "mikubot-sidebar-layout-v1": legacy });
+    const upgraded = boot({ "shiori-sidebar-layout-v1": legacy });
     const html = render(upgraded.api, upgraded.pageNames, "chat");
     assert.deepEqual(looseOf(html), ["persona", "personaKnowledge", "models", "settings"], "the old layout adopts the 未分类 defaults");
     assert.equal(groupsOf(html).has("talk"), false, "the retired category is dropped on migration");
@@ -158,12 +158,12 @@ function main() {
     const again = boot(upgraded.store._dump());
     assert.ok(!looseOf(render(again.api, again.pageNames, "chat")).includes("persona"), "a page moved back into a category stays there");
     // A user rename is NOT overwritten by the migration.
-    const renamed = boot({ "mikubot-sidebar-layout-v1": JSON.stringify({ version: 2, hidden: [], ungrouped: [], groups: [
+    const renamed = boot({ "shiori-sidebar-layout-v1": JSON.stringify({ version: 2, hidden: [], ungrouped: [], groups: [
       { id: "model", title: "我的工具", icon: "spark", pages: ["tools", "plugins"] },
     ] }) });
     assert.match(render(renamed.api, renamed.pageNames, "chat"), /<span class="nav-group-title">我的工具<\/span>/, "a user-renamed category keeps its name");
     // A v3 layout gets the preset renames but keeps the user's own 未分类 choices.
-    const v3 = boot({ "mikubot-sidebar-layout-v1": JSON.stringify({ version: 3, hidden: [], ungrouped: ["models"], groups: [
+    const v3 = boot({ "shiori-sidebar-layout-v1": JSON.stringify({ version: 3, hidden: [], ungrouped: ["models"], groups: [
       { id: "system", title: "系统", icon: "settings", pages: ["groups", "logs", "statistics", "diagnostics"] },
       { id: "memory", title: "记忆与知识", icon: "memory", pages: ["memory", "knowledge", "culture"] },
     ] }) });
@@ -184,7 +184,7 @@ function main() {
       group("system", "数据与日志", "settings", ["groups", "logs", "statistics", "diagnostics"], false),
     ] });
     const withFuture = { ...PAGE_NAMES, futurePage: "新页面" };
-    const none = boot({ "mikubot-sidebar-layout-v1": allHidden }, withFuture);
+    const none = boot({ "shiori-sidebar-layout-v1": allHidden }, withFuture);
     const html = render(none.api, withFuture, "chat");
     assert.ok(html.includes('data-page="futurePage"'), "with every category hidden the new page still gets an entry");
     assert.equal(none.api.isPageVisible("futurePage"), true, "and it is navigable");
@@ -194,7 +194,7 @@ function main() {
       group("model", "拓展工具", "spark", ["tools", "plugins"], false),
       group("memory", "认知与表达", "memory", ["memory", "knowledge", "culture"], true),
     ] });
-    const some = boot({ "mikubot-sidebar-layout-v1": oneVisible }, withFuture);
+    const some = boot({ "shiori-sidebar-layout-v1": oneVisible }, withFuture);
     const someHtml = render(some.api, withFuture, "chat");
     assert.equal(groupOfPage(someHtml, "futurePage"), "memory", "the new page joins a visible category");
   }
@@ -414,7 +414,7 @@ function main() {
       { id: "talk", title: "<img src=x onerror=alert(1)>", icon: "nope", pages: ["models", "models", "unknown", 7] },
       { id: "not valid!", title: "x", pages: ["logs"] },
     ], hidden: ["models", "ghost", 42] });
-    const { api, pageNames } = boot({ [JSON.parse(JSON.stringify("mikubot-sidebar-layout-v1"))]: hostile });
+    const { api, pageNames } = boot({ [JSON.parse(JSON.stringify("shiori-sidebar-layout-v1"))]: hostile });
     const html = render(api, pageNames, "chat");
     assert.ok(!html.includes("<img src=x"), "hostile title is escaped");
     assert.ok(html.includes("&lt;img src=x onerror=a"), "hostile title is escaped and truncated to the title limit");
@@ -424,7 +424,7 @@ function main() {
       assert.ok(html.includes(`data-page="${page}"`), `${page} survives a hostile layout`);
     }
     // A completely broken JSON payload falls back to defaults.
-    const broken = boot({ "mikubot-sidebar-layout-v1": "{{{not json" });
+    const broken = boot({ "shiori-sidebar-layout-v1": "{{{not json" });
     assert.match(render(broken.api, pageNames, "chat"), /data-page="models"/);
   }
 
@@ -436,7 +436,7 @@ function main() {
       { id: "memory", title: ["a"], icon: "memory", pages: ["memory"] },
       { id: "automation", title: 42, icon: "clock", pages: ["tasks"] },
     ] });
-    const { api, pageNames } = boot({ "mikubot-sidebar-layout-v1": hostile });
+    const { api, pageNames } = boot({ "shiori-sidebar-layout-v1": hostile });
     let html;
     assert.doesNotThrow(() => { html = render(api, pageNames, "chat"); }, "a hostile title cannot throw");
     assert.ok(html.includes('data-page="tools"'), "and the sidebar still renders");
@@ -449,7 +449,7 @@ function main() {
     const doubled = JSON.stringify({ version: 5, hidden: [], ungrouped: ["persona", "personaKnowledge", "models", "settings"], groups: [
       { id: "model", title: "工具", icon: "spark", pages: ["tools", "tools", "plugins", "tools"] },
     ] });
-    const { api, pageNames } = boot({ "mikubot-sidebar-layout-v1": doubled });
+    const { api, pageNames } = boot({ "shiori-sidebar-layout-v1": doubled });
     const html = render(api, pageNames, "chat");
     assert.equal(count(html, 'data-page="tools"'), 1, "the page renders exactly once");
     assert.match(manageRow(groupsView(api, pageNames), "model"), /2 个页面/, "the category counts each page once");
@@ -476,7 +476,7 @@ function main() {
     const versions = [{ toString: 1 }, { valueOf: 1, toString: 1 }, [{ toString: 1 }], true, null, "not a version", "1e400", -1];
     for (const version of versions) {
       const initial = JSON.stringify({ version, groups: [], hidden: [] });
-      const { api, pageNames, store } = boot({ "mikubot-sidebar-layout-v1": initial });
+      const { api, pageNames, store } = boot({ "shiori-sidebar-layout-v1": initial });
       assert.doesNotThrow(() => api.prepare(pageNames), "malformed version cannot abort prepare()");
       assert.equal(api.isTemporary(), false, "malformed versions do not masquerade as a future schema");
       assert.ok(render(api, pageNames, "chat").includes('data-page="tools"'), "the sidebar remains reachable");
@@ -485,7 +485,7 @@ function main() {
       assert.equal(JSON.parse(store.getItem(api.STORAGE_KEY)).version, api.VERSION, "malformed versions can be repaired by ordinary saving");
     }
     // Existing numeric-string layouts still use their intended migration path.
-    const v3 = boot({ "mikubot-sidebar-layout-v1": JSON.stringify({ version: "3", hidden: [], ungrouped: ["models"], groups: [
+    const v3 = boot({ "shiori-sidebar-layout-v1": JSON.stringify({ version: "3", hidden: [], ungrouped: ["models"], groups: [
       { id: "system", title: "系统", pages: ["logs"] },
     ] }) });
     const html = render(v3.api, v3.pageNames, "chat");
@@ -500,7 +500,7 @@ function main() {
       const initial = JSON.stringify({ version, futureOption: { enabled: true }, hidden: ["futurePage"], ungrouped: ["models"], groups: [
         { id: "model", title: "未来工具", icon: "spark", pages: ["tools", "plugins", "futurePage"], futureColor: "blue", collapsed: true },
       ] }, null, 2);
-      const { api, pageNames, store } = boot({ "mikubot-sidebar-layout-v1": initial });
+      const { api, pageNames, store } = boot({ "shiori-sidebar-layout-v1": initial });
       assert.equal(api.isTemporary(), true, "the shell can identify a future layout before its first render");
       const writes = [];
       const setItem = store.setItem;
@@ -622,7 +622,7 @@ function main() {
   //      home and the sidebar stays complete.
   {
     const customs = Array.from({ length: 12 }, (_, index) => ({ id: `custom${index + 1}`, title: `自定义${index + 1}`, icon: "spark", pages: [], custom: true }));
-    const { api, pageNames } = boot({ "mikubot-sidebar-layout-v1": JSON.stringify({ version: 1, groups: customs, hidden: [] }) });
+    const { api, pageNames } = boot({ "shiori-sidebar-layout-v1": JSON.stringify({ version: 1, groups: customs, hidden: [] }) });
     const html = render(api, pageNames, "chat");
     for (const page of Object.keys(pageNames)) {
       if (page === "help") continue;
@@ -654,7 +654,7 @@ function main() {
     const hostile = JSON.stringify({ version: 1, hidden: [], groups: [
       { id: "memory", title: "<img src=x onerror=alert(1)>", icon: "chat", pages: ["persona"], custom: false },
     ] });
-    const dirty = boot({ "mikubot-sidebar-layout-v1": hostile });
+    const dirty = boot({ "shiori-sidebar-layout-v1": hostile });
     const rendered = dirty.api.render({ pageNames: dirty.pageNames, current: "chat" });
     const dialogHtml = dirty.api.manageBody({ pageNames: dirty.pageNames });
     for (const [label, output] of [["render", rendered], ["manageBody", dialogHtml]]) {
@@ -670,7 +670,7 @@ function main() {
     const quoteBreak = JSON.stringify({ version: 1, hidden: [], groups: [
       { id: "memory", title: '" onfocus=alert(1)', icon: "chat", pages: ["persona"], custom: false },
     ] });
-    const breaker = boot({ "mikubot-sidebar-layout-v1": quoteBreak });
+    const breaker = boot({ "shiori-sidebar-layout-v1": quoteBreak });
     for (const [label, output] of [["render", breaker.api.render({ pageNames: breaker.pageNames, current: "chat" })],
                                    ["manageBody", breaker.api.manageBody({ pageNames: breaker.pageNames })]]) {
       assert.ok(output.includes("&quot;"), `${label}: double quotes are escaped`);
@@ -762,17 +762,17 @@ function main() {
     // Nothing open: no work, no error.
     assert.equal(api.closeIconPickers(outside), false, "no-op when nothing is open");
     // The real click handler is wired to the helper, plus an Escape path.
-    assert.match(appSource, /MikubotSidebar\?\.closeIconPickers\?\.\(event\.target\)/, "outside clicks dismiss the palette");
+    assert.match(appSource, /ShioriSidebar\?\.closeIconPickers\?\.\(event\.target\)/, "outside clicks dismiss the palette");
     // Escape must close the palette WITHOUT closing the dialog. keydown is the
     // cancelable event, so the guard has to preventDefault there; the dialog's
     // own "cancel" event is not reliably cancelable in Chromium.
-    assert.match(appSource, /event\.key === "Escape" && window\.MikubotSidebar\?\.closeIconPickers\?\.\(null\)[\s\S]{0,160}event\.preventDefault\(\);/, "keydown consumes Escape and prevents the dialog's default close");
-    assert.match(appSource, /if \(paletteEscape \|\| window\.MikubotSidebar\?\.closeIconPickers\?\.\(null\)\) \{ paletteEscape = false; event\.preventDefault\(\); return; \}/, "the cancel handler cooperates if it fires anyway");
+    assert.match(appSource, /event\.key === "Escape" && window\.ShioriSidebar\?\.closeIconPickers\?\.\(null\)[\s\S]{0,160}event\.preventDefault\(\);/, "keydown consumes Escape and prevents the dialog's default close");
+    assert.match(appSource, /if \(paletteEscape \|\| window\.ShioriSidebar\?\.closeIconPickers\?\.\(null\)\) \{ paletteEscape = false; event\.preventDefault\(\); return; \}/, "the cancel handler cooperates if it fires anyway");
     assert.match(appSource, /setTimeout\(\(\) => \{ paletteEscape = false; \}, 0\)/, "the one-shot flag cannot leak into a later Escape");
     // A module that fails to load must not take the whole shell down with it.
     assert.match(appSource, /layout\?\.render\s*\n?\s*\?/, "renderNavigation falls back when the module is missing");
-    assert.match(appSource, /MikubotSidebar\?\.handleAction\?\.\(action,target,sidebarContext\(\)\)/, "action dispatch is null-safe");
-    assert.match(appSource, /MikubotSidebar\?\.handleChange\?\.\(event\.target,sidebarContext\(\)\)/, "change dispatch is null-safe");
+    assert.match(appSource, /ShioriSidebar\?\.handleAction\?\.\(action,target,sidebarContext\(\)\)/, "action dispatch is null-safe");
+    assert.match(appSource, /ShioriSidebar\?\.handleChange\?\.\(event\.target,sidebarContext\(\)\)/, "change dispatch is null-safe");
   }
 
   // 10k. Deleting categories never loses a page: they become 未分类 entries, the
@@ -809,7 +809,7 @@ function main() {
   //      silently ignoring the click.
   {
     const customs = Array.from({ length: 12 }, (_, index) => ({ id: `custom${index + 1}`, title: `自定义${index + 1}`, icon: "spark", pages: [], custom: true }));
-    const { api, pageNames } = boot({ "mikubot-sidebar-layout-v1": JSON.stringify({ version: 5, groups: customs, hidden: [], ungrouped: [] }) });
+    const { api, pageNames } = boot({ "shiori-sidebar-layout-v1": JSON.stringify({ version: 5, groups: customs, hidden: [], ungrouped: [] }) });
     const messages = [];
     api.handleAction("sidebar-group-add", { dataset: {} }, { pageNames, notify: (text, bad) => messages.push([text, bad]) });
     assert.equal(messages.length, 1, "the cap is reported to the user");
@@ -820,12 +820,12 @@ function main() {
 
   // 11. Wiring: app.js consults the module, index.html ships it and the footer entry.
   assert.match(appSource, /layout\.render\(\{ pageNames: sidebarPageNames, current: state\.page/, "the module renders the navigation using the visible sidebar pages");
-  assert.match(appSource, /MikubotSidebar\?\.handleAction\?\.\(action,target,sidebarContext\(\)\)/);
-  assert.match(appSource, /MikubotSidebar\?\.handleChange\?\.\(event\.target,sidebarContext\(\)\)/);
+  assert.match(appSource, /ShioriSidebar\?\.handleAction\?\.\(action,target,sidebarContext\(\)\)/);
+  assert.match(appSource, /ShioriSidebar\?\.handleChange\?\.\(event\.target,sidebarContext\(\)\)/);
   assert.match(appSource, /open-sidebar-manage/);
-  assert.match(appSource, /MikubotSidebar\.isPageVisible\(page\)/);
-  assert.match(appSource, /MikubotSidebar\.isPageVisible\(state\.page\)/);
-  assert.match(appSource, /MikubotSidebar\?\.prepare\?\.\(sidebarPageNames\)/);
+  assert.match(appSource, /ShioriSidebar\.isPageVisible\(page\)/);
+  assert.match(appSource, /ShioriSidebar\.isPageVisible\(state\.page\)/);
+  assert.match(appSource, /ShioriSidebar\?\.prepare\?\.\(sidebarPageNames\)/);
   assert.match(appSource, /kind === "sidebar-manage"/);
   assert.match(indexSource, /src="\/static\/sidebar-layout\.js\?v=/);
   assert.match(indexSource, /data-action="open-sidebar-manage"/);

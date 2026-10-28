@@ -7,10 +7,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from mikubot.chat import ChatService
-from mikubot.db import Store
-from mikubot.memory_lifecycle import MemoryLifecycle
-from mikubot.settings import DEFAULTS
+from shiori.chat import ChatService
+from shiori.db import Store
+from shiori.memory_lifecycle import MemoryLifecycle
+from shiori.settings import DEFAULTS
 
 
 @pytest.fixture

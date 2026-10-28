@@ -5,9 +5,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from auth_helpers import password_login
-from mikubot.api import create_app
-from mikubot.db import Store
-from mikubot.settings import Settings
+from shiori.api import create_app
+from shiori.db import Store
+from shiori.settings import Settings
 
 
 def test_output_controls_defaults_and_persistence(tmp_path):

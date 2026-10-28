@@ -12,12 +12,12 @@ import pytest
 from fastapi.testclient import TestClient
 
 from auth_helpers import password_login
-from mikubot.access import AccessManager
-from mikubot.api import create_app
-from mikubot.computer import ComputerService
+from shiori.access import AccessManager
+from shiori.api import create_app
+from shiori.computer import ComputerService
 from qunyu.db import Store
-from mikubot.runs import RunContext, RunManager, TERMINAL
-from mikubot.settings import Settings
+from shiori.runs import RunContext, RunManager, TERMINAL
+from shiori.settings import Settings
 
 
 @pytest.fixture
@@ -127,7 +127,7 @@ async def test_real_temporary_python_child_completes_automatically(automatic, mo
 def test_automatic_mode_still_rejects_untrusted_or_nonadministrator_identity(automatic):
     item = automatic
     for identity in (item.access.identity('onebot', '202', '9000'), {'admin': True},
-                     {'platform': 'local', 'account_id': 'mikubot', 'proof': 'forged'}):
+                     {'platform': 'local', 'account_id': 'shiori', 'proof': 'forged'}):
         with pytest.raises(PermissionError):
             item.service.submit('web:default', '202', identity, '请运行电脑命令')
     assert item.runs.list() == []

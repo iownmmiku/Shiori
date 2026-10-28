@@ -22,7 +22,7 @@ const sandbox={window:{},state,URLSearchParams,AbortController,document:{hidden:
   openModal:(...args)=>{modal=args;state.modalKind=args[3];state.modalRecord=args[4];},closeModal:()=>{modal=null;},confirmAction:async(...args)=>{modal=args;},
   bootstrap:async()=>{},navigate:async page=>state.page=page,renderPage:async()=>{},toast:()=>{},scope:()=>state.scopes[0],navigator:{clipboard:{writeText:async text=>copied=text}},
 };
-vm.createContext(sandbox);vm.runInContext(fs.readFileSync(path.join(__dirname,"../mikubot/static/workspace-pages.js"),"utf8"),sandbox);const ui=sandbox.window.MikubotPages;
+vm.createContext(sandbox);vm.runInContext(fs.readFileSync(path.join(__dirname,"../shiori/static/workspace-pages.js"),"utf8"),sandbox);const ui=sandbox.window.ShioriPages;
 const plain=value=>JSON.parse(JSON.stringify(value));
 async function main(){
   assert.equal(ui.recommendChatModel(['text-embedding-3-small','gpt-chat-mini','gpt-reasoning-preview']),'gpt-chat-mini');

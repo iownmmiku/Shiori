@@ -13,10 +13,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 from auth_helpers import password_login
-from mikubot.api import create_app
-from mikubot.plugin_packages import MAX_FILE, inspect_archive
-from mikubot.plugins import PluginService
-from mikubot.runs import TERMINAL
+from shiori.api import create_app
+from shiori.plugin_packages import MAX_FILE, inspect_archive
+from shiori.plugins import PluginService
+from shiori.runs import TERMINAL
 from test_computer_auto_v9 import automatic, wait_for
 
 
@@ -79,10 +79,10 @@ def test_scan_strips_wrapper_identifies_candidates_and_never_imports(automatic, 
 async def test_multifile_package_runs_in_existing_child_and_validates_schema(automatic):
     service = PluginService(automatic.service.data_dir, automatic.service)
     item = install(service); service.activate(item['id'], True)
-    identity = automatic.access.identity('local', 'mikubot')
+    identity = automatic.access.identity('local', 'shiori')
     with pytest.raises(ValueError, match='不符合定义'):
-        service.submit(item['id'], {'value': 'wrong'}, 'web:default', 'mikubot', identity)
-    job = service.submit(item['id'], {'value': 7}, 'web:default', 'mikubot', identity)
+        service.submit(item['id'], {'value': 'wrong'}, 'web:default', 'shiori', identity)
+    job = service.submit(item['id'], {'value': 7}, 'web:default', 'shiori', identity)
     await wait_for(lambda: automatic.runs.get(job['id'])['status'] in TERMINAL)
     result = automatic.runs.get(job['id'])
     assert result['status'] == 'completed', result
@@ -175,7 +175,7 @@ def test_valid_highly_compressed_asset_remains_importable_after_export(automatic
 
 
 def test_tar_metadata_decompression_limit_precedes_tar_parser(monkeypatch):
-    from mikubot import plugin_packages
+    from shiori import plugin_packages
     output = io.BytesIO()
     # A large PAX record is parsed before tarfile yields the first regular file.
     # Keep this fixture tiny by reducing the configured uncompressed ceiling.
@@ -192,7 +192,7 @@ def test_tar_metadata_decompression_limit_precedes_tar_parser(monkeypatch):
 
 
 def test_helper_source_limit_applies_before_ast_parsing_but_resources_keep_file_limit(monkeypatch):
-    from mikubot import plugin_packages
+    from shiori import plugin_packages
     parse = plugin_packages.ast.parse
     def bounded_parse(source, *args, **kwargs):
         assert len(source) <= 10000, 'oversized helper reached AST parser'
@@ -220,8 +220,8 @@ async def test_nested_entry_imports_sibling_and_keeps_output_in_task_workspace(a
         'src/assets/value.txt': b'package-resource',
     }
     item = install(service, members); service.activate(item['id'], True)
-    identity = automatic.access.identity('local', 'mikubot')
-    job = service.submit(item['id'], {'value': 9}, 'web:default', 'mikubot', identity)
+    identity = automatic.access.identity('local', 'shiori')
+    job = service.submit(item['id'], {'value': 9}, 'web:default', 'shiori', identity)
     await wait_for(lambda: automatic.runs.get(job['id'])['status'] in TERMINAL)
     result = automatic.runs.get(job['id'])
     assert result['status'] == 'completed', result
@@ -246,8 +246,8 @@ def test_candidates_invalid_manifest_and_stale_preview(automatic, monkeypatch):
 def test_plugin_package_api_requires_auth_and_installs_only_as_draft(tmp_path, monkeypatch):
     # Keep HTTP authentication real, replace only OS encryption in this transport test.
     if os.name == 'nt':
-        monkeypatch.setattr('mikubot.web_auth._protect', lambda value: 'dpapi:' + base64.b64encode(value.encode()).decode())
-        monkeypatch.setattr('mikubot.web_auth._unprotect', lambda value: base64.b64decode(value.split(':', 1)[1]).decode())
+        monkeypatch.setattr('shiori.web_auth._protect', lambda value: 'dpapi:' + base64.b64encode(value.encode()).decode())
+        monkeypatch.setattr('shiori.web_auth._unprotect', lambda value: base64.b64decode(value.split(':', 1)[1]).decode())
     app = create_app(tmp_path, start_workers=False)
     with TestClient(app) as client:
         raw = packed(files())

@@ -3,7 +3,7 @@ from itertools import combinations
 
 import pytest
 
-from mikubot.output import _balanced_authored_parts, model_reply_parts
+from shiori.output import _balanced_authored_parts, model_reply_parts
 
 
 def config(maximum):

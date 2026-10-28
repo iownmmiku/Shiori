@@ -1,4 +1,4 @@
-# mikubot 0.1.6 预发布
+# Shiori 0.1.6 预发布
 
 本次以 **Pre-release** 交付，不设为最新稳定版；程序版本为0.1.6，正式稳定版仍为0.1.5。变更范围较大，建议先备份，在测试实例试用后反馈。
 
@@ -17,9 +17,9 @@
 
 ## 下载与升级
 
-- Windows安装版：`mikubot-0.1.6-Windows-Setup.exe`。
-- Windows便携版：完整解压`mikubot-0.1.6-Windows-x64.zip`，不要只提取EXE。
-- 源码：`mikubot-0.1.6-source.zip`，支持Python 3.11–3.13，推荐3.12。
+- Windows安装版：`shiori-0.1.6-Windows-Setup.exe`。
+- Windows便携版：完整解压`shiori-0.1.6-Windows-x64.zip`，不要只提取EXE。
+- 源码：`shiori-0.1.6-source.zip`，支持Python 3.11–3.13，推荐3.12。
 
 0.1.5可在右上角“版本与更新”开启**显示测试版**，再选择0.1.6。此开关默认关闭，常规稳定版检查不会推荐本预发布。0.1.3/0.1.4安装版需按原流程完成首次升级；Docker仍通过镜像更新。
 

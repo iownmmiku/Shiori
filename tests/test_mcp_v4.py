@@ -5,7 +5,7 @@ import socket
 import httpx
 import pytest
 
-from mikubot.mcp_client import MCPClient, MCPError, MAX_RESPONSE, _PinnedTransport, schema_hash, validate_mcp_url
+from shiori.mcp_client import MCPClient, MCPError, MAX_RESPONSE, _PinnedTransport, schema_hash, validate_mcp_url
 
 
 SCHEMA = {'type': 'object', 'properties': {'text': {'type': 'string', 'maxLength': 200}},

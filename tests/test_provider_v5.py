@@ -6,8 +6,8 @@ import httpx
 import pytest
 
 from qunyu.db import Store
-from mikubot.provider import Provider, ProviderError, estimate_tokens
-from mikubot.settings import DEFAULTS, PROVIDER_DEFAULTS, Settings
+from shiori.provider import Provider, ProviderError, estimate_tokens
+from shiori.settings import DEFAULTS, PROVIDER_DEFAULTS, Settings
 
 
 @pytest.fixture
@@ -385,8 +385,8 @@ def test_corrupt_settings_preserve_bytes_and_start_paused_without_connections(tm
     again = Settings(tmp_path)
     assert again.recovery_path == settings.recovery_path
     assert len(list(tmp_path.glob('settings.corrupt-*.json'))) == 1
-    settings.update({'identity': {'name': 'mikubot'}})
-    assert json.loads(path.read_text('utf-8'))['identity']['name'] == 'mikubot'
+    settings.update({'identity': {'name': 'shiori'}})
+    assert json.loads(path.read_text('utf-8'))['identity']['name'] == 'shiori'
     assert settings.recovery_path.read_bytes() == raw
     assert Settings(tmp_path).get()['paused']
 

@@ -6,7 +6,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
-const root = path.join(__dirname,"..","mikubot","static");
+const root = path.join(__dirname,"..","shiori","static");
 const app = fs.readFileSync(path.join(root,"app.js"),"utf8");
 const layout = fs.readFileSync(path.join(root,"sidebar-layout.js"),"utf8");
 const escape = value => String(value ?? "").replace(/[&<>"']/g,c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -78,7 +78,7 @@ function boot(saved) {
     return nodes.get(selector);
   }
   const state={page:"chat",scope:"web:default",filters:{},settings:{},boot:{},scopes:[],draft:"",modalKind:null};
-  const sandbox={window:{scrollTo(){},MikubotPages:{handleSubmit:async()=>false},MikubotExperience:{handleSubmit:async()=>false},MikubotFeatures:{handleSubmit:async()=>false}},
+  const sandbox={window:{scrollTo(){},ShioriPages:{handleSubmit:async()=>false},ShioriExperience:{handleSubmit:async()=>false},ShioriFeatures:{handleSubmit:async()=>false}},
     state,document,console,e:escape,icon:()=>"",configuredModel:()=>({}),$ : q,$$:selector=>document.querySelectorAll(selector),
     localStorage:{getItem:key=>storage.get(key) || null,setItem:(key,value)=>storage.set(key,String(value))},
     sessionStorage:{getItem:()=>null},toast:(...args)=>messages.push(args),renderPage:async()=>{renders++;},
@@ -99,12 +99,12 @@ function boot(saved) {
   vm.runInContext(section("function renderNavigation()","async function bootstrap("),sandbox);
   vm.runInContext(section("async function bootstrap(","async function renderPage("),sandbox);
   vm.runInContext(section('document.addEventListener("submit",','let searchTimer;'),sandbox);
-  sandbox.window.MikubotSidebar.prepare(sandbox.sidebarContext().pageNames);
-  const action=(name,control)=>sandbox.window.MikubotSidebar.handleAction(name,control || {dataset:{}},sandbox.sidebarContext());
-  const change=control=>sandbox.window.MikubotSidebar.handleChange(control,sandbox.sidebarContext());
+  sandbox.window.ShioriSidebar.prepare(sandbox.sidebarContext().pageNames);
+  const action=(name,control)=>sandbox.window.ShioriSidebar.handleAction(name,control || {dataset:{}},sandbox.sidebarContext());
+  const change=control=>sandbox.window.ShioriSidebar.handleChange(control,sandbox.sidebarContext());
   const find=predicate=>controls.find(predicate);
   const submit=async()=>listeners.get("submit")({target:form,preventDefault(){}});
-  const savedLayout=()=>JSON.parse(storage.get(sandbox.window.MikubotSidebar.STORAGE_KEY));
+  const savedLayout=()=>JSON.parse(storage.get(sandbox.window.ShioriSidebar.STORAGE_KEY));
   return {sandbox,state,document,dialog,nodes,messages,storage,action,change,find,submit,savedLayout,
     get form(){return form;},get done(){return done;},get panel(){return panel;},get opens(){return opens;},get replacements(){return replacements;},get renders(){return renders;}};
 }
@@ -184,19 +184,19 @@ async function main(){
     ui.action("sidebar-page-toggle",{dataset:{targetPage:"persona"}});
     ui.state.page="models";await ui.sandbox.bootstrap();
     assert.equal(ui.state.page,"persona");assert.equal(ui.state.botTab,"models");
-    const module=ui.sandbox.window.MikubotSidebar;delete ui.sandbox.window.MikubotSidebar;
+    const module=ui.sandbox.window.ShioriSidebar;delete ui.sandbox.window.ShioriSidebar;
     ui.sandbox.renderNavigation();
     assert.ok(!ui.nodes.get("#navigation").innerHTML.includes('data-page="models"'),"the fallback uses the same page map");
     assert.ok(ui.nodes.get("#navigation").innerHTML.includes('data-page="persona"'));
-    ui.sandbox.window.MikubotSidebar=module;
+    ui.sandbox.window.ShioriSidebar=module;
   }
   {
     const original=JSON.stringify({version:99,groups:[{id:"future",title:"新版分类",icon:"spark",pages:["plugins"],custom:true}],hidden:[],ungrouped:[],futureData:{preserve:true}});
-    const ui=boot({"mikubot-sidebar-layout-v1":original});ui.action("open-sidebar-manage");
+    const ui=boot({"shiori-sidebar-layout-v1":original});ui.action("open-sidebar-manage");
     const input=ui.find(x=>x.dataset.sidebarField==="title" && x.dataset.id==="future");
     input.focus();input.value="仅本次改名";
     await ui.submit();
-    assert.equal(ui.storage.get("mikubot-sidebar-layout-v1"),original,"an older build must preserve the original newer-schema layout");
+    assert.equal(ui.storage.get("shiori-sidebar-layout-v1"),original,"an older build must preserve the original newer-schema layout");
     assert.match(ui.messages.at(-1)[0],/仅临时生效/);
     assert.ok(!ui.messages.at(-1)[0].includes("已保存"),"temporary changes must not claim persistence");
   }

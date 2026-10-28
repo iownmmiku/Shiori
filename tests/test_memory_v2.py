@@ -6,7 +6,7 @@ import json
 import pytest
 
 from qunyu.db import Store, TABLES
-from mikubot.memory import CHUNK_SIZE, MAX_SEMANTIC_CHUNKS, MemoryEngine, tokenize
+from shiori.memory import CHUNK_SIZE, MAX_SEMANTIC_CHUNKS, MemoryEngine, tokenize
 
 
 @pytest.fixture
@@ -106,7 +106,8 @@ async def test_semantic_paraphrase_uses_only_bounded_chunks_and_cache(store):
         assert first["semantic"]["embedded_chunks"] == 2
         second = await engine.inspect("web:default", "owner", "最爱什么饮品")
         assert second["semantic"]["cache_hits"] == 2 and second["semantic"]["embedded_chunks"] == 0
-        assert len(calls) == 3  # query + documents, then only a fresh query
+        assert len(calls) == 2  # query + documents; identical query reuses its bounded cache
+        assert second['semantic']['query_cache_hit'] is True
         assert all(scope == "web:default" for _, scope in calls)
         with sqlite3.connect(engine.index_path) as connection:
             cache_dump = " ".join(str(row) for row in connection.iterdump())
@@ -282,6 +283,9 @@ async def test_clear_index_during_embedding_does_not_repopulate_old_generation(s
 async def test_model_and_dimension_signatures_prevent_vector_space_mixing(store):
     create(store, "模型测试")
     config = settings(True)
+    # Exercise an unannounced remote dimension change with caching disabled;
+    # a short-lived cached query intentionally preserves its original space.
+    config['memory']['query_cache_ttl_seconds'] = 0
     dimension, calls = 2, []
 
     async def embed(texts, *, scope_id):

@@ -1,11 +1,11 @@
 # Optional starting point; not a measured 2 GiB capacity guarantee.
 # docker compose -f compose.yaml -f compose.low-memory.yaml up -d
 services:
-  mikubot:
-    mem_limit: ${MIKUBOT_MEMORY_LIMIT:-768m}
-    cpus: ${MIKUBOT_CPU_LIMIT:-1.0}
+  shiori:
+    mem_limit: ${SHIORI_MEMORY_LIMIT:-768m}
+    cpus: ${SHIORI_CPU_LIMIT:-1.0}
     logging:
       driver: json-file
       options:
-        max-size: ${MIKUBOT_LOG_MAX_SIZE:-10m}
-        max-file: "${MIKUBOT_LOG_MAX_FILES:-3}"
+        max-size: ${SHIORI_LOG_MAX_SIZE:-10m}
+        max-file: "${SHIORI_LOG_MAX_FILES:-3}"

@@ -3,9 +3,9 @@ import copy
 
 import pytest
 
-from mikubot.chat import ChatService
+from shiori.chat import ChatService
 from qunyu.db import Store
-from mikubot.settings import DEFAULTS, resolve_model
+from shiori.settings import DEFAULTS, resolve_model
 
 
 DIGEST = "CONVERSATION_DIGEST_ONLY：大家约好周日一起做饭，菜单尚待确认。"

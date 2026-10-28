@@ -8,12 +8,12 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from mikubot.api import create_app
-from mikubot.chat import ChatService
+from shiori.api import create_app
+from shiori.chat import ChatService
 from qunyu.db import Store
-from mikubot.documents import extract_document
-from mikubot.provider import Provider, ProviderError
-from mikubot.settings import Settings
+from shiori.documents import extract_document
+from shiori.provider import Provider, ProviderError
+from shiori.settings import Settings
 from auth_helpers import password_login
 
 

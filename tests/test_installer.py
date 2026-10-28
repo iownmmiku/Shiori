@@ -6,7 +6,7 @@ import zipfile
 
 import pytest
 
-from mikubot import installer
+from shiori import installer
 
 real_shortcuts = installer.create_shortcuts
 real_running = installer.is_instance_running
@@ -14,7 +14,7 @@ real_guard = installer._acquire_application_guard
 
 
 def test_installer_checks_independent_and_legacy_data_locations(tmp_path, monkeypatch):
-    from mikubot import data_paths
+    from shiori import data_paths
     personal = tmp_path / 'personal-data'
     monkeypatch.setattr(data_paths, 'default_data_dir', lambda: personal)
     examined = []
@@ -51,13 +51,13 @@ def package(folder, files=None, extra=None, version='0.7.0'):
     folder.mkdir(parents=True, exist_ok=True)
     archive = folder / 'payload.zip'
     with zipfile.ZipFile(archive, 'w') as output:
-        for name, content in (files or {'mikubot.exe': b'program', '_internal/runtime.bin': b'runtime'}).items():
-            output.writestr('mikubot/' + name, content)
+        for name, content in (files or {'shiori.exe': b'program', '_internal/runtime.bin': b'runtime'}).items():
+            output.writestr('shiori/' + name, content)
         if extra:
             for name, content in extra:
                 output.writestr(name, content)
     manifest = {'schema': 1, 'version': version, 'sha256': hashlib.sha256(archive.read_bytes()).hexdigest(),
-                'root': 'mikubot', 'executable': 'mikubot.exe'}
+                'root': 'shiori', 'executable': 'shiori.exe'}
     return archive, manifest
 
 
@@ -67,16 +67,16 @@ def test_fresh_install_is_offline_and_stages_before_writing(tmp_path):
     progress = []
     result = installer.install_payload(payload, manifest, target, progress=lambda value, text: progress.append(value))
     assert result['version'] == '0.7.0'
-    assert (target / 'mikubot.exe').read_bytes() == b'program'
+    assert (target / 'shiori.exe').read_bytes() == b'program'
     assert not (target / 'data').exists()
     assert progress == sorted(progress) and progress[-1] == 100
     record = json.loads((target / installer.INSTALL_RECORD).read_text('utf-8'))
-    assert record['files']['mikubot.exe'] == hashlib.sha256(b'program').hexdigest()
-    assert not list(tmp_path.glob('.mikubot-*'))
+    assert record['files']['shiori.exe'] == hashlib.sha256(b'program').hexdigest()
+    assert not list(tmp_path.glob('.shiori-*'))
 
 
 def test_upgrade_preserves_data_and_unknown_files_and_removes_only_owned_obsolete(tmp_path):
-    payload, manifest = package(tmp_path / 'old', {'mikubot.exe': b'old', '_internal/obsolete.bin': b'old lib', 'edited.txt': b'original'})
+    payload, manifest = package(tmp_path / 'old', {'shiori.exe': b'old', '_internal/obsolete.bin': b'old lib', 'edited.txt': b'original'})
     target = tmp_path / 'install'
     installer.install_payload(payload, manifest, target)
     (target / 'data').mkdir()
@@ -89,32 +89,32 @@ def test_upgrade_preserves_data_and_unknown_files_and_removes_only_owned_obsolet
     assert (target / 'custom.txt').read_bytes() == b'user'
     assert (target / 'edited.txt').read_bytes() == b'user modified'
     assert not (target / '_internal/obsolete.bin').exists()
-    assert (target / 'mikubot.exe').read_bytes() == b'program'
+    assert (target / 'shiori.exe').read_bytes() == b'program'
 
 
 def test_legacy_portable_upgrade_keeps_data_and_extra(tmp_path):
     target = tmp_path / 'portable'
     (target / 'data').mkdir(parents=True)
-    (target / 'mikubot.exe').write_bytes(b'legacy')
+    (target / 'shiori.exe').write_bytes(b'legacy')
     (target / 'data' / 'config.json').write_bytes(b'original secrets')
     (target / 'local-note.txt').write_bytes(b'note')
     (target / 'README.md').write_bytes(b'personal same-name notes')
-    payload, manifest = package(tmp_path / 'bundle', {'mikubot.exe': b'new', 'README.md': b'program readme'})
+    payload, manifest = package(tmp_path / 'bundle', {'shiori.exe': b'new', 'README.md': b'program readme'})
     result = installer.install_payload(payload, manifest, target)
     assert (target / 'data' / 'config.json').read_bytes() == b'original secrets'
     assert (target / 'local-note.txt').read_bytes() == b'note'
     backup = Path(result['legacy_backup'])
-    assert (backup / 'mikubot.exe').read_bytes() == b'legacy'
+    assert (backup / 'shiori.exe').read_bytes() == b'legacy'
     assert (backup / 'README.md').read_bytes() == b'personal same-name notes'
     assert (target / 'README.md').read_bytes() == b'program readme'
     assert str(backup) in result['warnings'][-1]
     assert json.loads((target / installer.INSTALL_RECORD).read_text('utf-8'))['legacy_backup'] == str(backup)
 
 
-@pytest.mark.parametrize('name', ['mikubot/../escape', '/absolute', 'C:/escape', 'mikubot/C:bad',
-                                  'mikubot/a\\escape', 'mikubot/a./file', 'mikubot/NUL.txt',
-                                  'mikubot/data/config.json', 'mikubot/.mikubot-install.json', 'outside/file',
-                                  'mikubot//double', 'mikubot/_internal/../file'])
+@pytest.mark.parametrize('name', ['shiori/../escape', '/absolute', 'C:/escape', 'shiori/C:bad',
+                                  'shiori/a\\escape', 'shiori/a./file', 'shiori/NUL.txt',
+                                  'shiori/data/config.json', 'shiori/.shiori-install.json', 'outside/file',
+                                  'shiori//double', 'shiori/_internal/../file'])
 def test_unsafe_zip_paths_rejected_before_destination_writes(tmp_path, name):
     payload, manifest = package(tmp_path / 'bundle', extra=[(name, b'bad')])
     # ZipInfo normalizes backslashes on Windows when writing. Construct the
@@ -125,11 +125,11 @@ def test_unsafe_zip_paths_rejected_before_destination_writes(tmp_path, name):
     with pytest.raises(installer.InstallError):
         installer.install_payload(payload, manifest, tmp_path / 'install')
     assert not (tmp_path / 'install').exists()
-    assert not list(tmp_path.glob('.mikubot-*'))
+    assert not list(tmp_path.glob('.shiori-*'))
 
 
 def test_symbolic_link_in_payload_rejected(tmp_path):
-    info = zipfile.ZipInfo('mikubot/link')
+    info = zipfile.ZipInfo('shiori/link')
     info.create_system = 3
     info.external_attr = (stat.S_IFLNK | 0o777) << 16
     payload, manifest = package(tmp_path / 'bundle', extra=[(info, b'../../data')])
@@ -138,13 +138,13 @@ def test_symbolic_link_in_payload_rejected(tmp_path):
 
 
 def test_case_insensitive_duplicates_rejected(tmp_path):
-    payload, manifest = package(tmp_path / 'bundle', extra=[('mikubot/MIKUBOT.EXE', b'collision')])
+    payload, manifest = package(tmp_path / 'bundle', extra=[('shiori/SHIORI.EXE', b'collision')])
     with pytest.raises(installer.InstallError, match='重复'):
         installer.install_payload(payload, manifest, tmp_path / 'install')
 
 
 def test_file_and_directory_conflict_rejected(tmp_path):
-    payload, manifest = package(tmp_path / 'bundle', extra=[('mikubot/_internal', b'bad')])
+    payload, manifest = package(tmp_path / 'bundle', extra=[('shiori/_internal', b'bad')])
     with pytest.raises(installer.InstallError, match='冲突'):
         installer.install_payload(payload, manifest, tmp_path / 'install')
 
@@ -152,12 +152,12 @@ def test_file_and_directory_conflict_rejected(tmp_path):
 def test_sha_failure_preserves_existing_program(tmp_path):
     target = tmp_path / 'install'
     target.mkdir()
-    (target / 'mikubot.exe').write_bytes(b'old')
+    (target / 'shiori.exe').write_bytes(b'old')
     payload, manifest = package(tmp_path / 'bundle')
     manifest['sha256'] = '0' * 64
     with pytest.raises(installer.InstallError, match='校验失败'):
         installer.install_payload(payload, manifest, target)
-    assert (target / 'mikubot.exe').read_bytes() == b'old'
+    assert (target / 'shiori.exe').read_bytes() == b'old'
 
 
 def test_running_instance_blocks_before_stage_and_is_never_stopped(tmp_path, monkeypatch):
@@ -165,7 +165,7 @@ def test_running_instance_blocks_before_stage_and_is_never_stopped(tmp_path, mon
     payload, manifest = package(tmp_path / 'bundle')
     with pytest.raises(installer.InstallError, match='正在运行'):
         installer.install_payload(payload, manifest, tmp_path / 'install')
-    assert not list(tmp_path.glob('.mikubot-*'))
+    assert not list(tmp_path.glob('.shiori-*'))
 
 
 def test_instance_starting_during_staging_blocks_replace(tmp_path, monkeypatch):
@@ -179,23 +179,23 @@ def test_instance_starting_during_staging_blocks_replace(tmp_path, monkeypatch):
 
 def test_write_failure_rolls_back_and_allows_retry(tmp_path, monkeypatch):
     target = tmp_path / 'install'
-    payload, manifest = package(tmp_path / 'old', {'mikubot.exe': b'old', '_internal/runtime.bin': b'oldruntime'})
+    payload, manifest = package(tmp_path / 'old', {'shiori.exe': b'old', '_internal/runtime.bin': b'oldruntime'})
     installer.install_payload(payload, manifest, target)
     original_record = (target / installer.INSTALL_RECORD).read_bytes()
     payload, manifest = package(tmp_path / 'new')
     real_replace = installer.os.replace
     def fail_once(source, destination):
-        if '.mikubot-stage-' in str(source) and Path(destination) == target / '_internal/runtime.bin':
+        if '.shiori-stage-' in str(source) and Path(destination) == target / '_internal/runtime.bin':
             raise PermissionError('locked')
         return real_replace(source, destination)
     with monkeypatch.context() as scoped:
         scoped.setattr(installer.os, 'replace', fail_once)
         with pytest.raises(installer.InstallError, match='原程序文件已恢复'):
             installer.install_payload(payload, manifest, target)
-    assert (target / 'mikubot.exe').read_bytes() == b'old'
+    assert (target / 'shiori.exe').read_bytes() == b'old'
     assert (target / '_internal/runtime.bin').read_bytes() == b'oldruntime'
     assert (target / installer.INSTALL_RECORD).read_bytes() == original_record
-    assert not list(tmp_path.glob('.mikubot-*'))
+    assert not list(tmp_path.glob('.shiori-*'))
     installer.install_payload(payload, manifest, target)
     assert (target / '_internal/runtime.bin').read_bytes() == b'runtime'
 
@@ -205,11 +205,11 @@ def test_unknown_collision_on_new_version_is_preserved(tmp_path):
     target = tmp_path / 'install'
     installer.install_payload(payload, manifest, target)
     (target / 'new.txt').write_bytes(b'user')
-    payload, manifest = package(tmp_path / 'new', {'mikubot.exe': b'next', 'new.txt': b'program'})
+    payload, manifest = package(tmp_path / 'new', {'shiori.exe': b'next', 'new.txt': b'program'})
     with pytest.raises(installer.InstallError, match='用户文件重名'):
         installer.install_payload(payload, manifest, target)
     assert (target / 'new.txt').read_bytes() == b'user'
-    assert (target / 'mikubot.exe').read_bytes() == b'program'
+    assert (target / 'shiori.exe').read_bytes() == b'program'
 
 
 def test_initial_unrelated_file_collision_refuses(tmp_path):
@@ -248,12 +248,12 @@ def test_shortcut_failure_is_warning_after_success(tmp_path, monkeypatch):
     target = tmp_path / 'install'
     result = installer.install_payload(payload, manifest, target)
     assert result['warnings']
-    assert (target / 'mikubot.exe').exists()
+    assert (target / 'shiori.exe').exists()
 
 
 def test_rollback_failure_retains_recovery_copy(tmp_path, monkeypatch):
     target = tmp_path / 'install'
-    payload, manifest = package(tmp_path / 'old', {'mikubot.exe': b'old', '_internal/runtime.bin': b'oldruntime'})
+    payload, manifest = package(tmp_path / 'old', {'shiori.exe': b'old', '_internal/runtime.bin': b'oldruntime'})
     installer.install_payload(payload, manifest, target)
     payload, manifest = package(tmp_path / 'new')
     real_replace = installer.os.replace
@@ -264,28 +264,28 @@ def test_rollback_failure_retains_recovery_copy(tmp_path, monkeypatch):
     monkeypatch.setattr(installer.os, 'replace', broken)
     with pytest.raises(installer.InstallError, match='旧程序保存在'):
         installer.install_payload(payload, manifest, target)
-    backups = list(tmp_path.glob('.mikubot-backup-*'))
+    backups = list(tmp_path.glob('.shiori-backup-*'))
     assert len(backups) == 1
     assert (backups[0] / '_internal/runtime.bin').read_bytes() == b'oldruntime'
-    assert not list(tmp_path.glob('.mikubot-stage-*'))
+    assert not list(tmp_path.glob('.shiori-stage-*'))
     assert not list(tmp_path.glob('*.installing'))
 
 
 def test_target_ancestor_file_is_preserved_before_program_replacement(tmp_path):
     target = tmp_path / 'install'
     target.mkdir()
-    (target / 'mikubot.exe').write_bytes(b'old')
+    (target / 'shiori.exe').write_bytes(b'old')
     (target / '_internal').write_bytes(b'user file')
     payload, manifest = package(tmp_path / 'bundle')
     with pytest.raises(installer.InstallError, match='同名文件占用'):
         installer.install_payload(payload, manifest, target)
-    assert (target / 'mikubot.exe').read_bytes() == b'old'
+    assert (target / 'shiori.exe').read_bytes() == b'old'
     assert (target / '_internal').read_bytes() == b'user file'
 
 
 def test_concurrent_install_lock_blocks_and_is_not_removed(tmp_path):
     target = tmp_path / 'install'
-    name = '.mikubot-' + hashlib.sha256(str(target.resolve()).casefold().encode()).hexdigest()[:16] + '.installing'
+    name = '.shiori-' + hashlib.sha256(str(target.resolve()).casefold().encode()).hexdigest()[:16] + '.installing'
     lock = tmp_path / name
     lock.write_bytes(b'other installer')
     payload, manifest = package(tmp_path / 'bundle')

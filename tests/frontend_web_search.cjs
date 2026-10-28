@@ -1,6 +1,6 @@
 "use strict";
 const assert = require("node:assert/strict"), fs = require("node:fs"), path = require("node:path"), vm = require("node:vm");
-const source = fs.readFileSync(path.join(__dirname,"../mikubot/static/web-search.js"),"utf8");
+const source = fs.readFileSync(path.join(__dirname,"../shiori/static/web-search.js"),"utf8");
 const escape = value => String(value ?? "").replace(/[&<>"']/g,char => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
 const decode = value => String(value ?? "").replace(/&(?:amp|lt|gt|quot|#39);/g,value => ({"&amp;":"&","&lt;":"<","&gt;":">","&quot;":'"',"&#39;":"'"}[value]));
 const plain = value => JSON.parse(JSON.stringify(value));
@@ -27,11 +27,11 @@ const sandbox = {window:{},URL,state:{settings},fieldId:0,e:escape,icon:()=>"",
 };
 vm.createContext(sandbox);
 const readForm = sandbox.getForm;
-vm.runInContext(fs.readFileSync(path.join(__dirname,"../mikubot/static/ui-core.js"),"utf8"),sandbox);
+vm.runInContext(fs.readFileSync(path.join(__dirname,"../shiori/static/ui-core.js"),"utf8"),sandbox);
 sandbox.getForm = readForm;
 sandbox.toast = (...args) => toasts.push(args);
 vm.runInContext(source,sandbox);
-const ui = sandbox.window.MikubotWebSearch;
+const ui = sandbox.window.ShioriWebSearch;
 
 class Area {
   constructor(){this._html="";this._text="";}

@@ -11,9 +11,9 @@ const sandbox={window:{},state,TextDecoder,AbortController,URLSearchParams,
   api:async(url,opts)=>{calls.push([url,opts]);return url==='/api/chat'?response:{};},
   toast:(...args)=>notices.push(args)};
 vm.createContext(sandbox);
-vm.runInContext(fs.readFileSync(path.join(__dirname,'../mikubot/static/experience-chat.js'),'utf8'),sandbox);
+vm.runInContext(fs.readFileSync(path.join(__dirname,'../shiori/static/experience-chat.js'),'utf8'),sandbox);
 const runtime={attachments:[],attachmentScope:'web:default'};
-const ui=sandbox.window.MikubotExperienceChat.create(runtime,{});
+const ui=sandbox.window.ShioriExperienceChat.create(runtime,{});
 const frame=event=>'data: '+JSON.stringify(event)+'\n\n';
 function stream(events,options={}){
   const raw=new TextEncoder().encode(events.map(frame).join(''));

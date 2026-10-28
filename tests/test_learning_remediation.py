@@ -5,13 +5,13 @@ import json
 from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
-from mikubot.api import create_app
-from mikubot.chat import ChatService
-from mikubot.db import Store
-from mikubot.settings import Settings,DEFAULTS
-from mikubot.memory import _time_window
-from mikubot.learning_dashboard import snapshot
-from mikubot.delivery import DeliveryLedger
+from shiori.api import create_app
+from shiori.chat import ChatService
+from shiori.db import Store
+from shiori.settings import Settings,DEFAULTS
+from shiori.memory import _time_window
+from shiori.learning_dashboard import snapshot
+from shiori.delivery import DeliveryLedger
 
 @pytest.fixture
 def anyio_backend():return 'asyncio'
@@ -30,7 +30,7 @@ async def test_short_chat_extracts_once_and_cursor_survives_restart(tmp_path):
         await chat._extract('web:default','42',automatic=True)
         records=store.list_memories(scope_id='web:default')
         assert len(records)==1 and records[0]['status']=='active'
-        from mikubot.timezones import message_anchor, config_zone, utc_timestamp
+        from shiori.timezones import message_anchor, config_zone, utc_timestamp
         expected = _time_window('昨晚', message_anchor(message), config_zone(s))
         assert records[0]['event_time_known'] is True
         assert records[0]['event_time_start'] == utc_timestamp(expected[0])
@@ -82,7 +82,7 @@ def test_dashboard_uses_bounded_rows_and_counts_pending(tmp_path):
 @pytest.mark.anyio
 async def test_qq_image_bytes_reach_model_instead_of_expiring_cdn_url(tmp_path,monkeypatch):
     import base64
-    from mikubot.onebot import OneBotBridge
+    from shiori.onebot import OneBotBridge
     raw=base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=')
     calls=[]
     class Vision:
@@ -92,7 +92,7 @@ async def test_qq_image_bytes_reach_model_instead_of_expiring_cdn_url(tmp_path,m
     s=Settings(tmp_path);s.update({'model':{'base_url':'https://fixture.invalid/v1','model':'vision','vision':True},'onebot':{'enabled':True,'chat_policy':'blacklist','access_token':'fixture-onebot-token'},'stickers':{'enabled':False}})
     store=Store(tmp_path);store.upsert_scope({'id':'qq:private:42','auto_memory':False,'always_reply':True})
     chat=ChatService(store,s,Vision());bridge=OneBotBridge(store,s,chat)
-    import mikubot.stickers as stickers
+    import shiori.stickers as stickers
     monkeypatch.setattr(stickers,'download_image',lambda url,**kwargs:(raw,'image/png'))
     class Socket:
         async def send_json(self,action):
@@ -113,13 +113,13 @@ async def test_qq_image_bytes_reach_model_instead_of_expiring_cdn_url(tmp_path,m
 
 @pytest.mark.anyio
 async def test_resume_skips_unknown_and_confirmed_parts_and_checks_authority(tmp_path):
-    from mikubot.delivery import install_delivery
+    from shiori.delivery import install_delivery
     from fastapi import FastAPI
     store=Store(tmp_path);settings=Settings(tmp_path)
     settings.update({'output':{'interval_ms':0}})
     source=store.add_message('web:default','42','user','问题')
     assistant=store.add_message('web:default','assistant','assistant','整段回复')
-    from mikubot.settings import resolved_identity
+    from shiori.settings import resolved_identity
     flow=SimpleNamespace(settings=settings,store=store,chat=SimpleNamespace(social=SimpleNamespace(_allowed=lambda s:True,_blocked_sources=lambda s:set())),allowed=lambda *a:True,
         _output_locks={'web:default':asyncio.Lock()})
     sent=[]

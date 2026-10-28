@@ -15,12 +15,12 @@ from fastapi.responses import StreamingResponse
 import uvicorn
 
 from auth_helpers import password_login
-from mikubot.api import create_app
-from mikubot.chat_preview import emit_preview, preview_events, preview_filter
-from mikubot.db import Store
-from mikubot.provider import Provider, ProviderError
-from mikubot.settings import Settings
-from mikubot.web_chat_stream import chat_stream
+from shiori.api import create_app
+from shiori.chat_preview import emit_preview, preview_events, preview_filter
+from shiori.db import Store
+from shiori.provider import Provider, ProviderError
+from shiori.settings import Settings
+from shiori.web_chat_stream import chat_stream
 
 
 def frame(delta, finish=None):

@@ -20,7 +20,7 @@ def main():
     parser.add_argument('--work-dir', required=True, type=Path)
     parser.add_argument('--port', type=int, default=18767)
     parser.add_argument('--mcp-fixture-url', default='')
-    parser.add_argument('--version', '--expect-version', '--expect', dest='version', default='0.1.6')
+    parser.add_argument('--version', '--expect-version', '--expect', dest='version', default='0.2.0')
     args = parser.parse_args()
     version = effective_contract_version(args.version)
     root = args.work_dir.resolve()
@@ -37,7 +37,7 @@ def main():
         assert result.returncode == expected, f'installer exit {result.returncode}, expected {expected}'
 
     def record():
-        return json.loads((target / '.mikubot-install.json').read_text('utf-8'))
+        return json.loads((target / '.shiori-install.json').read_text('utf-8'))
 
     def snapshot(folder):
         return {p.relative_to(folder).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
@@ -47,15 +47,15 @@ def main():
     assert record()['version'] == args.version
     for name, digest in record()['files'].items():
         assert hashlib.sha256((target / name).read_bytes()).hexdigest() == digest, name
-    assert (target / '_internal/mikubot/static/quick-start.js').is_file()
+    assert (target / '_internal/shiori/static/quick-start.js').is_file()
     if version >= (0, 8):
         for name in ('experience.js', 'experience.css', 'guide.md'):
-            assert (target / '_internal/mikubot/static' / name).is_file(), name
-        assert (target / '_internal/mikubot/resources/csp/SKILL.md').is_file()
-        assert (target / '_internal/mikubot/resources/csp/references/persona-template.md').is_file()
+            assert (target / '_internal/shiori/static' / name).is_file(), name
+        assert (target / '_internal/shiori/resources/csp/SKILL.md').is_file()
+        assert (target / '_internal/shiori/resources/csp/references/persona-template.md').is_file()
     assert not (target / 'data').exists()
     smoke = [sys.executable, str(Path(__file__).with_name('smoke_portable.py')),
-             str(target / 'mikubot.exe'), '--data-dir', str(target / 'data'),
+             str(target / 'shiori.exe'), '--data-dir', str(target / 'data'),
              '--port', str(args.port), '--expect-version', args.version]
     if args.mcp_fixture_url:
         smoke += ['--mcp-fixture-url', args.mcp_fixture_url]
@@ -75,7 +75,7 @@ def main():
 
     def start():
         nonlocal process
-        process = subprocess.Popen([str(target / 'mikubot.exe'), '--data-dir', str(data), '--port', str(args.port), '--no-browser', '--no-tray'],
+        process = subprocess.Popen([str(target / 'shiori.exe'), '--data-dir', str(data), '--port', str(args.port), '--no-browser', '--no-tray'],
                                    cwd=target, creationflags=flags)
         for _ in range(120):
             try:
@@ -90,7 +90,7 @@ def main():
 
     def stop():
         nonlocal process
-        result = subprocess.run([str(target / 'mikubot.exe'), '--data-dir', str(data), '--stop', '--no-browser'], cwd=target,
+        result = subprocess.run([str(target / 'shiori.exe'), '--data-dir', str(data), '--stop', '--no-browser'], cwd=target,
                                 capture_output=True, timeout=15, creationflags=flags)
         assert result.returncode == 0
         if process:
@@ -100,10 +100,10 @@ def main():
 
     try:
         start()
-        old_record = (target / '.mikubot-install.json').read_bytes()
+        old_record = (target / '.shiori-install.json').read_bytes()
         install(target, expected=1)
         assert request('/healthz')['version'] == args.version
-        assert (target / '.mikubot-install.json').read_bytes() == old_record
+        assert (target / '.shiori-install.json').read_bytes() == old_record
         stop()
         before = snapshot(data)
         install(target)
@@ -123,12 +123,12 @@ def main():
     # Legacy installs lack ownership metadata: all replaced files stay recoverable.
     legacy = root / '旧便携目录'
     legacy.mkdir()
-    shutil.copy2(target / 'mikubot.exe', legacy / 'mikubot.exe')
+    shutil.copy2(target / 'shiori.exe', legacy / 'shiori.exe')
     (legacy / 'README.md').write_text('same-name personal document', 'utf-8')
     (legacy / 'data').mkdir()
     (legacy / 'data/keep.bin').write_bytes(b'legacy-data')
     install(legacy)
-    legacy_record = json.loads((legacy / '.mikubot-install.json').read_text('utf-8'))
+    legacy_record = json.loads((legacy / '.shiori-install.json').read_text('utf-8'))
     recovery = Path(legacy_record['legacy_backup'])
     assert recovery.is_relative_to(root) and recovery.is_dir()
     assert (recovery / 'README.md').read_text('utf-8') == 'same-name personal document'

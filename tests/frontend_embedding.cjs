@@ -11,8 +11,8 @@ const state={page:'models'},sandbox={window:{},state,e:escape,button:(title,acti
     if(url==='/api/model-catalog/models')return{models:[{...item,provider_id:options.body.provider_id,model:options.body.models[0].model}],added:[item]};
     if(url==='/api/model-catalog/embedding/test'){if(fail)throw Error('bad vector');return{ok:true,dimension:3,elapsed_ms:12};}return{};},
   $:selector=>nodes.get(selector),getForm:form=>form.values,openModal:(...args)=>{modal=args;state.modalKind=args[3];},closeModal:()=>{modal=null;},bootstrap:async()=>{},renderPage:async()=>{},navigate:async page=>state.page=page,toast:()=>{},setTimeout:()=>1,clearTimeout:()=>{}};
-vm.createContext(sandbox);vm.runInContext(fs.readFileSync(path.join(__dirname,'../mikubot/static/embedding-models.js'),'utf8'),sandbox);
-const ui=sandbox.window.MikubotEmbedding,plain=x=>JSON.parse(JSON.stringify(x));
+vm.createContext(sandbox);vm.runInContext(fs.readFileSync(path.join(__dirname,'../shiori/static/embedding-models.js'),'utf8'),sandbox);
+const ui=sandbox.window.ShioriEmbedding,plain=x=>JSON.parse(JSON.stringify(x));
 async function main(){
   assert.match(ui.tabs(),/对话模型/);assert.match(ui.tabs(),/嵌入模型/);
   await ui.handleAction('model-type-tab',{dataset:{id:'embedding'}});assert.equal(ui.active(),true);

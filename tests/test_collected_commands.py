@@ -6,11 +6,11 @@ import json
 
 import pytest
 
-from mikubot.chat import ChatService
-from mikubot.db import Store
-from mikubot.provider import ProviderError
-from mikubot.settings import DEFAULTS
-from mikubot.social import ConversationFlow
+from shiori.chat import ChatService
+from shiori.db import Store
+from shiori.provider import ProviderError
+from shiori.settings import DEFAULTS
+from shiori.social import ConversationFlow
 
 
 class Config:

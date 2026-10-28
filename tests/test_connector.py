@@ -6,10 +6,10 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from qunyu.db import Store
-from mikubot.onebot import OneBotBridge
-from mikubot.scheduler import TaskScheduler
-from mikubot.settings import DEFAULTS
-from mikubot.social import SocialEngine
+from shiori.onebot import OneBotBridge
+from shiori.scheduler import TaskScheduler
+from shiori.settings import DEFAULTS
+from shiori.social import SocialEngine
 
 
 class Config:

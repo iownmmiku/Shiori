@@ -6,11 +6,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from mikubot.db import Store
-from mikubot.memory import MemoryEngine
-from mikubot.provider import _PriorityGate
-from mikubot.settings import Settings
-from mikubot.runs import RunManager
+from shiori.db import Store
+from shiori.memory import MemoryEngine
+from shiori.provider import _PriorityGate
+from shiori.settings import Settings
+from shiori.runs import RunManager
 from test_tool_actions_v4 import environment, propose
 
 
@@ -40,7 +40,7 @@ def test_sandbox_external_permission_requires_real_boolean(tmp_path):
 
 
 def test_tray_notification_is_nonblocking_and_has_no_messagebox(monkeypatch):
-    from mikubot import notifications
+    from shiori import notifications
     called=threading.Event();release=threading.Event()
     def notify(message,title):
         called.set();release.wait(2)
@@ -52,7 +52,7 @@ def test_tray_notification_is_nonblocking_and_has_no_messagebox(monkeypatch):
 
 
 def test_temporary_tray_notification_is_removed_without_a_dialog(monkeypatch):
-    from mikubot import notifications
+    from shiori import notifications
     stopped=threading.Event();seen=[]
     class Icon:
         HAS_NOTIFICATION=True
@@ -62,10 +62,10 @@ def test_temporary_tray_notification_is_removed_without_a_dialog(monkeypatch):
         def stop(self):stopped.set()
     monkeypatch.setattr(notifications,'os',SimpleNamespace(name='nt'))
     monkeypatch.setitem(sys.modules,'pystray',SimpleNamespace(Icon=Icon))
-    monkeypatch.setattr('mikubot.brand.tray_image',lambda:object())
+    monkeypatch.setattr('shiori.brand.tray_image',lambda:object())
     assert notifications.notify_info('browser mode',lifetime=0)
     assert stopped.wait(1)
-    assert seen==[('browser mode','mikubot',True)]
+    assert seen==[('browser mode','Shiori',True)]
 
 
 @pytest.mark.anyio

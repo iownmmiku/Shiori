@@ -4,12 +4,12 @@ import asyncio
 import httpx
 import pytest
 
-from mikubot.db import Store
-from mikubot.model_catalog import ModelCatalog
-from mikubot.provider import (Provider, ProviderError, ProviderBudgetExceededError,
+from shiori.db import Store
+from shiori.model_catalog import ModelCatalog
+from shiori.provider import (Provider, ProviderError, ProviderBudgetExceededError,
     ProviderTimeoutError, ProviderConnectionError, ProviderRateLimitError, is_budget_exceeded)
-from mikubot.settings import Settings, resolve_model
-from mikubot.social import _failure_feedback
+from shiori.settings import Settings, resolve_model
+from shiori.social import _failure_feedback
 
 
 @pytest.mark.parametrize('error,word,budget', [

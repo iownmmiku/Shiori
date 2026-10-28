@@ -6,8 +6,8 @@ import zipfile
 
 def package(source: Path, archive: Path):
     source, archive = Path(source).resolve(), Path(archive).resolve()
-    if not (source / 'mikubot.exe').is_file():
-        raise ValueError('发行目录缺少 mikubot.exe')
+    if not (source / 'shiori.exe').is_file():
+        raise ValueError('发行目录缺少 shiori.exe')
     files = sorted(p for p in source.rglob('*') if p.is_file())
     for p in files:
         parts = p.relative_to(source).parts
@@ -15,7 +15,7 @@ def package(source: Path, archive: Path):
             raise ValueError('发行目录包含用户数据、测试数据或链接')
     with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED, compresslevel=6) as output:
         for p in files:
-            output.write(p, 'mikubot/' + p.relative_to(source).as_posix())
+            output.write(p, 'shiori/' + p.relative_to(source).as_posix())
     return len(files)
 
 

@@ -6,10 +6,10 @@ from copy import deepcopy
 
 import pytest
 
-from mikubot.db import Store
-from mikubot.profiles import resolve_scope, validate_profiles
-from mikubot.settings import DEFAULTS, Settings, resolved_debounce
-from mikubot.social import ConversationFlow, SocialEngine
+from shiori.db import Store
+from shiori.profiles import resolve_scope, validate_profiles
+from shiori.settings import DEFAULTS, Settings, resolved_debounce
+from shiori.social import ConversationFlow, SocialEngine
 
 
 @pytest.fixture
@@ -56,6 +56,16 @@ class Chat:
         message = self.store.add_message(scope_id, str(user_id), 'user', text, **dict(metadata or {}, images=images or []))
         self.social.observe(scope_id, message)
         return message
+
+    async def respond_group(self, scope_id, entries, *, metadata=None):
+        # Transport fixture only: real actor/authority checks live in the
+        # ChatService end-to-end group security suite.
+        meta = dict(metadata or {})
+        if len({entry['message']['user_id'] for entry in entries}) > 1:
+            meta.update(trusted_identity=None, is_admin=False, is_owner=False)
+        return await self.respond(scope_id, entries[-1]['message']['user_id'],
+            '\n'.join(entry['text'] for entry in entries),
+            images=list(dict.fromkeys(image for entry in entries for image in entry['images'])), metadata=meta)
 
     async def respond(self, scope_id, user_id, text, images=None, metadata=None):
         self.calls.append((scope_id, user_id, text, images, metadata, time.monotonic()))
@@ -139,18 +149,18 @@ async def test_planner_runs_once_on_combined_text_without_second_batch_delay(set
 
 
 @pytest.mark.anyio
-async def test_group_members_never_merge_authority_or_text(setup):
+async def test_group_members_share_text_window_without_borrowing_authority(setup):
     _, _, chat, flow, _, _ = setup
     try:
         await send(flow, '管理员自己的请求', user='101')
         await send(flow, '普通成员的请求', user='404')
         await send(flow, '管理员的补充', user='101')
         await drain(flow)
-        calls = {call[1]: call for call in chat.calls}
-        assert calls['101'][2] == '管理员自己的请求\n管理员的补充'
-        assert calls['404'][2] == '普通成员的请求'
-        assert calls['101'][4]['trusted_identity']['account_id'] == '101'
-        assert len(calls['101'][4]['source_ids']) == 2 and len(calls['404'][4]['source_ids']) == 1
+        assert len(chat.calls) == 1
+        call = chat.calls[0]
+        assert call[2] == '管理员自己的请求\n普通成员的请求\n管理员的补充'
+        assert call[4]['trusted_identity'] is None
+        assert len(call[4]['source_ids']) == 3
     finally:
         await flow.close()
 

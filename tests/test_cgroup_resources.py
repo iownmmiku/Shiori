@@ -5,7 +5,7 @@ import subprocess
 
 import pytest
 
-from mikubot.resource_metrics import ResourceMetrics, read_resources
+from shiori.resource_metrics import ResourceMetrics, read_resources
 
 
 def files(root, values):
@@ -19,7 +19,7 @@ def proc_files(root, membership, mounts=''):
 
 
 def test_v2_samples_actual_cpu_time_against_visible_quota(tmp_path, monkeypatch):
-    monkeypatch.setattr('mikubot.resource_metrics.os.cpu_count', lambda: 16)
+    monkeypatch.setattr('shiori.resource_metrics.os.cpu_count', lambda: 16)
     base, proc = tmp_path / 'group', tmp_path / 'proc'
     files(base, {'cpu.stat': 'usage_usec 1000000\nuser_usec 900000\n', 'cpu.max': '50000 100000',
                  'memory.current': 950, 'memory.max': 1000, 'memory.peak': 980,
@@ -38,7 +38,7 @@ def test_v2_samples_actual_cpu_time_against_visible_quota(tmp_path, monkeypatch)
 
 
 def test_v1_combined_controllers_mount_root_and_nanosecond_usage(tmp_path, monkeypatch):
-    monkeypatch.setattr('mikubot.resource_metrics.os.cpu_count', lambda: 8)
+    monkeypatch.setattr('shiori.resource_metrics.os.cpu_count', lambda: 8)
     base, proc = tmp_path / 'cgroup', tmp_path / 'proc'
     memory, cpu = base / 'memory', base / 'cpu,cpuacct'
     files(memory / 'worker', {'memory.usage_in_bytes': 500, 'memory.limit_in_bytes': 1000,
@@ -82,7 +82,7 @@ def test_namespace_root_and_escaped_mount_path_are_supported(tmp_path):
 
 
 def test_unlimited_v1_memory_and_cpuset_capacity_are_not_synthetic_ooms(tmp_path, monkeypatch):
-    monkeypatch.setattr('mikubot.resource_metrics.os.cpu_count', lambda: 12)
+    monkeypatch.setattr('shiori.resource_metrics.os.cpu_count', lambda: 12)
     base, proc = tmp_path / 'cgroup', tmp_path / 'proc'
     files(base / 'memory', {'memory.usage_in_bytes': 42, 'memory.limit_in_bytes': 9223372036854771712})
     files(base / 'cpu', {'cpu.cfs_quota_us': -1, 'cpu.cfs_period_us': 100000})
@@ -164,7 +164,7 @@ def test_statistics_ui_distinguishes_cgroup_and_external_connector_metrics():
 def test_statistics_api_keeps_resource_boundaries_and_background_index_status(tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
     from auth_helpers import password_login
-    from mikubot.api import create_app
+    from shiori.api import create_app
     resource = {'available': True, 'cgroup_version': 1, 'cpu_percent': 25, 'cpu_usage_cores': .25,
                 'cpu_limit': 1, 'memory_bytes': 100, 'memory_limit_bytes': 200}
     monkeypatch.setattr(ResourceMetrics, 'read', lambda self: resource)

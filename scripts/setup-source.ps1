@@ -30,7 +30,7 @@ Push-Location -LiteralPath $taskRoot
 try {
     if ($Stop) {
         if (-not (Test-Path -LiteralPath $taskPython)) { throw '尚未准备源码环境；停止操作不会自动安装依赖。' }
-        $taskStopArgs = @('-m', 'mikubot', '--stop', '--no-browser', '--no-tray')
+        $taskStopArgs = @('-m', 'shiori', '--stop', '--no-browser', '--no-tray')
         if ($DataDir) { $taskStopArgs += @('--data-dir', $DataDir) }
         & $taskPython @taskStopArgs
         if ($LASTEXITCODE -ne 0) { throw '停止请求失败，请查看数据目录中的 runtime.log。' }
@@ -64,7 +64,7 @@ try {
     $taskDigestText = [System.IO.File]::ReadAllText($taskRequirements) + [System.IO.File]::ReadAllText((Join-Path $taskRoot 'requirements-server.txt'))
     $taskHasher = [System.Security.Cryptography.SHA256]::Create()
     try { $taskDigest = [System.BitConverter]::ToString($taskHasher.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($taskDigestText))).Replace('-', '').ToLowerInvariant() } finally { $taskHasher.Dispose() }
-    $taskMarker = Join-Path $taskVenv '.mikubot-requirements.sha256'
+    $taskMarker = Join-Path $taskVenv '.shiori-requirements.sha256'
     $taskInstalled = if (Test-Path -LiteralPath $taskMarker) { ([System.IO.File]::ReadAllText($taskMarker)).Trim() } else { '' }
     if ($Reinstall -or $taskInstalled -ne $taskDigest) {
         Write-Host '正在安装源码依赖（首次需要网络）。密钥和聊天数据保持原样。'
@@ -75,14 +75,14 @@ try {
     & $taskPython -c 'import fastapi, uvicorn, httpx, websockets, multipart, jsonschema, pypdf; import PIL'
     if ($LASTEXITCODE -ne 0) { throw '依赖检查失败，请使用 -Reinstall 重新安装；不会覆盖 data。' }
     if ($SetupOnly) { Write-Host '源码环境已就绪。之后运行 start.ps1，或再次执行此脚本启动。'; return }
-    $taskLaunchArgs = @('-m', 'mikubot')
+    $taskLaunchArgs = @('-m', 'shiori')
     if ($DataDir) { $taskLaunchArgs += @('--data-dir', $DataDir) }
     if ($Port) { $taskLaunchArgs += @('--port', [string]$Port) }
     if ($BindHost) { $taskLaunchArgs += @('--host', $BindHost) }
     if ($NoBrowser) { $taskLaunchArgs += '--no-browser' }
     if ($Browser) { $taskLaunchArgs += '--browser' }
     if ($NoTray) { $taskLaunchArgs += '--no-tray' }
-    Write-Host '正在启动 mikubot。默认使用独立桌面窗口；关闭后留在托盘，可从托盘退出或使用本脚本 -Stop。'
+    Write-Host '正在启动 shiori。默认使用独立桌面窗口；关闭后留在托盘，可从托盘退出或使用本脚本 -Stop。'
     & $taskPython @taskLaunchArgs
-    if ($LASTEXITCODE -ne 0) { throw 'mikubot 启动失败，请查看数据目录中的 runtime.log。' }
+    if ($LASTEXITCODE -ne 0) { throw 'shiori 启动失败，请查看数据目录中的 runtime.log。' }
 } finally { Pop-Location }

@@ -6,10 +6,10 @@ import sqlite3
 
 import pytest
 
-from mikubot.chat import ChatService
-from mikubot.context import ContextEngine
-from mikubot.db import Store, message_fingerprint
-from mikubot.settings import DEFAULTS, resolve_model
+from shiori.chat import ChatService
+from shiori.context import ContextEngine
+from shiori.db import Store, message_fingerprint
+from shiori.settings import DEFAULTS, resolve_model
 
 
 @pytest.fixture
@@ -244,9 +244,9 @@ async def test_first_cursor_backfills_old_sources_and_legacy_empty_seed(service)
 @pytest.mark.anyio
 async def test_all_history_paths_use_insertion_order_for_timestamp_ties(service, monkeypatch):
     store, _, _, chat = service
-    monkeypatch.setattr('mikubot.db.utc_now', lambda: '2026-10-23T00:00:00.000000Z')
+    monkeypatch.setattr('shiori.db.utc_now', lambda: '2026-10-23T00:00:00.000000Z')
     ids = iter(['z-last-lexically', 'm-middle', 'a-first-lexically'])
-    monkeypatch.setattr('mikubot.db.uuid4', lambda: next(ids))
+    monkeypatch.setattr('shiori.db.uuid4', lambda: next(ids))
     originals = [store.add_message('web:default', 'owner', 'user', f'同一时刻{i}') for i in range(3)]
     lifecycle = chat.memory_lifecycle
     assert lifecycle.pending('web:default', 'owner') == originals

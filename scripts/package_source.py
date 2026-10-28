@@ -21,6 +21,7 @@ TREE_TYPES = {
     '.github/workflows': {'.yml', '.yaml'},
     'qunyu': {'.py'},
     'mikubot': {'.py'},
+    'shiori': {'.py'},
     'docs': {'.md', '.png', '.jpg', '.jpeg', '.svg'},
     'evals': {'.json'},
     'tests': {'.py', '.cjs', '.json'},
@@ -47,7 +48,7 @@ def _excluded_name(name: str) -> bool:
 
 
 def release_version(root: Path) -> str:
-    tree = ast.parse((root / 'mikubot' / '__init__.py').read_text('utf-8-sig'))
+    tree = ast.parse((root / 'shiori' / '__init__.py').read_text('utf-8-sig'))
     for node in tree.body:
         if isinstance(node, ast.Assign) and any(isinstance(x, ast.Name) and x.id == '__version__' for x in node.targets):
             value = ast.literal_eval(node.value)
@@ -88,8 +89,8 @@ def source_files(root: Path) -> list[Path]:
                     continue
                 path = parent / name
                 relative = path.relative_to(base)
-                resource = tree == 'mikubot' and relative.parts[0] == 'resources'
-                static = tree == 'mikubot' and relative.parts[0] == 'static'
+                resource = tree == 'shiori' and relative.parts[0] == 'resources'
+                static = tree == 'shiori' and relative.parts[0] == 'static'
                 allowed = (path.suffix.casefold() in types
                            or (static and path.suffix.casefold() in STATIC_TYPES)
                            or (resource and (path.suffix.casefold() in {'.md', '.ps1', '.cmd'} or name in RESOURCE_NOTICES))
@@ -109,14 +110,14 @@ def source_files(root: Path) -> list[Path]:
 def package(root: Path, archive: Path | None = None) -> dict:
     root = Path(root).resolve()
     version = release_version(root)
-    prefix = f'mikubot-{version}-source'
+    prefix = f'shiori-{version}-source'
     archive = Path(archive).resolve() if archive else root / 'dist' / f'{prefix}.zip'
     if archive.suffix.casefold() != '.zip':
         raise ValueError('源码包输出路径必须为 ZIP')
     if any(archive.is_relative_to(root / name) for name in TREE_TYPES) or archive in {root / name for name in ROOT_FILES}:
         raise ValueError('源码包不能写入源码白名单目录或覆盖源码文件')
     files = source_files(root)
-    manifest = {'version': version, 'format': 'mikubot-source-v1', 'files': {
+    manifest = {'version': version, 'format': 'shiori-source-v1', 'files': {
         path.relative_to(root).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest() for path in files}}
     archive.parent.mkdir(parents=True, exist_ok=True)
     temporary = archive.with_suffix('.zip.tmp')
@@ -141,7 +142,7 @@ def package(root: Path, archive: Path | None = None) -> dict:
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='生成不包含用户数据和运行环境的 mikubot 源码包')
+    parser = argparse.ArgumentParser(description='生成不包含用户数据和运行环境的 Shiori 源码包')
     parser.add_argument('--root', type=Path, default=Path(__file__).resolve().parent.parent)
     parser.add_argument('--output', type=Path)
     args = parser.parse_args()

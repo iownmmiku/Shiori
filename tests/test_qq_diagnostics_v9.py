@@ -10,10 +10,10 @@ from unittest.mock import AsyncMock
 import pytest
 
 from qunyu.db import Store
-from mikubot.onebot import OneBotBridge
-from mikubot.official import OfficialBridge
-from mikubot.settings import DEFAULTS
-from mikubot.social import SocialEngine
+from shiori.onebot import OneBotBridge
+from shiori.official import OfficialBridge
+from shiori.settings import DEFAULTS
+from shiori.social import SocialEngine
 
 
 @pytest.fixture
@@ -247,7 +247,7 @@ async def test_official_private_defaults_and_error_receipts(tmp_path):
 
 def test_actual_fastapi_reverse_ws_chat_service_and_delivery_receipt(tmp_path):
     from fastapi.testclient import TestClient
-    from mikubot.api import create_app
+    from shiori.api import create_app
     app = create_app(tmp_path / 'actual-pipeline', start_workers=False)
     cfg = app.state.settings
     cfg.update({'onebot': {'enabled': True, 'adapter': 'napcat', 'allowed_users': ['101'],
@@ -285,7 +285,7 @@ def test_actual_fastapi_reverse_ws_chat_service_and_delivery_receipt(tmp_path):
 
 def test_real_unconfigured_provider_returns_bounded_qq_error_receipt(tmp_path):
     from fastapi.testclient import TestClient
-    from mikubot.api import create_app
+    from shiori.api import create_app
     app = create_app(tmp_path / 'unconfigured-model', start_workers=False)
     app.state.settings.update({'onebot': {'enabled': True, 'adapter': 'napcat', 'allowed_users': ['101'],
         'access_token': 'isolated-test-onebot-token'}})
@@ -305,10 +305,10 @@ def test_real_unconfigured_provider_returns_bounded_qq_error_receipt(tmp_path):
 
 @pytest.mark.anyio
 async def test_private_chat_allowlist_is_shared_by_memory_context_reminders_and_diagnostics(tmp_path):
-    from mikubot.context import ContextEngine
-    from mikubot.memory import MemoryEngine
-    from mikubot.scheduler import TaskScheduler
-    from mikubot.diagnostics import build_diagnostics
+    from shiori.context import ContextEngine
+    from shiori.memory import MemoryEngine
+    from shiori.scheduler import TaskScheduler
+    from shiori.diagnostics import build_diagnostics
     store, cfg = Store(tmp_path), Config()
     cfg.data['onebot']['owner_ids'] = []
     scope = 'qq:private:101'

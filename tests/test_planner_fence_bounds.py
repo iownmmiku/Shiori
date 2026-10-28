@@ -7,7 +7,7 @@ def test_whitespace_heavy_fences_reject_without_unbounded_backtracking():
     # A subprocess bounds a regression even if it reintroduces CPU-bound regex
     # work, which an asyncio timeout in the same thread cannot interrupt.
     code = '''
-from mikubot.planner_result import parse_plan, PlanValidationError
+from shiori.planner_result import parse_plan, PlanValidationError
 fence = chr(96) * 3
 for text in (fence + ' ' * 15000 + 'x',
              fence + 'json' + ' ' * 15000 + 'x',

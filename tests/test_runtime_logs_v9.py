@@ -5,7 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from auth_helpers import password_login
-from mikubot.api import create_app
+from shiori.api import create_app
 
 
 @pytest.fixture

@@ -5,7 +5,7 @@ import re
 
 import pytest
 
-from mikubot import __version__
+from shiori import __version__
 from scripts.smoke_contract import effective_contract_version
 
 
@@ -59,8 +59,8 @@ def test_actual_smoke_feature_guards_use_the_full_public_contract(name):
 
 
 def test_release_version_and_web_asset_cache_labels_match():
-    assert __version__ == '0.1.6'
-    versions = re.findall(r'\?v=([^"\s]+)', (ROOT / 'mikubot/static/index.html').read_text('utf-8'))
+    assert __version__ == '0.2.0'
+    versions = re.findall(r'\?v=([^"&\s]+)', (ROOT / 'shiori/static/index.html').read_text('utf-8'))
     assert versions and set(versions) == {__version__}
 
 

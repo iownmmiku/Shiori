@@ -7,12 +7,12 @@ from unittest.mock import AsyncMock
 import pytest
 
 from qunyu.db import Store
-from mikubot.chat import ChatService
-from mikubot.official import OfficialBridge
-from mikubot.onebot import OneBotBridge
-from mikubot.output import split_output as configured_split_output
-from mikubot.settings import DEFAULTS
-from mikubot.social import SocialEngine
+from shiori.chat import ChatService
+from shiori.official import OfficialBridge
+from shiori.onebot import OneBotBridge
+from shiori.output import split_output as configured_split_output
+from shiori.settings import DEFAULTS
+from shiori.social import SocialEngine
 
 
 def split_output(text, config=None, scope=None):

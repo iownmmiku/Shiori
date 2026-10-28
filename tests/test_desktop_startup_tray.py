@@ -6,7 +6,7 @@ from types import ModuleType, SimpleNamespace
 
 import pytest
 
-from mikubot.desktop import DesktopShell
+from shiori.desktop import DesktopShell
 
 
 class Event:

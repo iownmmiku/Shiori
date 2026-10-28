@@ -5,8 +5,8 @@ import json
 
 import pytest
 
-from mikubot.db import Store
-from mikubot.knowledge import PersonaKnowledge, _interest_focuses, assess_topic_relevance
+from shiori.db import Store
+from shiori.knowledge import PersonaKnowledge, _interest_focuses, assess_topic_relevance
 
 
 @pytest.fixture

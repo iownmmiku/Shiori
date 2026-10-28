@@ -40,11 +40,11 @@ async def test_real_chat_and_onebot_combine_repeated_mentions_before_planning(tm
     from copy import deepcopy
     import json
     from types import SimpleNamespace
-    from mikubot.chat import ChatService
-    from mikubot.db import Store
-    from mikubot.onebot import OneBotBridge
-    from mikubot.provider import ProviderTimeoutError
-    from mikubot.settings import DEFAULTS
+    from shiori.chat import ChatService
+    from shiori.db import Store
+    from shiori.onebot import OneBotBridge
+    from shiori.provider import ProviderTimeoutError
+    from shiori.settings import DEFAULTS
 
     config = deepcopy(DEFAULTS)
     config['onebot'].update(enabled=True, chat_policy='blacklist')

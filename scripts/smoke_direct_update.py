@@ -20,8 +20,8 @@ from unittest.mock import patch
 import urllib.request
 from uuid import uuid4
 
-from mikubot import __version__
-from mikubot import updates
+from shiori import __version__
+from shiori import updates
 
 
 def main():
@@ -40,11 +40,11 @@ def main():
     shutil.copytree(args.program.resolve(),target)
     baseline={p.relative_to(target).as_posix():hashlib.sha256(p.read_bytes()).hexdigest() for p in target.rglob('*') if p.is_file()}
     if args.mode=='installed':
-        (target/'.mikubot-install.json').write_text(json.dumps({'schema':1,'version':__version__,'files':baseline}))
+        (target/'.shiori-install.json').write_text(json.dumps({'schema':1,'version':__version__,'files':baseline}))
     (target/'user-keep.txt').write_text('unknown file must survive','utf-8')
     with socket.socket() as listener:
         listener.bind(('127.0.0.1',0));port=listener.getsockname()[1]
-    exe=target/'mikubot.exe'
+    exe=target/'shiori.exe'
     command=[str(exe),'--no-browser','--data-dir',str(data),'--port',str(port),'--strict-port']
     original=subprocess.Popen(command,cwd=target,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,
                               creationflags=subprocess.CREATE_NO_WINDOW)
@@ -72,7 +72,7 @@ def main():
         password_hash=hashlib.sha256(password.read_bytes()).hexdigest()
         version=__version__ if not args.rollback else '0.1.999'
         key=uuid4().hex;folder=data/'updates'/key;folder.mkdir(parents=True)
-        archive=folder/f'mikubot-{version}-Windows-x64.zip';shutil.copy2(args.archive.resolve(),archive)
+        archive=folder/f'shiori-{version}-Windows-x64.zip';shutil.copy2(args.archive.resolve(),archive)
         manager=updates.UpdateManager(data,runtime={'mode':args.mode,'switch_supported':True,'update_kind':'portable',
             'service':'','install_supported':args.mode=='installed','default_kind':'portable','current_version':__version__})
         manager.download={'id':key,'tag':'v'+version,'kind':'portable','name':archive.name,'status':'ready',
@@ -106,7 +106,7 @@ def main():
         assert json.loads((data/'server.json').read_text('utf-8'))['port']==port
         if args.rollback:
             for name,sha in baseline.items():assert hashlib.sha256((target/name).read_bytes()).hexdigest()==sha,name
-        else:assert (target/'.mikubot-update.json').is_file()
+        else:assert (target/'.shiori-update.json').is_file()
         output={'passed':True,'version':__version__,'mode':args.mode,'rollback':args.rollback,'frozen_helper':True,
                 'status':result['status'],'same_port':True,'password_preserved':True,'memory_preserved':True,
                 'user_files_preserved':True,'data_backup':(folder/'data-backup').is_dir()}

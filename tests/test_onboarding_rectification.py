@@ -8,12 +8,12 @@ import pytest
 from fastapi.testclient import TestClient
 
 from auth_helpers import password_login
-from mikubot.access import chat_allowed, manager_for
-from mikubot.api import create_app
-from mikubot.db import Store
-from mikubot.installer import INSTALL_RECORD, gui_install_target
-from mikubot.output import split_output, split_transport_output
-from mikubot.settings import Settings
+from shiori.access import chat_allowed, manager_for
+from shiori.api import create_app
+from shiori.db import Store
+from shiori.installer import INSTALL_RECORD, gui_install_target
+from shiori.output import split_output, split_transport_output
+from shiori.settings import Settings
 
 
 def test_fresh_blacklist_and_old_whitelist_survive_restart(tmp_path):
@@ -106,7 +106,7 @@ def test_restore_inheritance_clears_old_behavior_but_keeps_memory_and_name(tmp_p
 
 
 def test_gui_install_parent_adds_one_subfolder_and_preserves_existing_install(tmp_path):
-    assert gui_install_target(tmp_path) == tmp_path / 'mikubot'
+    assert gui_install_target(tmp_path) == tmp_path / 'shiori'
     assert gui_install_target(tmp_path / 'MiKuBot') == tmp_path / 'MiKuBot'
     owned = tmp_path / 'custom-name'
     owned.mkdir()
@@ -135,10 +135,10 @@ def test_transport_drops_blank_segments_and_edge_blank_lines_preserving_code():
 
 
 def test_blacklist_revocation_stops_remaining_chunks_and_memory_access(tmp_path):
-    from mikubot.onebot import OneBotBridge
-    from mikubot.social import SocialEngine
-    from mikubot.memory import MemoryEngine
-    from mikubot.context import ContextEngine
+    from shiori.onebot import OneBotBridge
+    from shiori.social import SocialEngine
+    from shiori.memory import MemoryEngine
+    from shiori.context import ContextEngine
 
     async def scenario():
         settings = Settings(tmp_path)
@@ -172,7 +172,7 @@ def test_blacklist_revocation_stops_remaining_chunks_and_memory_access(tmp_path)
 def test_installer_footer_stays_in_short_window_at_high_dpi(tmp_path, monkeypatch):
     import tkinter as tk
     from tkinter import ttk
-    from mikubot.installer import run_gui
+    from shiori.installer import run_gui
 
     root = tk.Tk()
     root.withdraw()
@@ -199,5 +199,5 @@ def test_installer_footer_stays_in_short_window_at_high_dpi(tmp_path, monkeypatc
         finally:
             root.destroy()
     monkeypatch.setattr(root, 'mainloop', verify)
-    run_gui(tmp_path / 'unused.zip', {'version': '0.1.1'}, tmp_path / 'mikubot')
+    run_gui(tmp_path / 'unused.zip', {'version': '0.1.1'}, tmp_path / 'shiori')
     assert checked == [1.0, 1.5, 2.0]

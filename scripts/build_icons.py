@@ -1,4 +1,4 @@
-"""Build mikubot's original vector mark and Windows icons with Pillow only.
+"""Build shiori's original vector mark and Windows icons with Pillow only.
 
 SVG paths and raster strokes use the same geometry below. No browser, fonts,
 network access or SVG runtime is needed; Pillow is already an app dependency.
@@ -12,15 +12,17 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
 ROOT = Path(__file__).resolve().parents[1]
-ASSETS = ROOT / 'mikubot' / 'static' / 'assets' / 'brand'
+ASSETS = ROOT / 'shiori' / 'static' / 'assets' / 'brand'
 SIZES = (16, 20, 24, 32, 48, 64, 128, 256)
 INK = '#10464c'
 MINT = '#52dfd0'
 PAPER = '#dcf8f2'
 WHITE = '#ffffff'
 PATHS = (
-    (('M', 64, 164), ('L', 64, 119), ('C', 64, 77, 128, 77, 128, 119), ('L', 128, 164)),
-    (('M', 128, 119), ('C', 128, 77, 192, 77, 192, 119), ('L', 192, 164)),
+    (('M', 176, 82), ('C', 159, 61, 104, 60, 84, 84),
+     ('C', 59, 115, 98, 126, 132, 132),
+     ('C', 169, 139, 188, 153, 169, 178),
+     ('C', 151, 201, 96, 199, 77, 176)),
 )
 SPARK = ((201, 44), (205, 55), (216, 59), (205, 63), (201, 74), (197, 63), (186, 59), (197, 55))
 
@@ -37,7 +39,7 @@ def svg(kind: str) -> str:
     spark = '' if tray else '<polygon points="' + ' '.join(f'{x},{y}' for x, y in SPARK) + '" fill="' + (PAPER if kind == 'app' else color) + '"/>'
     transform = ' transform="translate(-64 -64) scale(1.5)"' if tray else ''
     paths = ''.join(f'<path d="{_path_text(commands)}"/>' for commands in PATHS)
-    return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="mikubot">'
+    return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="Shiori">'
             f'{background}<g{transform} fill="none" stroke="{color}" stroke-width="24" stroke-linecap="round" stroke-linejoin="round">'
             f'{paths}</g>{spark}</svg>\n')
 
@@ -91,13 +93,13 @@ def build(destination: Path = ASSETS, *, preview: bool = True):
         (destination / f'{kind}.svg').write_text(svg(kind), encoding='utf-8')
         for size in SIZES:
             render(kind, size).save(destination / f'{kind}-{size}.png', optimize=True)
-    render('app').save(destination / 'mikubot.ico', sizes=[(size, size) for size in SIZES])
+    render('app').save(destination / 'shiori.ico', sizes=[(size, size) for size in SIZES])
     if preview:
         image = Image.new('RGB', (960, 470), '#f5fbfa')
         draw = ImageDraw.Draw(image)
         font = ImageFont.truetype('C:/Windows/Fonts/segoeui.ttf', 19) if Path('C:/Windows/Fonts/segoeui.ttf').is_file() else ImageFont.load_default(size=19)
         heading = ImageFont.truetype('C:/Windows/Fonts/segoeuib.ttf', 28) if Path('C:/Windows/Fonts/segoeuib.ttf').is_file() else font
-        draw.text((36, 23), 'mikubot', font=heading, fill=INK)
+        draw.text((36, 23), 'Shiori', font=heading, fill=INK)
         draw.text((37, 65), 'An original mark for conversation, rhythm and useful work.', font=font, fill='#617e82')
         for x, kind, label in ((46, 'app', 'App / desktop'), (278, 'avatar', 'Chat avatar'), (510, 'mark', 'Brand mark')):
             tile = render(kind, 180)

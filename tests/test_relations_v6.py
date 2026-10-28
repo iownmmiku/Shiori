@@ -3,7 +3,7 @@ import json
 import pytest
 
 from qunyu.db import Store
-from mikubot.memory import MemoryEngine
+from shiori.memory import MemoryEngine
 
 
 @pytest.fixture

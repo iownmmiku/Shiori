@@ -3,7 +3,7 @@ const assert = require("node:assert/strict"), fs = require("node:fs"), path = re
 const escape = value => String(value ?? "").replace(/[&<>"']/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
 const sandbox = {state:{scope:"web:default"},e:escape,scope:()=>({persona_id:"default"}),personaName:()=>"初音未来",fmt:()=>"",icon:()=>"",imageURL:value=>value};
 vm.createContext(sandbox);
-vm.runInContext(fs.readFileSync(path.join(__dirname,"../mikubot/static/chat-page.js"),"utf8"),sandbox,{filename:"chat-page.js"});
+vm.runInContext(fs.readFileSync(path.join(__dirname,"../shiori/static/chat-page.js"),"utf8"),sandbox,{filename:"chat-page.js"});
 const record = {id:"reply-1",role:"assistant",content:"保留第一段。\n\n保留第二段。",metadata:{reply_parts:["保留第一段。","保留第二段。"],
   original_reply:'保留第一段。（动作）\n\n保留第二段。\n<img src=x onerror="steal()">尾句。',
   output_adjustment:{limited:true,removed_parentheses:true},memory_ids:["memory-1"],expression_ids:["expression-1"]}};

@@ -7,7 +7,7 @@ import time
 
 import pytest
 
-from mikubot.db import BLOCKED_SOURCE_CACHE_SCOPES, Store
+from shiori.db import BLOCKED_SOURCE_CACHE_SCOPES, Store
 
 
 @pytest.fixture

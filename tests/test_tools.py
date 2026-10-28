@@ -4,13 +4,13 @@ from unittest.mock import patch
 
 import pytest
 
-from mikubot.timeparse import HK, parse_due
-from mikubot.tools import calculate, public_addresses
+from shiori.timeparse import HK, parse_due
+from shiori.tools import calculate, public_addresses
 
 
 def test_bing_redirects_are_decoded_only_for_known_host_and_path():
     import base64
-    from mikubot.tools import _search_result_url
+    from shiori.tools import _search_result_url
     target = 'https://docs.python.org/3/?q=中文'
     encoded = 'a1' + base64.urlsafe_b64encode(target.encode()).decode().rstrip('=')
     assert _search_result_url('https://www.bing.com/ck/a?!&&u=' + encoded + '&ntb=1') == target
@@ -24,7 +24,7 @@ def test_bing_redirects_are_decoded_only_for_known_host_and_path():
 
 def test_search_link_domain_boundaries_and_invalid_destinations():
     import base64
-    from mikubot.tools import _search_result_url
+    from shiori.tools import _search_result_url
     assert _search_result_url('https://notbing.com/page')
     assert _search_result_url('https://microsoft.com.example.org/page')
     for url in ('https://cn.bing.com/search', 'https://www.microsoft.com/page', 'http://localhost/private',
@@ -37,7 +37,7 @@ def test_search_link_domain_boundaries_and_invalid_destinations():
 
 
 def test_search_parsing_is_bounded_and_does_not_invent_empty_results(monkeypatch):
-    from mikubot import tools
+    from shiori import tools
     async def page(url):
         return {'url': url, 'text': '真实搜索结果正文。' * 100,
                 'links': ['https://www.bing.com/internal'] * 35 + ['https://notbing.com/source'] * 2 +
@@ -53,7 +53,7 @@ def test_search_parsing_is_bounded_and_does_not_invent_empty_results(monkeypatch
 
 
 def test_html_relative_links_are_kept_with_finite_collection():
-    from mikubot.tools import _TextParser
+    from shiori.tools import _TextParser
     parser = _TextParser()
     parser.feed('<a href="/ck/a?u=a1abc">结果</a>' + '<a href="https://example.org/result">链接</a>' * 500)
     assert parser.links[0].startswith('/ck/a?') and len(parser.links) == 120
@@ -84,7 +84,7 @@ def test_time_parser_uses_hk_and_requires_explicit_date():
 
 
 def test_secrets_protected_and_redacted(tmp_path):
-    from mikubot.settings import Settings
+    from shiori.settings import Settings
     secret = 'test-secret-not-real-12345'
     settings = Settings(tmp_path)
     settings.update({'model': {'api_key': secret, 'base_url': 'https://example.com/v1', 'model': 'test'}})

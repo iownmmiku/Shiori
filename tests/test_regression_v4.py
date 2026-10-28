@@ -7,11 +7,11 @@ from unittest.mock import AsyncMock
 import pytest
 import httpx
 
-from mikubot.chat import ChatService
+from shiori.chat import ChatService
 from qunyu.db import Store
-from mikubot.settings import DEFAULTS
-from mikubot.chat import TOOLS
-from mikubot.provider import Provider, ProviderError
+from shiori.settings import DEFAULTS
+from shiori.chat import TOOLS
+from shiori.provider import Provider, ProviderError
 
 
 @pytest.fixture

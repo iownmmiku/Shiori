@@ -5,9 +5,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from auth_helpers import password_login
-from mikubot import tools
-from mikubot.api import create_app
-from mikubot.distillation import DiscoveryError, DistillationService
+from shiori import tools
+from shiori.api import create_app
+from shiori.distillation import DiscoveryError, DistillationService
 
 
 @pytest.fixture

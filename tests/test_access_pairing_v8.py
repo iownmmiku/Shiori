@@ -6,12 +6,12 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 
-from mikubot.access import AccessManager
+from shiori.access import AccessManager
 from qunyu.db import Store
-from mikubot.onebot import OneBotBridge
-from mikubot.official import OfficialBridge
-from mikubot.qq_pairing import LocalQQPairing, loopback_url, revision
-from mikubot.settings import Settings
+from shiori.onebot import OneBotBridge
+from shiori.official import OfficialBridge
+from shiori.qq_pairing import LocalQQPairing, loopback_url, revision
+from shiori.settings import Settings
 
 
 @pytest.fixture
@@ -33,12 +33,12 @@ def test_admin_requires_signed_ingress_and_exact_platform_instance(settings):
     settings.update({'access':{'administrators':[
         {'platform':'onebot','account_id':'123','instance_id':'456'},
         {'platform':'qqofficial','account_id':'openid','instance_id':'app1'}]}})
-    assert access.is_admin(access.identity('local','mikubot'))
+    assert access.is_admin(access.identity('local','shiori'))
     assert access.is_admin(access.identity('onebot','123','456'))
     assert access.is_admin(access.identity('qqofficial','openid','app1'))
     assert not access.is_admin(access.identity('onebot','123','789'))
     assert not access.is_admin(access.identity('qqofficial','openid','app2'))
-    assert not access.is_admin({'platform':'local','account_id':'mikubot','instance_id':'','is_admin':True})
+    assert not access.is_admin({'platform':'local','account_id':'shiori','instance_id':'','is_admin':True})
     assert not access.is_admin(dict(access.identity('onebot','999','456'), account_id='123'))
     assert not access.is_admin(access.identity('onebot','999','456'))
     persisted = access.identity('onebot','123','456')
@@ -80,7 +80,7 @@ def test_group_only_config_and_separate_lists(settings):
 @pytest.mark.parametrize('patch', [
     {'computer':{'max_steps':True}}, {'computer':{'runtime':'sandbox'}},
     {'computer':{'timeout_seconds':0}}, {'computer':{'workspace':'bad\x00path'}},
-    {'access':{'administrators':[{'platform':'local','account_id':'mikubot'}]}},
+    {'access':{'administrators':[{'platform':'local','account_id':'shiori'}]}},
     {'access':{'administrators':[{'platform':'onebot','account_id':'nickname'}]}},
 ])
 def test_invalid_privilege_and_computer_config(settings, patch):
@@ -230,6 +230,25 @@ async def test_connector_merge_idempotence_and_undo_preserves_other_nodes(settin
     await connector.disconnect(repeated['undo_id'], 'fixture-password')
     assert fixture.schema == original
     assert fixture.writes == 2
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize('adapter', ['napcat','snowluma'])
+async def test_renamed_connector_reuses_old_managed_node(settings, adapter):
+    fixture = WebUI(adapter)
+    connector = LocalQQPairing(settings, 'ws://127.0.0.1:18765/onebot/v11/ws', transport=httpx.MockTransport(fixture))
+    url = 'http://localhost:6099'
+    await connector.connect(adapter, url, 'fixture-password')
+    clients = connector._clients(fixture.schema, adapter)
+    clients[-1]['name'] = connector._legacy_connection_name
+    old_token = clients[-1]['token' if adapter == 'napcat' else 'accessToken']
+    result = await connector.connect(adapter, url, 'fixture-password')
+    clients = connector._clients(fixture.schema, adapter)
+    assert len(clients) == 2
+    assert clients[-1]['name'] == connector.connection_name
+    assert clients[-1]['token' if adapter == 'napcat' else 'accessToken'] == old_token
+    assert result['changed']
+    assert not (await connector.connect(adapter, url, 'fixture-password'))['changed']
 
 
 @pytest.mark.anyio

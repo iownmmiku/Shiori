@@ -11,11 +11,11 @@ from fastapi.responses import JSONResponse
 import httpx
 import pytest
 
-from mikubot.chat import ChatService
-from mikubot.db import Store
-from mikubot.delivery import DeliveryLedger, install_delivery
-from mikubot.onebot import OneBotBridge
-from mikubot.settings import DEFAULTS, resolved_identity
+from shiori.chat import ChatService
+from shiori.db import Store
+from shiori.delivery import DeliveryLedger, install_delivery
+from shiori.onebot import OneBotBridge
+from shiori.settings import DEFAULTS, resolved_identity
 
 
 @pytest.fixture

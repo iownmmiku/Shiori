@@ -6,13 +6,13 @@ import pytest
 
 from scripts.package_portable import package
 from scripts.prepare_installer import prepare
-from mikubot import installer
+from shiori import installer
 
 
 def source_tree(tmp_path):
     source = tmp_path / 'program'
     source.mkdir()
-    (source / 'mikubot.exe').write_bytes(b'fixture program')
+    (source / 'shiori.exe').write_bytes(b'fixture program')
     (source / '中文说明.md').write_text('fixture documentation', 'utf-8')
     return source
 
@@ -38,8 +38,8 @@ def test_built_zip_is_accepted_by_real_installer(tmp_path, monkeypatch):
 def test_prepare_checks_original_zip_name_before_windows_normalization(tmp_path):
     archive = tmp_path / 'windows.zip'
     with zipfile.ZipFile(archive, 'w') as z:
-        z.writestr('mikubot/mikubot.exe', b'fixture')
-    archive.write_bytes(archive.read_bytes().replace(b'mikubot/mikubot.exe', b'mikubot\\mikubot.exe'))
+        z.writestr('shiori/shiori.exe', b'fixture')
+    archive.write_bytes(archive.read_bytes().replace(b'shiori/shiori.exe', b'shiori\\shiori.exe'))
     with pytest.raises(ValueError):
         prepare(archive, tmp_path / 'payload', '0.7.0')
     assert not (tmp_path / 'payload/payload.zip').exists()

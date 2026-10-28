@@ -3,9 +3,9 @@ import json
 
 import pytest
 
-from mikubot.context import ContextEngine, MAX_INPUT_CHARS
+from shiori.context import ContextEngine, MAX_INPUT_CHARS
 from qunyu.db import Store
-from mikubot.diagnostics import build_diagnostics
+from shiori.diagnostics import build_diagnostics
 
 
 @pytest.fixture
@@ -270,7 +270,7 @@ def test_diagnostics_are_local_aggregate_only_and_redact_recursive_secrets(store
 
 def test_expression_store_defaults_and_tombstone_category(store):
     scope = store.upsert_scope({"id": "web:new"})
-    from mikubot.settings import DEFAULTS, resolved_identity
+    from shiori.settings import DEFAULTS, resolved_identity
     assert scope['plan_enabled'] is None and resolved_identity(DEFAULTS, scope)['plan_enabled']
     assert not scope["expression_use"] and not scope["expression_learn"] and not scope["context_compress"]
     word = store.create_jargon({"term": "好耶", "meaning": "开心", "status": "approved"})

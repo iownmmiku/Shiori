@@ -8,9 +8,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from mikubot.computer import ComputerService
-from mikubot.computer_worker import execute as execute_worker
-from mikubot.runs import RunManager
+from shiori.computer import ComputerService
+from shiori.computer_worker import execute as execute_worker
+from shiori.runs import RunManager
 
 
 @pytest.fixture
@@ -34,7 +34,7 @@ async def test_cancel_queued_run_before_coroutine_starts_is_durable(tmp_path):
         executed.append(True)
         return {'ok': True}
     runs.register('test', handler)
-    job = runs.submit('test', {}, identity={'platform': 'local', 'user_id': 'mikubot'})
+    job = runs.submit('test', {}, identity={'platform': 'local', 'user_id': 'shiori'})
     runs.cancel(job['id'])
     await runs.close()
     assert not executed
@@ -54,7 +54,7 @@ async def test_approval_is_single_use_and_resumes_original_task(tmp_path):
         writes.append('sample')
         return {'reply': 'completed'}
     runs.register('test', handler)
-    job = runs.submit('test', {}, identity={'platform': 'local', 'user_id': 'mikubot'})
+    job = runs.submit('test', {}, identity={'platform': 'local', 'user_id': 'shiori'})
     await wait_for(lambda: runs.get(job['id'])['status'] == 'awaiting_approval')
     approval = runs.get(job['id'])['approval']['id']
     with pytest.raises(ValueError, match='失效'):
@@ -96,7 +96,7 @@ async def test_restarted_run_never_replays_unfinished_operations(tmp_path):
         ctx.checkpoint(pending_tool={'name': 'write_file', 'arguments': {'path': 'output.txt'}})
         await blocker.wait()
     runs.register('test', handler)
-    job = runs.submit('test', {}, identity={'platform': 'local', 'user_id': 'mikubot'})
+    job = runs.submit('test', {}, identity={'platform': 'local', 'user_id': 'shiori'})
     await wait_for(lambda: runs.get(job['id'])['status'] == 'running')
     restored = RunManager(tmp_path)
     assert restored.get(job['id'])['status'] == 'interrupted'
@@ -113,7 +113,7 @@ async def test_cancel_waiting_approval_never_executes(tmp_path):
         await ctx.approve('操作', {'value': 'sample'})
         actions.append(True)
     runs.register('test', handler)
-    job = runs.submit('test', {}, identity={'platform': 'local', 'user_id': 'mikubot'})
+    job = runs.submit('test', {}, identity={'platform': 'local', 'user_id': 'shiori'})
     await wait_for(lambda: runs.get(job['id'])['status'] == 'awaiting_approval')
     approval = runs.get(job['id'])['approval']['id']
     runs.cancel(job['id'])

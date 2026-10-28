@@ -39,7 +39,7 @@ my_plugin/
    └─ example.txt
 ```
 
-允许任意安全的外层文件夹。清单结构版本 `schema_version` 固定为1，与 mikubot 软件版本及内部存储版本无关。
+允许任意安全的外层文件夹。清单结构版本 `schema_version` 固定为1，与 Shiori 软件版本及内部存储版本无关。
 
 ```json
 {

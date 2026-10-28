@@ -6,8 +6,8 @@ import zipfile
 import pytest
 from fastapi.testclient import TestClient
 
-from mikubot.api import create_app
-from mikubot.settings import resolved_identity
+from shiori.api import create_app
+from shiori.settings import resolved_identity
 from auth_helpers import password_login
 
 
@@ -176,6 +176,6 @@ def test_old_zip_without_knowledge_restores_compatibly(client):
 def test_new_static_module_is_served_locally_without_build_step(client):
     c, _ = client
     index = c.get('/').text
-    assert 'mikubot' in index and '/static/workspace-features.js' in index
+    assert 'shiori' in index and '/static/workspace-features.js' in index
     features = c.get('/static/workspace-features.js')
-    assert features.status_code == 200 and 'MikubotFeatures' in features.text
+    assert features.status_code == 200 and 'ShioriFeatures' in features.text

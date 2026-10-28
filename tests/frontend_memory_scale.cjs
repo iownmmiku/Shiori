@@ -1,7 +1,7 @@
 "use strict";
 const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
-const source=fs.readFileSync(path.join(__dirname,'../mikubot/static/memory-page.js'),'utf8');
-const core=fs.readFileSync(path.join(__dirname,'../mikubot/static/ui-core.js'),'utf8');
+const source=fs.readFileSync(path.join(__dirname,'../shiori/static/memory-page.js'),'utf8');
+const core=fs.readFileSync(path.join(__dirname,'../shiori/static/ui-core.js'),'utf8');
 const calls=[],nodes=new Map();let modal;
 const escape=value=>String(value??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
 function node(){return {children:[],parentNode:null,append(child){this.children=this.children.filter(x=>x!==child);child.parentNode?.children.splice(child.parentNode.children.indexOf(child),1);this.children.push(child);child.parentNode=this;},prepend(child){this.append(child);this.children.unshift(this.children.pop());},remove(){this.parentNode?.children.splice(this.parentNode.children.indexOf(this),1);this.parentNode=null;}};}
@@ -19,14 +19,14 @@ const sandbox={window:{},URLSearchParams,state:{scope:'web:default',filters:{}},
 vm.createContext(sandbox);
 vm.runInContext(core.slice(core.indexOf('function syncToastLayer()'),core.indexOf('function heading(')),sandbox);
 vm.runInContext(source.slice(source.indexOf('async function renderMemoryRecords()')),sandbox);
-vm.runInContext(fs.readFileSync(path.join(__dirname,'../mikubot/static/workspace-features.js'),'utf8'),sandbox);
+vm.runInContext(fs.readFileSync(path.join(__dirname,'../shiori/static/workspace-features.js'),'utf8'),sandbox);
 async function main(){
   sandbox.toast('existing message');const existing=region.children[0];dialog.open=true;sandbox.syncToastLayer();
   assert.equal(region.parentNode,dialog);assert.equal(region.children[0],existing,'opening a modal preserves existing notifications');
   sandbox.toast('<script>error</script>',true);assert.match(region.children[1].innerHTML,/&lt;script&gt;/);
   dialog.open=false;sandbox.syncToastLayer();assert.equal(region.parentNode,body,'closing a modal restores the normal notification layer');
   let html=await sandbox.renderMemoryRecords();assert.match(calls.at(-1),/limit=50/);assert.match(html,/第 1 页/);assert.ok(!html.includes('<script>'));
-  const ui=sandbox.window.MikubotFeatures;
+  const ui=sandbox.window.ShioriFeatures;
   await ui.handleAction('memory-page',{dataset:{offset:'50'}});await sandbox.renderMemoryRecords();assert.match(calls.at(-1),/offset=50/);
   sandbox.state.filters.q='old fact';await sandbox.renderMemoryRecords();assert.match(calls.at(-1),/offset=0/,'search resets the page');
   sandbox.state.filters.status='pending';await sandbox.renderMemoryRecords();assert.ok(calls.at(-1).startsWith('/api/memory/candidates?'));assert.match(calls.at(-1),/q=old\+fact/);

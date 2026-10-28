@@ -10,9 +10,9 @@ const sandbox={window:{},state:{scope:'web:default',settings:{output:{}},persona
   select:(name,title,options,current)=>`<select name="${name}">${options.map(([value,label])=>`<option value="${value}" ${value===current?'selected':''}>${escape(label)}</option>`)}</select>`,
   closeModal:()=>{},splitNames:()=>[],scopeModalBase:()=>{}};
 vm.createContext(sandbox);
-for(const name of ['workspace-features.js','settings-page.js','chat-page.js'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../mikubot/static',name),'utf8'),sandbox,{filename:name});
+for(const name of ['workspace-features.js','settings-page.js','chat-page.js'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../shiori/static',name),'utf8'),sandbox,{filename:name});
 async function main(){
-  const html=sandbox.window.MikubotFeatures.outputSection();assert.match(html,/value="model" selected/);assert.match(html,/模型在生成时决定/);assert.match(html,/<details[^>]*>.*旧版长度参数/s);
+  const html=sandbox.window.ShioriFeatures.outputSection();assert.match(html,/value="model" selected/);assert.match(html,/模型在生成时决定/);assert.match(html,/<details[^>]*>.*旧版长度参数/s);
   assert.match(html,/name="reply_max_chars" value="0"/);assert.match(html,/name="message_max_chars" value="0"/);
   assert.match(html,/删除括号及其中内容/);assert.match(html,/均衡合并相邻/);assert.match(html,/代码和链接不会截成残缺片段/);
   await sandbox.saveSettings('output',{values:{enabled:false,mode:'model',reply_max_chars:'600',message_max_chars:'100',remove_parentheses:true,target_chars:'160',max_chars:'320',interval_ms:'600',max_parts:'8',platform_max_chars:'1800'}});
@@ -21,10 +21,10 @@ async function main(){
   sandbox.state.settings.output={reply_max_chars:800,message_max_chars:200,remove_parentheses:true,enabled:false};
   let scopeHTML='';const body={insertAdjacentHTML:(_position,html)=>{scopeHTML+=html;}};
   sandbox.$=selector=>selector==='#modal .modal-body'?body:null;
-  sandbox.window.MikubotFeatures.scopeModal({id:'web:default',output:{message_max_chars:80,reply_max_chars:null}});
+  sandbox.window.ShioriFeatures.scopeModal({id:'web:default',output:{message_max_chars:80,reply_max_chars:null}});
   assert.match(scopeHTML,/name="out_reply_max_chars" value="800"/);assert.match(scopeHTML,/name="out_message_max_chars" value="80"/);
   assert.match(scopeHTML,/name="out_remove_parentheses" checked/);
-  const appSource=fs.readFileSync(path.join(__dirname,'../mikubot/static/app.js'),'utf8');
+  const appSource=fs.readFileSync(path.join(__dirname,'../shiori/static/app.js'),'utf8');
   vm.runInContext(appSource.slice(appSource.indexOf('async function saveModal('),appSource.indexOf('function modelPayload(')),sandbox,{filename:'app-scope-output.js'});
   sandbox.state.modalRecord={id:'web:default',output_reply_max_chars:30,settings:{output:{message_max_chars:20},output_remove_parentheses:true,unrelated:true}};
   const values={output_override:true,out_enabled:false,out_mode:'model',out_reply_max_chars:'500',out_message_max_chars:'90',out_remove_parentheses:true,out_target_chars:'160',out_max_chars:'320',out_interval_ms:'600',out_max_parts:'8',out_platform_max_chars:'1800'};

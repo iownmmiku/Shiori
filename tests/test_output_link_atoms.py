@@ -1,7 +1,7 @@
 """Inline Markdown destinations are indivisible at arbitrary nesting depths."""
 import pytest
 
-from mikubot.output import (_atoms, OutputLimitError, model_reply_parts,
+from shiori.output import (_atoms, OutputLimitError, model_reply_parts,
                             prepare_reply, remove_parenthetical_content,
                             reply_char_count, split_output, strip_memory_citations)
 

@@ -22,8 +22,8 @@ const sandbox = {
     return{ok:true,status:200,json:async()=>data};},
 };
 vm.createContext(sandbox);
-vm.runInContext(fs.readFileSync(path.join(__dirname,"../mikubot/static/auth.js"),"utf8"),sandbox);
-const auth=sandbox.window.MikubotAuth;
+vm.runInContext(fs.readFileSync(path.join(__dirname,"../shiori/static/auth.js"),"utf8"),sandbox);
+const auth=sandbox.window.ShioriAuth;
 const form=(kind,values)=>({dataset:{authForm:kind},values,reset(){this.values={};},querySelector:selector=>selector === ".auth-form-error" ? error : {disabled:false},closest(){return this;}});
 const submit=async item=>handlers.submit({target:item,preventDefault(){},stopImmediatePropagation(){}});
 
@@ -58,7 +58,7 @@ async function main(){
 
   current={mode:"password",password_set:true,authenticated:true,actual_remote_enabled:false,restart_required:true,urls:["http://127.0.0.1:8765/"]};
   const panel=await auth.settingsPanel();
-  assert.match(panel,/登录与远程管理/);assert.match(panel,/重启 mikubot 后生效/);
+  assert.match(panel,/登录与远程管理/);assert.match(panel,/重启 shiori 后生效/);
   assert.ok(!panel.includes("D:\\private"),"remote status does not preserve an earlier local path");
   await submit(form("network",{remote_enabled:"on",host:"0.0.0.0",port:"9123"}));
   const network=calls.find(item=>item[0]==="/api/auth/access"&&item[1].method==="PUT");
@@ -67,7 +67,7 @@ async function main(){
   current={mode:"password",password_set:true,authenticated:false};await auth.requireLogin();
   responseError="密码不正确";const login=form("login",{password:"wrong-password"});
   await submit(login);assert.match(error.textContent,/密码不正确/);assert.ok(!classes.has("auth-ready"));
-  const script=fs.readFileSync(path.join(__dirname,"../mikubot/static/auth.js"),"utf8");
+  const script=fs.readFileSync(path.join(__dirname,"../shiori/static/auth.js"),"utf8");
   assert.ok(!script.includes("localStorage."));assert.ok(!script.includes("sessionStorage."));
   assert.ok(!script.includes("/api/session"),"legacy token auth must not bypass the password gate");
   console.log("Password UI trust-boundary checks passed");

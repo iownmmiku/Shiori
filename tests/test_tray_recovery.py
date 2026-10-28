@@ -3,8 +3,8 @@ import threading
 import time
 from types import SimpleNamespace
 
-from mikubot.desktop import DesktopShell
-from mikubot.system_tray import SystemTray
+from shiori.desktop import DesktopShell
+from shiori.system_tray import SystemTray
 
 
 class Icon:

@@ -7,7 +7,7 @@ import sys
 import tempfile
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-from mikubot.sandbox import availability, prepare, stop
+from shiori.sandbox import availability, prepare, stop
 
 
 def main():
@@ -18,7 +18,7 @@ def main():
     if not ready['available']:
         print(json.dumps({'status':'unavailable','message':ready['message']},ensure_ascii=False))
         return 1 if args.require else 0
-    with tempfile.TemporaryDirectory(prefix='mikubot-isolation-') as folder:
+    with tempfile.TemporaryDirectory(prefix='shiori-isolation-') as folder:
         base=Path(folder);root=base/'workspace';root.mkdir()
         root.chmod(0o777)
         outside=base/'outside-secret.txt';outside.write_text('must-not-be-visible','utf-8')

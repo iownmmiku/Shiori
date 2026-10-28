@@ -7,7 +7,7 @@ const calls = [], nodes = new Map(); let modal = null;
 const escaped = value => String(value ?? "").replace(/[&<>"']/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
 let responder = async () => ({});
 const state={scope:"web:default",scopes:[{id:"web:default",name:"本地"}],settings:{model:{},computer:{}},personas:[],images:[],boot:{setup_required:false},page:"chat",filters:{}};
-const sandbox={window:{MikubotQuickStart:{diagnosticsPanel:()=>"",modelSelection:()=>({provider_id:"default"})}},state,URLSearchParams,FormData,AbortController,EventSource:class{close(){}addEventListener(){}},
+const sandbox={window:{ShioriQuickStart:{diagnosticsPanel:()=>"",modelSelection:()=>({provider_id:"default"})}},state,URLSearchParams,FormData,AbortController,EventSource:class{close(){}addEventListener(){}},
   e:escaped,configuredModel:()=>state.settings.model,query:params=>new URLSearchParams(params).toString(),rows:value=>Array.isArray(value)?value:value.items||[],
   heading:(...args)=>args.join(""),button:(text,action,style,symbol,attrs="")=>`<button data-action="${action}" ${attrs}>${escaped(text)}</button>`,
   icon:()=>"<svg></svg>",tag:value=>`<span>${escaped(value)}</span>`,notice:value=>`<p>${escaped(value)}</p>`,fmt:value=>String(value),empty:()=>"empty",renderMessage:()=>"",toolJSON:value=>JSON.stringify(value),
@@ -21,8 +21,8 @@ const sandbox={window:{MikubotQuickStart:{diagnosticsPanel:()=>"",modelSelection
   renderPersonas:async()=>'<h1>人格</h1><button data-action="new-persona" >创造人格</button>',renderSettings:async()=>'<div class="settings-main"><form data-form="qq"></form></div>',
 };
 vm.createContext(sandbox);
-for(const file of [...require('./ui_modules.cjs').experienceFactories,'experience.js'])vm.runInContext(fs.readFileSync(path.join(__dirname,"../mikubot/static",file),"utf8"),sandbox,{filename:file});
-const ui=sandbox.window.MikubotExperience;
+for(const file of [...require('./ui_modules.cjs').experienceFactories,'experience.js'])vm.runInContext(fs.readFileSync(path.join(__dirname,"../shiori/static",file),"utf8"),sandbox,{filename:file});
+const ui=sandbox.window.ShioriExperience;
 const plain=value=>JSON.parse(JSON.stringify(value));
 
 async function main(){
@@ -151,7 +151,7 @@ async function fullScriptIntegration(){
     scrollTo(){},navigator:{},
   };
   browser.window=browser;vm.createContext(browser);
-  for(const file of require('./ui_modules.cjs').integrationScripts)vm.runInContext(fs.readFileSync(path.join(__dirname,"../mikubot/static",file),"utf8"),browser,{filename:file});
+  for(const file of require('./ui_modules.cjs').integrationScripts)vm.runInContext(fs.readFileSync(path.join(__dirname,"../shiori/static",file),"utf8"),browser,{filename:file});
   await new Promise(resolve=>setTimeout(resolve,10));
   assert.match(element("#navigation").innerHTML,/运行概览/);
   assert.match(element("#content").innerHTML,/聊天模式/);
@@ -167,9 +167,9 @@ async function fullScriptIntegration(){
   vm.runInContext('state.boot.listener={port_changed:false,port_warning:""}; renderNavigation();',browser);
   assert.equal(element("#port-warning").hidden,true);
   assert.equal(element("#port-warning").textContent,"");
-  const personas=await vm.runInContext("window.MikubotExperience.renderPersonas()",browser);
+  const personas=await vm.runInContext("window.ShioriExperience.renderPersonas()",browser);
   assert.match(personas,/蒸馏人格/);
-  const settingsHTML=await vm.runInContext("window.MikubotExperience.renderSettings()",browser);
+  const settingsHTML=await vm.runInContext("window.ShioriExperience.renderSettings()",browser);
   assert.match(settingsHTML,/管理员账号/);
   assert.match(settingsHTML,/电脑任务/);
   assert.match(settingsHTML,/自动配对本机 QQ/);
@@ -178,10 +178,10 @@ async function fullScriptIntegration(){
   assert.match(settingsHTML,/不是沙箱/);
   assert.match(settingsHTML,/登录与远程管理/);
   assert.match(settingsHTML,/security\/webui-password.json/);
-  const help=await vm.runInContext("window.MikubotExperience.renderHelp()",browser);
+  const help=await vm.runInContext("window.ShioriExperience.renderHelp()",browser);
   assert.match(help,/Safe local help/);
   const localMessage=vm.runInContext('renderMessageBase({role:"user",user_id:"owner",scope_id:"web:default",content:"hello"})',browser);
-  assert.match(localMessage,/mikubot/);assert.ok(!localMessage.includes(">owner<"));
+  assert.match(localMessage,/shiori/);assert.ok(!localMessage.includes(">owner<"));
   const qqMessage=vm.runInContext('renderMessageBase({role:"user",user_id:"owner",scope_id:"group:123",metadata:{nickname:"QQ member"},content:"hello"})',browser);
   assert.match(qqMessage,/QQ member/);
   assert.ok(listeners.submit && listeners.click && listeners.change);

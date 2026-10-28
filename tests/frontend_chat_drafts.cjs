@@ -2,7 +2,7 @@
 // Exercise the shipped chat factory with a real in-memory attachment lifecycle.
 // No browser, network request, model or automatically replayed task is involved.
 const assert=require("node:assert/strict"),fs=require("node:fs"),vm=require("node:vm"),path=require("node:path");
-const source=fs.readFileSync(path.join(__dirname,"../mikubot/static/experience-chat.js"),"utf8");
+const source=fs.readFileSync(path.join(__dirname,"../shiori/static/experience-chat.js"),"utf8");
 const plain=value=>JSON.parse(JSON.stringify(value));
 const A={id:"a".repeat(32),name:"first.txt"},B={id:"b".repeat(32),name:"next.txt"},C={id:"c".repeat(32),name:"other.txt"};
 const image=name=>({name,data:"data:image/png;base64,"+name});
@@ -35,7 +35,7 @@ function fixture(){
     }
   };
   vm.createContext(sandbox);vm.runInContext(source,sandbox);
-  const ui=sandbox.window.MikubotExperienceChat.create(runtime,{inactive:()=>true,jobDetail:()=>""});
+  const ui=sandbox.window.ShioriExperienceChat.create(runtime,{inactive:()=>true,jobDetail:()=>""});
   const draft=(text,images=[],attachments=[])=>{input.value=text;state.draft=text;state.images=images;runtime.attachments=attachments;runtime.attachmentScope=state.scope;};
   const say=async(text,images=[],attachments=[])=>{draft(text,images,attachments);await ui.sendChat();};
   return{ui,state,runtime,input,config,calls,notices,available,draft,say,timers,sends:()=>calls.filter(([url])=>url==="/api/chat"),releases:()=>calls.filter(([url])=>url.endsWith("/release"))};

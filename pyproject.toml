@@ -3,7 +3,7 @@ requires = ["setuptools>=75,<83"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "mikubot"
+name = "shiori"
 dynamic = ["version", "dependencies"]
 description = "Local QQ companion and administrator-authorized task assistant"
 license = {file = "LICENSE"}
@@ -18,17 +18,18 @@ classifiers = [
 ]
 
 [project.scripts]
-mikubot = "mikubot.__main__:main"
+shiori = "shiori.__main__:main"
+mikubot = "shiori.__main__:main"
 
 [tool.setuptools.dynamic]
-version = {attr = "mikubot.__version__"}
+version = {attr = "shiori.__version__"}
 dependencies = {file = ["requirements-server.txt"]}
 
 [project.optional-dependencies]
 desktop = ["pystray==0.19.5; sys_platform == 'win32'", "pywebview==6.2.1; sys_platform == 'win32'", "pythonnet==3.2.1; sys_platform == 'win32'", "clr_loader==0.3.1; sys_platform == 'win32'"]
 
 [tool.setuptools.packages.find]
-include = ["mikubot*", "qunyu*"]
+include = ["shiori*", "mikubot*", "qunyu*"]
 
 [tool.setuptools.package-data]
-mikubot = ["static/*", "static/assets/brand/*", "resources/*.ps1", "resources/*.cmd", "resources/csp/*", "resources/csp/references/*"]
+shiori = ["static/*", "static/assets/brand/*", "resources/*.ps1", "resources/*.cmd", "resources/csp/*", "resources/csp/references/*"]

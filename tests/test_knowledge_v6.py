@@ -6,7 +6,7 @@ from datetime import timedelta
 import pytest
 
 from qunyu.db import Store
-from mikubot.knowledge import PersonaKnowledge, _now
+from shiori.knowledge import PersonaKnowledge, _now
 
 
 @pytest.fixture
@@ -71,7 +71,7 @@ async def test_old_dates_never_become_recent_when_retrieved(env):
 
 @pytest.mark.anyio
 async def test_deleted_tombstones_free_capacity_and_still_block_relearning(env, monkeypatch):
-    import mikubot.knowledge as module
+    import shiori.knowledge as module
     monkeypatch.setattr(module, 'MAX_ITEMS', 1)
     store, cfg, engine, read = env
     item = (await engine.explore('music', manual=True))['items'][0]

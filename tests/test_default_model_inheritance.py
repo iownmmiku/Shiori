@@ -4,11 +4,11 @@ from copy import deepcopy
 import httpx
 import pytest
 
-from mikubot.db import Store
-from mikubot.memory_lifecycle import MemoryLifecycle
-from mikubot.model_catalog import ModelCatalog
-from mikubot.provider import Provider, ProviderError
-from mikubot.settings import DEFAULTS, Settings, resolve_model
+from shiori.db import Store
+from shiori.memory_lifecycle import MemoryLifecycle
+from shiori.model_catalog import ModelCatalog
+from shiori.provider import Provider, ProviderError
+from shiori.settings import DEFAULTS, Settings, resolve_model
 
 
 @pytest.fixture

@@ -5,7 +5,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
-from mikubot.startup import instance_details, stop_instance
+from shiori.startup import instance_details, stop_instance
 
 
 @pytest.fixture

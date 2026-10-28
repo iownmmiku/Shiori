@@ -1,6 +1,6 @@
 "use strict";
 const assert=require("node:assert/strict"),fs=require("node:fs"),path=require("node:path"),vm=require("node:vm");
-const base=path.join(__dirname,"../mikubot/static"),calls=[],toasts=[],nodes=new Map();
+const base=path.join(__dirname,"../shiori/static"),calls=[],toasts=[],nodes=new Map();
 const escape=value=>String(value??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const RealDate=Date,now=RealDate.parse("2026-10-26T01:00:00+08:00");
 class Clock extends RealDate {constructor(...args){super(...(args.length?args:[now]));}static now(){return now;}}
@@ -22,13 +22,13 @@ const sandbox={window:{},state,Date:Clock,Intl,URL,URLSearchParams,fieldId:0,e:e
     }
     throw Error("unexpected API route");
   },navigate:async page=>{state.page=page;},bootstrap:async()=>{},getForm:form=>form.values,closeModal:()=>{},
-  renderPage:async()=>{renderCount++;rendered=await sandbox.window.MikubotFeatures.renderPersonaKnowledge();},toast:(...args)=>toasts.push(args)};
+  renderPage:async()=>{renderCount++;rendered=await sandbox.window.ShioriFeatures.renderPersonaKnowledge();},toast:(...args)=>toasts.push(args)};
 vm.createContext(sandbox);
 const readForm=sandbox.getForm;
 vm.runInContext(fs.readFileSync(path.join(base,"ui-core.js"),"utf8"),sandbox);
 sandbox.getForm=readForm;sandbox.toast=(...args)=>toasts.push(args);
 vm.runInContext(fs.readFileSync(path.join(base,"workspace-features.js"),"utf8"),sandbox);
-const ui=sandbox.window.MikubotFeatures;
+const ui=sandbox.window.ShioriFeatures;
 const record=changes=>({at:"2026-10-26T00:30:00+08:00",interest:"音乐",query:"音乐 最新资讯 2026年10月",created:0,updated:0,pending:0,filtered:2,failures:0,reason:"no_relevant_sources",rejections:[
   {url:"https://one.example/article",reason:"网页主段与兴趣主题关联不足"},
   {url:"https://two.example/article",reason:"域名不符合当前来源规则"}

@@ -7,9 +7,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from auth_helpers import password_login
-from mikubot.api import create_app
-from mikubot.computer import TOOLS
-from mikubot.provider import ProviderError
+from shiori.api import create_app
+from shiori.computer import TOOLS
+from shiori.provider import ProviderError
 
 
 @pytest.fixture

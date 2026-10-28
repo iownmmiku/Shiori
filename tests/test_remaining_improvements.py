@@ -9,14 +9,14 @@ import zipfile
 import pytest
 from fastapi.testclient import TestClient
 
-from mikubot.access import AccessManager
-from mikubot.api import create_app
-from mikubot.distillation import DistillationService
-from mikubot.provider import _PriorityGate, ProviderError
-from mikubot.remote_guide import https_guide
-from mikubot.runs import RunManager
-from mikubot.settings import Settings
-from mikubot.web_auth import WebAuth
+from shiori.access import AccessManager
+from shiori.api import create_app
+from shiori.distillation import DistillationService
+from shiori.provider import _PriorityGate, ProviderError
+from shiori.remote_guide import https_guide
+from shiori.runs import RunManager
+from shiori.settings import Settings
+from shiori.web_auth import WebAuth
 from auth_helpers import password_login, FIXTURE_PASSWORD
 
 
@@ -160,11 +160,11 @@ def test_model_queue_has_bounded_parallelism_and_cancellation():
 
 
 def test_docker_missing_fails_closed_before_process_creation(tmp_path,monkeypatch):
-    import mikubot.sandbox as sandbox
+    import shiori.sandbox as sandbox
     app=create_app(tmp_path,start_workers=False)
     assert app.state.settings.get()['computer']['runtime']=='docker'
     monkeypatch.setattr(sandbox,'availability',lambda:{'available':False,'message':'Docker不可用'})
-    import mikubot.computer as computer
+    import shiori.computer as computer
     monkeypatch.setattr(computer.subprocess,'Popen',lambda *_args,**_kwargs:pytest.fail('must not run host shell'))
     with pytest.raises(ValueError,match='Docker不可用'):
         app.state.computer._process(SimpleNamespace(check=lambda:True,id='fixture'),tmp_path,'execute_shell','echo test')
@@ -172,7 +172,7 @@ def test_docker_missing_fails_closed_before_process_creation(tmp_path,monkeypatc
 
 
 def test_docker_command_is_local_offline_restricted_and_mounts_no_secrets(tmp_path,monkeypatch):
-    import mikubot.sandbox as sandbox
+    import shiori.sandbox as sandbox
     monkeypatch.setattr(sandbox,'availability',lambda:{'available':True})
     monkeypatch.setattr(sandbox,'docker_prefix',lambda:['docker','--host','local-engine'])
     root=tmp_path/'workspace';root.mkdir()
@@ -181,7 +181,7 @@ def test_docker_command_is_local_offline_restricted_and_mounts_no_secrets(tmp_pa
     assert command[command.index('--network')+1]=='none'
     assert '--read-only' in command and '--cap-drop' in command
     assert '--pull=never' in command and '--privileged' not in command
-    assert '--env-file' not in command and len(identity)==40
+    assert '--env-file' not in command and len(identity)==len('shiori-')+32
     assert sum('source=' in arg for arg in command)==2
 
 
@@ -192,7 +192,7 @@ def test_https_guide_rejects_unsafe_or_incompatible_input(url):
 
 def test_canonical_import_compatibility_shares_one_module():
     import importlib
-    assert importlib.import_module('qunyu.db') is importlib.import_module('mikubot.db')
+    assert importlib.import_module('qunyu.db') is importlib.import_module('shiori.db')
 
 
 def test_explicit_proxy_trust_only_establishes_https_not_local_authority(tmp_path):
@@ -215,7 +215,7 @@ def test_explicit_proxy_trust_only_establishes_https_not_local_authority(tmp_pat
 
 
 def test_limited_writer_survives_owned_stream_closing():
-    from mikubot.computer_worker import LimitedWriter
+    from shiori.computer_worker import LimitedWriter
     stream=io.StringIO();writer=LimitedWriter(stream)
     writer.write('正常输出');stream.close()
     writer.flush();writer.close()

@@ -1,11 +1,11 @@
 services:
-  mikubot:
+  shiori:
     build: .
     restart: unless-stopped
     ports:
       - "127.0.0.1:8765:8765"
     volumes:
-      - mikubot-data:/data
+      - shiori-data:/data
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=64m
@@ -14,4 +14,5 @@ services:
     pids_limit: 128
     stop_grace_period: 30s
 volumes:
-  mikubot-data:
+  shiori-data:
+    name: ${SHIORI_DATA_VOLUME:-shiori-data}

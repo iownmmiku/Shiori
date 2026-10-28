@@ -6,11 +6,11 @@ from copy import deepcopy
 
 import pytest
 from fastapi.testclient import TestClient
-from mikubot.api import create_app
-from mikubot.chat import ChatService
+from shiori.api import create_app
+from shiori.chat import ChatService
 from qunyu.db import Store
-from mikubot.settings import DEFAULTS
-from mikubot.evaluation import replay,validate_cases
+from shiori.settings import DEFAULTS
+from shiori.evaluation import replay,validate_cases
 from auth_helpers import password_login
 
 

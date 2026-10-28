@@ -6,11 +6,11 @@ import time
 
 import pytest
 
-from mikubot.chat import ChatService
-from mikubot.db import Store
-from mikubot.onebot import OneBotBridge
-from mikubot.settings import DEFAULTS
-from mikubot.timing import TurnTiming, add_duration, current_trace_id, measure
+from shiori.chat import ChatService
+from shiori.db import Store
+from shiori.onebot import OneBotBridge
+from shiori.settings import DEFAULTS
+from shiori.timing import TurnTiming, add_duration, current_trace_id, measure
 
 
 @pytest.fixture
@@ -170,7 +170,7 @@ async def test_cancelled_scope_wait_still_records_wait_and_does_not_unlock_anoth
 
 @pytest.mark.anyio
 async def test_failed_qq_image_read_is_timed_and_never_calls_the_model(tmp_path, monkeypatch):
-    from mikubot import stickers
+    from shiori import stickers
     store, config = Store(tmp_path), Config()
     config.value['model']['vision'] = True
     chat = ChatService(store, config, Model())

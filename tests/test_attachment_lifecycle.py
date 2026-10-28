@@ -9,9 +9,9 @@ from fastapi.testclient import TestClient
 import pytest
 
 from auth_helpers import password_login
-from mikubot.api import create_app
-from mikubot.attachments import AttachmentLibrary, bounded_parse
-from mikubot.db import Store
+from shiori.api import create_app
+from shiori.attachments import AttachmentLibrary, bounded_parse
+from shiori.db import Store
 
 
 @pytest.fixture

@@ -7,8 +7,8 @@ import httpx
 import pytest
 
 from qunyu.db import Store
-from mikubot.provider import Provider, ProviderError, estimate_tokens
-from mikubot.settings import (CUSTOM_PARAM_RESERVED, CUSTOM_PARAM_MAX_ABS,
+from shiori.provider import Provider, ProviderError, estimate_tokens
+from shiori.settings import (CUSTOM_PARAM_RESERVED, CUSTOM_PARAM_MAX_ABS,
                               CUSTOM_PARAM_MAX_STRING, DEFAULTS, MAX_OUTPUT_TOKENS,
                               PROVIDER_DEFAULTS, Settings)
 

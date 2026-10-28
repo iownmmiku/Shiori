@@ -6,15 +6,15 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 
-from mikubot.chat import ChatService
-from mikubot.chat_preview import preview_events
-from mikubot.db import Store
-from mikubot import model_stream
-from mikubot.model_stream import receive_chat
-from mikubot.onebot import OneBotBridge
-from mikubot.provider import Provider, ProviderContentFilterError, ProviderError, is_budget_exceeded
-from mikubot.settings import PROVIDER_DEFAULTS, Settings
-from mikubot.social import _failure_feedback
+from shiori.chat import ChatService
+from shiori.chat_preview import preview_events
+from shiori.db import Store
+from shiori import model_stream
+from shiori.model_stream import receive_chat
+from shiori.onebot import OneBotBridge
+from shiori.provider import Provider, ProviderContentFilterError, ProviderError, is_budget_exceeded
+from shiori.settings import PROVIDER_DEFAULTS, Settings
+from shiori.social import _failure_feedback
 
 
 RAW = 'PRIVATE_UPSTREAM_FILTER_BODY https://private.invalid/v1?api_key=private-key Traceback'

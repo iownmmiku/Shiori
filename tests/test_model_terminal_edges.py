@@ -5,11 +5,11 @@ import json
 import httpx
 import pytest
 
-from mikubot.db import Store
-from mikubot.model_stream import receive_chat
-from mikubot.provider import (Provider, ProviderContentFilterError, ProviderError,
+from shiori.db import Store
+from shiori.model_stream import receive_chat
+from shiori.provider import (Provider, ProviderContentFilterError, ProviderError,
                               ProviderOutputBudgetError, ProviderStreamError)
-from mikubot.settings import PROVIDER_DEFAULTS, Settings
+from shiori.settings import PROVIDER_DEFAULTS, Settings
 
 
 ACTUAL = {'prompt_tokens': 12, 'completion_tokens': 0}

@@ -12,8 +12,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.mark.parametrize('kind, filename, description', [
-    ('app', 'mikubot.exe', 'mikubot Desktop'),
-    ('installer', 'mikubot-0.1.0-Windows-Setup.exe', 'mikubot Setup'),
+    ('app', 'shiori.exe', 'Shiori Desktop'),
+    ('installer', 'shiori-0.1.0-Windows-Setup.exe', 'Shiori Setup'),
 ])
 def test_pyinstaller_parses_public_release_resource(tmp_path, kind, filename, description):
     versioninfo = pytest.importorskip('PyInstaller.utils.win32.versioninfo')
@@ -28,14 +28,14 @@ def test_pyinstaller_parses_public_release_resource(tmp_path, kind, filename, de
         'FileVersion': '0.1.0',
         'InternalName': filename[:-4],
         'OriginalFilename': filename,
-        'ProductName': 'mikubot',
+        'ProductName': 'Shiori',
         'ProductVersion': '0.1.0',
     }
     assert info.kids[1].kids[0].name == 'Translation'
     assert info.kids[1].kids[0].kids == [1033, 1200]
     # Exercise serialization too, rather than accepting a parse-only stub.
     raw = info.toRaw()
-    assert raw and 'mikubot'.encode('utf-16le') in raw
+    assert raw and 'shiori'.encode('utf-16le') in raw
 
 
 @pytest.mark.parametrize('version, kind', [

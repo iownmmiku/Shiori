@@ -1,0 +1,4 @@
+/* Original shiori monogram. Text remains in the DOM for older cached CSS. */
+.shiori-mark{background:#10464c url('/static/assets/brand/app.svg?brand=shiori') center/contain no-repeat!important;color:transparent!important;font-size:0!important;letter-spacing:0!important;overflow:hidden;border-radius:27%!important;flex-shrink:0}
+.shiori-mark>span{display:none!important}
+.chat-avatar,.chat-welcome-glyph,.message.assistant .message-avatar{background:#dcf8f2 url('/static/assets/brand/avatar.svg?brand=shiori') center/contain no-repeat!important;color:transparent!important;font-size:0!important;border:0!important;flex-shrink:0}

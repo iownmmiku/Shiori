@@ -10,12 +10,12 @@ from fastapi.testclient import TestClient
 import pytest
 
 from auth_helpers import password_login
-from mikubot.api import create_app
-from mikubot.db import Store
-from mikubot.settings import Settings
-from mikubot.social import SocialEngine, ConversationFlow
-from mikubot.stickers import StickerLibrary, download_image, MAX_IMAGE
-from mikubot.provider import ProviderStreamError
+from shiori.api import create_app
+from shiori.db import Store
+from shiori.settings import Settings
+from shiori.social import SocialEngine, ConversationFlow
+from shiori.stickers import StickerLibrary, download_image, MAX_IMAGE
+from shiori.provider import ProviderStreamError
 
 
 def png():
@@ -168,7 +168,7 @@ def test_image_validation_rejects_bad_data_and_internal_network():
 
 
 def test_onebot_upgrades_known_qq_image_cdn_to_https():
-    from mikubot.onebot import OneBotBridge
+    from shiori.onebot import OneBotBridge
     _,images,_,_=OneBotBridge._message({'message':[{'type':'image','data':{'url':'http://multimedia.nt.qq.com.cn/download?key=fixture'}}]})
     assert images==['https://multimedia.nt.qq.com.cn/download?key=fixture']
 
@@ -199,7 +199,7 @@ def test_authenticated_library_edit_preview_filter_and_backup(tmp_path):
 
 @pytest.mark.anyio
 async def test_onebot_sticker_uses_real_image_segment_and_echo_receipt(library):
-    from mikubot.onebot import OneBotBridge
+    from shiori.onebot import OneBotBridge
     store,cfg,model,engine=library
     await collect(store,engine);item=engine.page()['items'][0]
     chat=SimpleNamespace(stickers=engine)
@@ -247,7 +247,7 @@ async def test_flow_sends_one_sticker_only_after_confirmed_text(library):
 
 @pytest.mark.anyio
 async def test_official_sticker_upload_revalidates_before_sending(tmp_path):
-    from mikubot.official import OfficialBridge
+    from shiori.official import OfficialBridge
     store=Store(tmp_path);cfg=Settings(tmp_path)
     cfg.update({'onebot':{'adapter':'official'},'qq_official':{'enabled':True,'app_id':'1234567890','app_secret':'isolated-fixture-secret'},
         'model':{'base_url':'https://fixture.invalid/v1','model':'test','vision':True},'stickers':{'collect_probability':1}})

@@ -9,12 +9,12 @@ import pytest
 from fastapi.testclient import TestClient
 
 from auth_helpers import password_login
-from mikubot.api import create_app
-from mikubot.chat import ChatService
-from mikubot.db import Store
-from mikubot.settings import Settings
-from mikubot.social import SocialEngine
-from mikubot.timezones import current_time_context
+from shiori.api import create_app
+from shiori.chat import ChatService
+from shiori.db import Store
+from shiori.settings import Settings
+from shiori.social import SocialEngine
+from shiori.timezones import current_time_context
 
 
 @pytest.fixture
@@ -60,7 +60,7 @@ class Model:
 
 @pytest.mark.anyio
 async def test_chat_clock_refreshes_per_reply_and_switch_takes_effect(tmp_path, monkeypatch):
-    from mikubot import timezones
+    from shiori import timezones
     fixed = [datetime(2027, 1, 1, 3, 30, tzinfo=timezone.utc)]
 
     class Clock(datetime):

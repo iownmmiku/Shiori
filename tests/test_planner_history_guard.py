@@ -8,9 +8,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from mikubot.chat import ChatService
-from mikubot.db import Store, message_fingerprint
-from mikubot.settings import DEFAULTS
+from shiori.chat import ChatService
+from shiori.db import Store, message_fingerprint
+from shiori.settings import DEFAULTS
 
 
 SCOPE = 'qq:group:202'
@@ -146,7 +146,7 @@ def test_stream_guard_rechecks_legacy_ancestor_dependencies_and_authority(servic
 
 
 def test_stream_guard_observes_memory_expiry_without_database_write(service, monkeypatch):
-    import mikubot.db as db_module
+    import shiori.db as db_module
     store, _, chat = service
     memory = fact(store, valid_to='2300-01-01T00:00:00Z')
     chain(store, memory=memory)
@@ -160,7 +160,7 @@ def test_stream_guard_observes_memory_expiry_without_database_write(service, mon
 
 @pytest.mark.parametrize('change', ['delete', 'expiry', 'sources'])
 def test_stream_guard_observes_knowledge_changes_outside_database(service, monkeypatch, change):
-    import mikubot.chat as chat_module
+    import shiori.chat as chat_module
     store, _, chat = service
     knowledge = {'id': 'fixture-knowledge', 'persona_id': 'default', 'status': 'active',
         'title': 'A verified source', 'text': 'A sourced detail', 'url': 'https://example.org/reference',

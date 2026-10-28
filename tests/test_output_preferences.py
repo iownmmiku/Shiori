@@ -5,9 +5,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from auth_helpers import password_login
-from mikubot.api import create_app
-from mikubot.chat_preview import emit_preview
-from mikubot.output import (generation_instructions, prepare_reply, reply_char_count,
+from shiori.api import create_app
+from shiori.chat_preview import emit_preview
+from shiori.output import (generation_instructions, prepare_reply, reply_char_count,
                             remove_parenthetical_content, split_output)
 
 

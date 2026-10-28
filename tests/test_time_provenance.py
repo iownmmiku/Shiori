@@ -7,11 +7,11 @@ import json
 import httpx
 import pytest
 
-from mikubot.chat import ChatService
-from mikubot.db import Store
-from mikubot.provider import Provider
-from mikubot.settings import Settings
-from mikubot.timezones import (ingress_times, message_anchor, message_time_context,
+from shiori.chat import ChatService
+from shiori.db import Store
+from shiori.provider import Provider
+from shiori.settings import Settings
+from shiori.timezones import (ingress_times, message_anchor, message_time_context,
                                message_time_reference, refresh_dispatch_time,
                                reference_time, utc_timestamp)
 
@@ -186,8 +186,8 @@ async def test_extraction_drops_model_guessed_date_and_persists_only_source_supp
 
 def test_dispatch_refreshes_only_owned_clock_preserving_original_message_time():
     original = [
-        {'role': 'system', 'content': '【现实时间】旧时钟\n角色设定\n【现实时间】人格中的原文\n', '_mikubot_clock': 'system'},
-        {'role': 'user', 'content': json.dumps({'current_message_id': 'm', 'current_user_id': 'u', 'current_time': {'now': 'old'}, 'current_message_time': {'sent_at': 'original'}}, ensure_ascii=False), '_mikubot_clock': 'planner'}]
+        {'role': 'system', 'content': '【现实时间】旧时钟\n角色设定\n【现实时间】人格中的原文\n', '_shiori_clock': 'system'},
+        {'role': 'user', 'content': json.dumps({'current_message_id': 'm', 'current_user_id': 'u', 'current_time': {'now': 'old'}, 'current_message_time': {'sent_at': 'original'}}, ensure_ascii=False), '_shiori_clock': 'planner'}]
     untouched = deepcopy(original)
     refreshed = refresh_dispatch_time(original, {'time': {'timezone': 'UTC'}}, purpose='planner')
     assert '旧时钟' not in refreshed[0]['content']
@@ -201,12 +201,12 @@ def test_dispatch_refreshes_only_owned_clock_preserving_original_message_time():
     custom = [{'role': 'system', 'content': '【现实时间】用户提供的原文，不是应用时钟\n'}]
     assert refresh_dispatch_time(custom) == custom
     transmitted = refresh_dispatch_time(original, for_transport=True)
-    assert all('_mikubot_clock' not in item for item in transmitted)
+    assert all('_shiori_clock' not in item for item in transmitted)
 
 
 @pytest.mark.anyio
 async def test_provider_refreshes_clock_after_queue_wait_and_each_http_retry(tmp_path, monkeypatch):
-    from mikubot import timezones
+    from shiori import timezones
     from contextlib import asynccontextmanager
     fixed = [datetime(2026, 10, 22, 23, 59, tzinfo=UTC)]
     class Clock(datetime):
@@ -231,7 +231,7 @@ async def test_provider_refreshes_clock_after_queue_wait_and_each_http_retry(tmp
     original_client = httpx.AsyncClient
     monkeypatch.setattr(httpx, 'AsyncClient', lambda *args, **kwargs: original_client(*args, transport=httpx.MockTransport(handler), **kwargs))
     try:
-        await provider.complete([{'role': 'system', 'content': '【现实时间】旧时钟\n', '_mikubot_clock': 'system'}, {'role': 'user', 'content': '你好'}])
+        await provider.complete([{'role': 'system', 'content': '【现实时间】旧时钟\n', '_shiori_clock': 'system'}, {'role': 'user', 'content': '你好'}])
         assert '2026-10-23T00:01:00+00:00' in seen[0]
         assert '2026-10-23T00:04:00+00:00' in seen[1]
     finally:

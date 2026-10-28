@@ -9,12 +9,12 @@ import pytest
 from fastapi.testclient import TestClient
 
 from auth_helpers import password_login
-from mikubot.api import create_app
-from mikubot.catalog_api import install_catalog
-from mikubot.model_catalog import ModelCatalog
+from shiori.api import create_app
+from shiori.catalog_api import install_catalog
+from shiori.model_catalog import ModelCatalog
 from qunyu.db import Store
-from mikubot.provider import Provider
-from mikubot.settings import Settings, resolve_model
+from shiori.provider import Provider
+from shiori.settings import Settings, resolve_model
 
 
 SECRET = 'isolated-catalog-key-39'

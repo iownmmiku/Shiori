@@ -11,9 +11,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from auth_helpers import FIXTURE_PASSWORD, password_login
-from mikubot import __version__
-from mikubot import updates, installer
-from mikubot.api import create_app
+from shiori import __version__
+from shiori import updates, installer
+from shiori.api import create_app
 
 CONTENT = b'MZ-local-fixture-installer-not-executable'
 
@@ -23,7 +23,7 @@ def anyio_backend(): return 'asyncio'
 
 
 def release(tag='v'+__version__, *, digest=True, kind='installer', body=CONTENT, identifier=12):
-    name=f'mikubot-{tag[1:]}-{updates.KINDS[kind]}'
+    name=f'shiori-{tag[1:]}-{updates.KINDS[kind]}'
     item={'id':identifier*10,'name':name,'state':'uploaded','size':len(body),
           'browser_download_url':updates._asset_url(tag,name)}
     sha=hashlib.sha256(body).hexdigest()

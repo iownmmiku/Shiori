@@ -14,8 +14,8 @@ const sandbox={window:{},state,FormData,AbortController,URLSearchParams,setTimeo
   openModal:(...args)=>{modal=args;},closeModal:()=>{modal=null;},confirmAction:async(a,b,callback)=>{perform=callback;},
   field:()=>'',select:()=>'',toggle:()=>'',textarea:()=>'',renderPersonas:async()=>'',renderSettings:async()=>''};
 vm.createContext(sandbox);
-for(const file of [...require('./ui_modules.cjs').experienceFactories,'experience.js'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../mikubot/static',file),'utf8'),sandbox,{filename:file});
-const ui=sandbox.window.MikubotExperience,plain=value=>JSON.parse(JSON.stringify(value));
+for(const file of [...require('./ui_modules.cjs').experienceFactories,'experience.js'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../shiori/static',file),'utf8'),sandbox,{filename:file});
+const ui=sandbox.window.ShioriExperience,plain=value=>JSON.parse(JSON.stringify(value));
 const refId='a'.repeat(32),defaultResponse=(url,opts)=>url==='/api/chat/attachments'?{id:refId,name:'fixture.txt'}:{};
 async function upload(){const file=new Blob(['fixture']);file.name='fixture.txt';await ui.handleChange({id:'attachment-input',value:'file',files:[file]});}
 

@@ -9,8 +9,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from auth_helpers import password_login
-from mikubot.api import create_app
-from mikubot.settings import Settings, resolve_model
+from shiori.api import create_app
+from shiori.settings import Settings, resolve_model
 
 
 @pytest.fixture

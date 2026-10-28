@@ -5,10 +5,10 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from mikubot.db import Store
-from mikubot.planner_result import PlanValidationError, parse_plan
-from mikubot.settings import DEFAULTS
-from mikubot.social import SocialEngine
+from shiori.db import Store
+from shiori.planner_result import PlanValidationError, parse_plan
+from shiori.settings import DEFAULTS
+from shiori.social import SocialEngine
 
 
 @pytest.fixture
@@ -237,8 +237,8 @@ async def test_revoked_source_or_permission_suppresses_parse_failure_feedback(ru
 @pytest.mark.anyio
 @pytest.mark.parametrize('case', ['omitted-needed-info', 'invalid-direct', 'invalid-passive'])
 async def test_real_chat_and_onebot_preserve_planner_failure_boundaries(tmp_path, case):
-    from mikubot.chat import ChatService
-    from mikubot.onebot import OneBotBridge
+    from shiori.chat import ChatService
+    from shiori.onebot import OneBotBridge
 
     config = Config()
     config.value['memory']['organization_enabled'] = False

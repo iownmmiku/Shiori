@@ -6,9 +6,9 @@ from copy import deepcopy
 
 import pytest
 
-from mikubot.db import Store
-from mikubot.settings import DEFAULTS
-from mikubot.social import ConversationFlow, SocialEngine
+from shiori.db import Store
+from shiori.settings import DEFAULTS
+from shiori.social import ConversationFlow, SocialEngine
 
 
 @pytest.fixture
@@ -397,7 +397,7 @@ async def test_private_always_reply_still_skips_planner_entirely(setup):
 @pytest.mark.anyio
 async def test_planner_hard_deadline_keeps_dispatched_provider_usage_unknown(setup, monkeypatch):
     import httpx
-    from mikubot.provider import Provider
+    from shiori.provider import Provider
     store, config, chat, flow, sent, _ = setup
     config.value['planner']['max_age_ms'] = 250
     config.value['model']['stream_mode'] = 'off'

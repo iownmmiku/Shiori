@@ -4,10 +4,10 @@ import json
 
 import pytest
 
-from mikubot.db import Store
-from mikubot.settings import DEFAULTS
-from mikubot.social import SocialEngine
-from mikubot.timezones import message_time_context, refresh_dispatch_time
+from shiori.db import Store
+from shiori.settings import DEFAULTS
+from shiori.social import SocialEngine
+from shiori.timezones import message_time_context, refresh_dispatch_time
 
 
 @pytest.fixture

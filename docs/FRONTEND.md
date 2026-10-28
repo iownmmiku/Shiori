@@ -1,6 +1,6 @@
 # 当前前端结构
 
-前端仍为原生 HTML/CSS/JS，无 Node 运行依赖或用户构建步骤。`mikubot/static/index.html` 用 `defer` 按明确顺序加载脚本；新增模块应同时加入该清单，不能依赖动态执行字符串。
+前端仍为原生 HTML/CSS/JS，无 Node 运行依赖或用户构建步骤。`shiori/static/index.html` 用 `defer` 按明确顺序加载脚本；新增模块应同时加入该清单，不能依赖动态执行字符串。
 
 | 模块 | 责任 |
 | --- | --- |

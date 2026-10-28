@@ -2,8 +2,8 @@ import sqlite3
 
 import pytest
 
-from mikubot.db import Store
-from mikubot.memory_search import MemorySearchIndex
+from shiori.db import Store
+from shiori.memory_search import MemorySearchIndex
 
 
 @pytest.fixture
@@ -195,7 +195,7 @@ def test_unwritable_cache_uses_explicit_sql_fallback_and_remains_bounded(store, 
         fact(store, f'普通事实 {number}')
     def unavailable(*args, **kwargs):
         raise sqlite3.OperationalError('unable to open database file')
-    monkeypatch.setattr('mikubot.memory_search.MemorySearchIndex', unavailable)
+    monkeypatch.setattr('shiori.memory_search.MemorySearchIndex', unavailable)
     ids = store.memory_candidate_ids('web:default', 'owner', '昆仑石', 2)
     assert wanted['id'] in ids and len(ids) == 2
     assert store.memory_search_status()['mode'] == 'sql_fallback'

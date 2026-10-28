@@ -7,15 +7,15 @@ import pytest
 from fastapi.testclient import TestClient
 
 from auth_helpers import FIXTURE_PASSWORD, password_login
-from mikubot.api import create_app
-from mikubot.auth_api import BOOTSTRAP_COOKIE
-from mikubot.web_auth import COOKIE_NAME
+from shiori.api import create_app
+from shiori.auth_api import BOOTSTRAP_COOKIE
+from shiori.web_auth import COOKIE_NAME
 
 
 @pytest.mark.parametrize(('host','expected'), [('127.0.0.1',True),('::1',True),('::ffff:127.0.0.1',True),('::ffff:192.168.1.10',False),('192.168.1.10',False)])
 def test_peer_loopback_recognizes_ipv4_mapped_ipv6_without_trusting_headers(host, expected):
     from types import SimpleNamespace
-    from mikubot.auth_api import local_peer
+    from shiori.auth_api import local_peer
     request = SimpleNamespace(client=SimpleNamespace(host=host), headers={'host':'127.0.0.1:8765','x-forwarded-for':'127.0.0.1'})
     assert local_peer(request) is expected
 
@@ -290,10 +290,10 @@ def test_remote_named_host_requires_explicit_allowlist(clients):
     local, remote, app = clients
     password_login(local, app)
     remote_login(remote)
-    assert remote.get('/api/bootstrap', headers={'host': 'mikubot.example:8765'}).status_code == 403
-    response = local.put('/api/auth/access', json={'allowed_hosts': ['mikubot.example']})
+    assert remote.get('/api/bootstrap', headers={'host': 'shiori.example:8765'}).status_code == 403
+    response = local.put('/api/auth/access', json={'allowed_hosts': ['shiori.example']})
     assert response.status_code == 200, response.text
-    assert remote.get('/api/bootstrap', headers={'host': 'mikubot.example:8765'}).status_code == 200
+    assert remote.get('/api/bootstrap', headers={'host': 'shiori.example:8765'}).status_code == 200
 
 
 def test_password_protection_is_not_exported_or_restored_with_backups(clients):

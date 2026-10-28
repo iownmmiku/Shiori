@@ -11,20 +11,20 @@ from types import SimpleNamespace
 
 import pytest
 
-from mikubot import data_paths, startup
-from mikubot.desktop import DesktopShell, external_link, local_origin, navigation_allowed
+from shiori import data_paths, startup
+from shiori.desktop import DesktopShell, external_link, local_origin, navigation_allowed
 
 
 def test_default_data_separate_from_application(tmp_path):
     home = tmp_path / 'user'
-    assert data_paths.default_data_dir(environ={'LOCALAPPDATA': str(home / 'local')}, platform='win32', home=home) == home / 'local' / 'mikubot' / 'data'
-    assert data_paths.default_data_dir(environ={}, platform='win32', home=home) == home / 'AppData' / 'Local' / 'mikubot' / 'data'
-    assert data_paths.default_data_dir(environ={'XDG_DATA_HOME': str(home / 'xdg')}, platform='linux', home=home) == home / 'xdg' / 'mikubot' / 'data'
+    assert data_paths.default_data_dir(environ={'LOCALAPPDATA': str(home / 'local')}, platform='win32', home=home) == home / 'local' / 'shiori' / 'data'
+    assert data_paths.default_data_dir(environ={}, platform='win32', home=home) == home / 'AppData' / 'Local' / 'shiori' / 'data'
+    assert data_paths.default_data_dir(environ={'XDG_DATA_HOME': str(home / 'xdg')}, platform='linux', home=home) == home / 'xdg' / 'shiori' / 'data'
 
 
 @pytest.fixture
 def paths(tmp_path, monkeypatch):
-    base, target = tmp_path / 'application', tmp_path / 'userdata' / 'mikubot' / 'data'
+    base, target = tmp_path / 'application', tmp_path / 'userdata' / 'shiori' / 'data'
     legacy = base / 'data'
     legacy.mkdir(parents=True)
     monkeypatch.setattr(data_paths, 'default_data_dir', lambda: target)
@@ -202,7 +202,7 @@ def test_desktop_navigations_are_blocked_before_load(tmp_path, monkeypatch):
 
 
 def test_lan_listener_preserves_local_desktop_endpoint():
-    from mikubot.__main__ import _bind_listeners
+    from shiori.__main__ import _bind_listeners
     probe = socket.socket()
     probe.bind(('127.0.0.1', 0))
     port = probe.getsockname()[1]

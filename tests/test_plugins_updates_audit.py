@@ -12,10 +12,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 from auth_helpers import password_login
-from mikubot.api import create_app
-from mikubot.plugins import PluginService, requested, create_and_run
-from mikubot.runs import TERMINAL
-from mikubot import startup, updates
+from shiori.api import create_app
+from shiori.plugins import PluginService, requested, create_and_run
+from shiori.runs import TERMINAL
+from shiori import startup, updates
 from test_computer_auto_v9 import automatic, wait_for
 from test_updates import manager
 
@@ -37,10 +37,10 @@ async def test_plugin_runs_in_real_child_and_does_not_import_on_save(automatic):
     payload['code'] = f'from pathlib import Path\nPath({str(marker)!r}).write_text("worker", encoding="utf-8")\ndef run(input):\n    return {{"value": input["value"]}}\n'
     item = service.save(payload)
     assert not marker.exists() and not item['enabled']
-    identity = fixture.access.identity('local', 'mikubot')
-    with pytest.raises(ValueError, match='尚未启用'): service.submit(item['id'], {}, 'web:default', 'mikubot', identity)
+    identity = fixture.access.identity('local', 'shiori')
+    with pytest.raises(ValueError, match='尚未启用'): service.submit(item['id'], {}, 'web:default', 'shiori', identity)
     service.activate(item['id'], True)
-    job = service.submit(item['id'], {'value': '中文 \' " \\ 参数'}, 'web:default', 'mikubot', identity)
+    job = service.submit(item['id'], {'value': '中文 \' " \\ 参数'}, 'web:default', 'shiori', identity)
     await wait_for(lambda: fixture.runs.get(job['id'])['status'] in TERMINAL)
     final = fixture.runs.get(job['id'])
     assert final['status'] == 'completed', final
@@ -57,8 +57,8 @@ async def test_plugin_revision_disable_and_qq_identity_revoke_execution(automati
     item = service.save(sample())
     service.activate(item['id'], True)
     with pytest.raises(PermissionError): service.submit(item['id'], {}, 'web:default', '101', fixture.identity)
-    identity = fixture.access.identity('local', 'mikubot')
-    job = service.submit(item['id'], {'value': 'never'}, 'web:default', 'mikubot', identity)
+    identity = fixture.access.identity('local', 'shiori')
+    job = service.submit(item['id'], {'value': 'never'}, 'web:default', 'shiori', identity)
     service.activate(item['id'], False)
     await wait_for(lambda: fixture.runs.get(job['id'])['status'] in TERMINAL)
     assert fixture.runs.get(job['id'])['status'] == 'failed'
@@ -74,15 +74,15 @@ async def test_plugin_keeps_per_action_approval_and_docker_failure_closed(automa
     service = PluginService(fixture.service.data_dir, fixture.service)
     service.save(sample()); service.activate('example_plugin', True)
     fixture.settings.update({'computer': {'approval_mode': 'per_action'}})
-    job = service.submit('example_plugin', {'value': 1}, 'web:default', 'mikubot', fixture.access.identity('local', 'mikubot'))
+    job = service.submit('example_plugin', {'value': 1}, 'web:default', 'shiori', fixture.access.identity('local', 'shiori'))
     await wait_for(lambda: fixture.runs.get(job['id'])['status'] == 'awaiting_approval')
     assert not fixture.runs.get(job['id'])['result']
     fixture.runs.cancel(job['id'])
     await wait_for(lambda: fixture.runs.get(job['id'])['status'] in TERMINAL)
     fixture.settings.update({'computer': {'runtime': 'docker', 'approval_mode': 'automatic'}})
     def unavailable(*args): raise ValueError('隔离镜像不可用')
-    monkeypatch.setattr('mikubot.sandbox.prepare', unavailable)
-    job = service.submit('example_plugin', {'value': 1}, 'web:default', 'mikubot', fixture.access.identity('local', 'mikubot'))
+    monkeypatch.setattr('shiori.sandbox.prepare', unavailable)
+    job = service.submit('example_plugin', {'value': 1}, 'web:default', 'shiori', fixture.access.identity('local', 'shiori'))
     await wait_for(lambda: fixture.runs.get(job['id'])['status'] in TERMINAL)
     assert fixture.runs.get(job['id'])['status'] == 'failed'
     assert '隔离镜像不可用' in fixture.runs.get(job['id'])['error']
@@ -216,7 +216,7 @@ async def test_automatic_update_worker_preserves_paths_and_uses_silent_installer
     config = json.loads((item.folder/'update-worker.json').read_text('utf-8'))
     assert '--silent' in config['arguments'] and '--no-launch' in config['arguments'] and '--wait-pid' in config['arguments']
     assert '--no-shortcuts' in config['arguments']  # Updating preserves existing user shortcut choices.
-    assert config['application'] == str(target/'mikubot.exe')
+    assert config['application'] == str(target/'shiori.exe')
     assert str(item.data_dir) in config['arguments']
     assert (item.folder/'update-worker.ps1').read_bytes().startswith(b'\xef\xbb\xbf')
     await item.close()
@@ -238,7 +238,7 @@ def test_owner_marker_reclaims_only_proven_dead_local_process(tmp_path, monkeypa
 
 
 def test_second_real_process_cannot_acquire_owned_data(tmp_path):
-    script = 'from pathlib import Path\nfrom mikubot.startup import data_guard\nimport sys\ntry:\n with data_guard(Path(sys.argv[1])): print("acquired")\nexcept OSError: print("refused"); sys.exit(3)\n'
+    script = 'from pathlib import Path\nfrom shiori.startup import data_guard\nimport sys\ntry:\n with data_guard(Path(sys.argv[1])): print("acquired")\nexcept OSError: print("refused"); sys.exit(3)\n'
     with startup.data_guard(tmp_path):
         child = subprocess.run([sys.executable, '-c', script, str(tmp_path)], capture_output=True, text=True, timeout=15)
     assert child.returncode == 3 and 'refused' in child.stdout

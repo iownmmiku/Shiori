@@ -5,11 +5,11 @@ from copy import deepcopy
 
 import pytest
 
-from mikubot.chat import ChatService
-from mikubot.db import Store
-from mikubot.delivery import DeliveryLedger
-from mikubot.onebot import OneBotBridge
-from mikubot.settings import DEFAULTS
+from shiori.chat import ChatService
+from shiori.db import Store
+from shiori.delivery import DeliveryLedger
+from shiori.onebot import OneBotBridge
+from shiori.settings import DEFAULTS
 
 
 @pytest.fixture

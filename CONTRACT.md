@@ -1,14 +1,14 @@
-# mikubot 0.1.6 集成约定
+# Shiori 0.1.6 集成约定
 
 本文描述0.1.6源码集成约定，版本发布与下载以GitHub实际公开资产为准；旧版不保证具备本版新增接口。
 
-本文供当前源码开发与接入使用，运行时校验以 `mikubot/api.py`、`experience_api.py` 及对应服务为准。历史内部版本说明归档于 `docs/archive/`，不覆盖当前约定。产品名与核心包均为 `mikubot`；`qunyu` 仅为旧导入和启动兼容层，计划在 **0.3.0** 移除，新集成应直接使用 `mikubot`。
+本文供当前源码开发与接入使用，运行时校验以 `shiori/api.py`、`experience_api.py` 及对应服务为准。历史内部版本说明归档于 `docs/archive/`，不覆盖当前约定。产品名为 **Shiori**，核心包为 `shiori`；`mikubot`、`qunyu` 仅为旧导入和启动兼容层，计划在 **0.3.0** 移除，新集成应直接使用 `shiori`。本次改名仅在本地完成，GitHub 仓库地址维持 `iownmmiku/mikubot`。
 
 ## 运行与认证
 
 0.1.6配置与消息处理见[使用说明](docs/CONFIGURATION_WORKFLOWS.md)：`settings.debounce`含`enabled/seconds/max_wait_seconds`，默认`false/3/30`；机器人配置与会话可用`debounce_enabled/debounce_seconds/debounce_max_wait_seconds`覆盖，空值继承。`GET /api/time`经过管理台认证，返回程序UTC时钟、配置时区和感知开关。`POST /api/chat`可接收1—8项`messages`原始输入，各项仅包含`text/images/attachments/sent_at`；合并来源、接收时刻、身份与授权由服务端生成，不接受客户端冒充。JSON与SSE共用同一校验和附件租约。客户端收集不等于跨客户端服务端等待队列。插件规范包导入、导出与回退接口见[插件说明](docs/PLUGINS.md)。
 
-Python 3.11–3.13（推荐3.12），FastAPI、SQLite；正式入口为 `python -m mikubot`，应用工厂为 `mikubot.api:create_app`。前端为 `mikubot/static` 中的 HTML/CSS/JS，无需用户构建。Windows 默认数据在 `%LOCALAPPDATA%\mikubot\data`，可用 `--data-dir` 指定位置；新默认目录全空时可复制旧版同级 `data`，不删除旧目录，不覆盖已有新数据。
+Python 3.11–3.13（推荐3.12），FastAPI、SQLite；正式入口为 `python -m shiori`，应用工厂为 `shiori.api:create_app`。前端为 `shiori/static` 中的 HTML/CSS/JS，无需用户构建。全新 Windows 安装默认数据在 `%LOCALAPPDATA%\shiori\data`；若该目录为空而旧 `mikubot/data` 或 `qunyu/data` 有数据，则直接沿用旧目录，不复制成两份。安装目录内的历史 `data` 仍按原规则安全迁移。可用 `--data-dir` 或 `SHIORI_DATA_DIR` 指定位置，兼容 `MIKUBOT_DATA_DIR`、`QUNYU_DATA_DIR`。数据库文件名 `qunyu.db`、身份签名命名空间和数据锁保持兼容，不重置密码、记忆或管理员。
 
 **每个数据目录只允许一个写入进程。**正式启动器在加载设置前获取同一数据目录的系统进程锁：Windows命名互斥体，POSIX文件锁，桌面、浏览器与`--no-browser`均经过此入口。第二次启动复用已有实例或明确拒绝。应用工厂用于嵌入和测试，不应直接开启多个ASGI worker。同时以原子独占文件创建 `.instance-owner.json`，包含宿主、PID命名空间和进程身份；本地已死亡进程可回收，外来命名空间或损坏记录保守拒绝，只有确认所有写入者退出后才能手动移除。禁止Docker、本地程序或多台主机同时写同一目录，不承诺网络文件系统或多节点写入。安装现有数据目录时获取同一锁。
 
@@ -28,7 +28,7 @@ Python 3.11–3.13（推荐3.12），FastAPI、SQLite；正式入口为 `python 
 
 ## 身份与电脑授权
 
-`access.administrators` 存储 `platform`、`account_id`、`instance_id` 和备注。平台为 `onebot` 或 `qqofficial`；认证的本地 `mikubot` 管理员内置。填写实例 ID 时只匹配该机器人实例，留空的手填历史条目可匹配该平台同账号；短时码绑定保存实际实例。账号名、群身份和引用内容不构成凭据。
+`access.administrators` 存储 `platform`、`account_id`、`instance_id` 和备注。平台为 `onebot` 或 `qqofficial`；认证的本地 `shiori` 管理员内置。填写实例 ID 时只匹配该机器人实例，留空的手填历史条目可匹配该平台同账号；短时码绑定保存实际实例。账号名、群身份和引用内容不构成凭据。
 
 `AccessManager` 在本机或平台认证入口签发内部身份凭据，任务每一步、审批及继续时复核。私聊/群允许列表只控制聊天资格。普通用户可以使用允许的记忆、计算、待办等聊天工具，不获得本机电脑能力或配置管理权限。
 

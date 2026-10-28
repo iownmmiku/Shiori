@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from mikubot.chat import ChatService
+from shiori.chat import ChatService
 
 
 @pytest.fixture

@@ -5,7 +5,7 @@ import json
 import pytest
 
 from qunyu.db import Store
-from mikubot.knowledge import PersonaKnowledge, _now
+from shiori.knowledge import PersonaKnowledge, _now
 
 
 @pytest.fixture
@@ -66,7 +66,7 @@ async def test_exploration_date_does_not_pass_chinese_to_locale_strftime(store, 
         def __format__(self, spec):
             spec.encode('ascii')
             return super().__format__(spec)
-    monkeypatch.setattr('mikubot.knowledge._now', lambda: AsciiFormatDate(2026, 10, 19, tzinfo=timezone.utc))
+    monkeypatch.setattr('shiori.knowledge._now', lambda: AsciiFormatDate(2026, 10, 19, tzinfo=timezone.utc))
     service, sources = engine(store, provider=Provider())
     await service.explore('interested')
     assert sources.queries and sources.queries[0].endswith('2026年10月')
@@ -259,7 +259,7 @@ def test_invalid_backup_dates_rejected():
     ('Japanese anime', 'Japanese anime production interview', 'Japanese anime teams discuss animation production and visual composition. This interview focuses on Japanese anime rather than unrelated entertainment.')
 ])
 def test_topic_filter_accepts_substantive_short_long_and_english_topics(interest, title, body):
-    from mikubot.knowledge import assess_topic_relevance
+    from shiori.knowledge import assess_topic_relevance
     result = assess_topic_relevance(interest, title, body)
     assert result['relevant'], result
     assert result['matched_terms'] and result['reason']
@@ -272,12 +272,12 @@ def test_topic_filter_accepts_substantive_short_long_and_english_topics(interest
     ('免费账号共享', '这里提供免费账号和密码。音乐来源未标注，动画仅是导航标签。请使用这些账号和密码登录。')
 ])
 def test_topic_filter_rejects_unrelated_title_only_navigation_and_credentials(title, body):
-    from mikubot.knowledge import assess_topic_relevance
+    from shiori.knowledge import assess_topic_relevance
     assert not assess_topic_relevance('音乐', title, body)['relevant']
 
 
 def test_qualified_topic_needs_more_than_one_broad_keyword():
-    from mikubot.knowledge import assess_topic_relevance
+    from shiori.knowledge import assess_topic_relevance
     assert not assess_topic_relevance('Japanese anime', 'Anime news',
                                      'Anime news is updated here. Anime audiences read entertainment announcements. Anime streaming is discussed.')['relevant']
 

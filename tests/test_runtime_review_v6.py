@@ -5,11 +5,11 @@ from types import SimpleNamespace
 import pytest
 
 from qunyu.db import Store
-from mikubot.chat import ChatService
-from mikubot.evaluation import replay
-from mikubot.onebot import OneBotBridge
-from mikubot.settings import DEFAULTS
-from mikubot.tool_actions import ToolActions
+from shiori.chat import ChatService
+from shiori.evaluation import replay
+from shiori.onebot import OneBotBridge
+from shiori.settings import DEFAULTS
+from shiori.tool_actions import ToolActions
 from unittest.mock import AsyncMock
 
 

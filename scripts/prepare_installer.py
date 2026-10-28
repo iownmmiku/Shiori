@@ -12,11 +12,11 @@ def prepare(archive: Path, destination: Path, version: str):
         if z.testzip() is not None:
             raise ValueError('发行ZIP损坏')
         names = [entry.orig_filename for entry in z.infolist()]
-        if 'mikubot/mikubot.exe' not in names:
+        if 'shiori/shiori.exe' not in names:
             raise ValueError('发行ZIP缺少程序入口')
         for name in names:
             parts = PurePosixPath(name).parts
-            if not parts or parts[0] != 'mikubot' or '..' in parts or '\\' in name or ':' in name:
+            if not parts or parts[0] != 'shiori' or '..' in parts or '\\' in name or ':' in name:
                 raise ValueError('发行ZIP含不安全路径')
             if any(part.lower() in ('data', 'admin.token') or part.startswith('.qa-') for part in parts):
                 raise ValueError('发行ZIP含用户或测试数据')
@@ -24,7 +24,7 @@ def prepare(archive: Path, destination: Path, version: str):
     payload = destination / 'payload.zip'
     shutil.copy2(archive, payload)
     manifest = {'schema': 1, 'version': version, 'sha256': hashlib.sha256(payload.read_bytes()).hexdigest(),
-                'root': 'mikubot', 'executable': 'mikubot.exe'}
+                'root': 'shiori', 'executable': 'shiori.exe'}
     (destination / 'manifest.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2), 'utf-8')
     return manifest
 

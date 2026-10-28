@@ -16,10 +16,10 @@ docker compose -f compose.yaml -f compose.low-memory.yaml up -d --build
 覆盖文件默认给应用容器设置 **768 MiB 内存、1 CPU**，标准输出采用 `json-file`，每份日志 10 MiB、保留 3 份。这是尚待目标 Linux 压测确认的起点，限制过低会导致 OOM 重启，不会自动降低应用分配。用 `.env` 或启动时环境变量调整：
 
 ```text
-MIKUBOT_MEMORY_LIMIT=768m
-MIKUBOT_CPU_LIMIT=1.0
-MIKUBOT_LOG_MAX_SIZE=10m
-MIKUBOT_LOG_MAX_FILES=3
+SHIORI_MEMORY_LIMIT=768m
+SHIORI_CPU_LIMIT=1.0
+SHIORI_LOG_MAX_SIZE=10m
+SHIORI_LOG_MAX_FILES=3
 ```
 
 宿主回环映射 `127.0.0.1:8765`、非 root、只读根文件系统、`/tmp` 64 MiB、无新增权限及 128 进程限制继续生效。不要为方便连接器而挂载 Docker socket 或开放管理端口到公网。卷里的应用日志已有独立轮转；这里新增的日志限制针对 Docker 标准输出。
@@ -53,7 +53,7 @@ MIKUBOT_LOG_MAX_FILES=3
 
 ## 同机资源预算
 
-分别采样操作系统、应用容器、NapCat/SnowLuma、可选电脑代码容器。为操作系统和连接器留出余量，不能将 2 GiB 全部分给 mikubot。QQ 客户端/连接器的版本、登录态和群活跃程度会改变占用，连接器没有在本项目里的统一内存保证。
+分别采样操作系统、应用容器、NapCat/SnowLuma、可选电脑代码容器。为操作系统和连接器留出余量，不能将 2 GiB 全部分给 Shiori。QQ 客户端/连接器的版本、登录态和群活跃程度会改变占用，连接器没有在本项目里的统一内存保证。
 
 内置 Docker 电脑脚本单任务已有 512 MiB / 1 CPU / 64 进程限制，属于额外开销；应用服务容器默认不挂载宿主 Docker socket，所以此覆盖文件不会自动启用它。电脑能力保持默认关闭。云端部署若调用远程模型，本地不加载模型权重；同机 Ollama 等本地模型需另外计算权重和上下文显存/内存。
 
@@ -74,4 +74,4 @@ python scripts/sample_resources.py --pid SERVICE_PID --seconds 60 --output resou
 
 出现重启或卡顿时核对 `docker inspect --format '{{.State.OOMKilled}} {{.RestartCount}} {{.HostConfig.Memory}}' YOUR_CONTAINER`、`docker stats --no-stream`、应用日志，以及 cgroup v2 的 `memory.current`、`memory.peak`、`memory.events`。容器重建或重启可能重置计数；保存事故时间和采样口径。不要自动修改宿主 Swap、安全组或关闭鉴权。
 
-内置统计兼容 cgroup v1/v2，使用两次采样间的真实累计 CPU 时间计算资源组使用率，首次显示采样中。资源组可能包含多个进程，进程指标仅涵盖 mikubot。可见祖先配额和 CPU 集合会约束分母，但不承诺在所有容器权限与挂载布局下都可采集。NapCat/SnowLuma 没有可信 PID 关联，独立资源明确显示未采集，可用上述宿主采样方法另行记录。
+内置统计兼容 cgroup v1/v2，使用两次采样间的真实累计 CPU 时间计算资源组使用率，首次显示采样中。资源组可能包含多个进程，进程指标仅涵盖 Shiori。可见祖先配额和 CPU 集合会约束分母，但不承诺在所有容器权限与挂载布局下都可采集。NapCat/SnowLuma 没有可信 PID 关联，独立资源明确显示未采集，可用上述宿主采样方法另行记录。

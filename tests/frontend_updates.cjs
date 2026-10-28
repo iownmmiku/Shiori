@@ -3,9 +3,9 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('nod
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const node={innerHTML:''},calls=[];let confirm=null,polls=0;
 const release={id:12,tag:'v0.1.2',name:'Release <script>x</script>',notes:'<img src=x onerror=bad()>',published_at:'2026-10-19',relation:'newer',prerelease:false,
-  url:'https://github.com/iownmmiku/mikubot/releases/tag/v0.1.2',assets:{installer:{name:'setup.exe',size:123,verified_download_available:true},source:{name:'source.zip',size:20,verified_download_available:true}}};
+  url:'https://github.com/iownmmiku/Shiori/releases/tag/v0.1.2',assets:{installer:{name:'setup.exe',size:123,verified_download_available:true},source:{name:'source.zip',size:20,verified_download_available:true}}};
 let result={current_version:'0.1.1',mode:'installed',default_kind:'installer',install_supported:true,local_install_allowed:true,
-  releases:[],download:{status:'idle'},releases_url:'https://github.com/iownmmiku/mikubot/releases',page:1,include_prerelease:false};
+  releases:[],download:{status:'idle'},releases_url:'https://github.com/iownmmiku/Shiori/releases',page:1,include_prerelease:false};
 let fail=false;
 const sandbox={window:{},state:{page:'settings',authenticated:true},document:{hidden:false},e:esc,fmt:String,icon:()=>'',notice:text=>esc(text),
   button:(label,action,style,symbol,extra='')=>`<button data-action="${action}" ${extra}>${esc(label)}</button>`,
@@ -13,9 +13,9 @@ const sandbox={window:{},state:{page:'settings',authenticated:true},document:{hi
   $:selector=>selector==='#updates-section'?node:null,toast(){},setTimeout:()=>++polls,clearTimeout(){},
   confirmAction:async(a,b,callback)=>{confirm={a,b,callback};},
   api:async(url,options)=>{calls.push({url,options});if(fail)throw Error('network failed');return structuredClone(result);}};
-vm.createContext(sandbox);vm.runInContext(fs.readFileSync(path.join(__dirname,'../mikubot/static/updates.js'),'utf8'),sandbox);
+vm.createContext(sandbox);vm.runInContext(fs.readFileSync(path.join(__dirname,'../shiori/static/updates.js'),'utf8'),sandbox);
 (async()=>{
-  const ui=sandbox.window.MikubotUpdates;
+  const ui=sandbox.window.ShioriUpdates;
   assert.match(await ui.settingsPanel(),/0\.1\.1/);assert.deepEqual(calls.map(x=>x.url),['/api/updates'],'render does not contact GitHub');
   result={...result,releases:[release],checked_at:'2026-10-19'};
   await ui.handleAction('update-check',{});

@@ -3,10 +3,10 @@ from copy import deepcopy
 
 import pytest
 
-from mikubot.chat import ChatService
-from mikubot.context import ContextEngine
-from mikubot.db import Store
-from mikubot.settings import DEFAULTS, resolve_model
+from shiori.chat import ChatService
+from shiori.context import ContextEngine
+from shiori.db import Store
+from shiori.settings import DEFAULTS, resolve_model
 
 
 @pytest.fixture
@@ -67,7 +67,7 @@ def seed(store, start, count, scope='web:default', user='owner'):
 async def test_cumulative_digest_coverage_and_invalidated_fallback_follow_database_order(env, monkeypatch, timestamp_ties, legacy_order):
     store, settings, provider = env
     if timestamp_ties:
-        monkeypatch.setattr('mikubot.db.utc_now', lambda: '2026-10-26T00:00:00.000000+00:00')
+        monkeypatch.setattr('shiori.db.utc_now', lambda: '2026-10-26T00:00:00.000000+00:00')
     engine = ContextEngine(store, settings, provider)
     originals = seed(store, 0, 12)
     first = await engine.build('web:default', 'owner', originals)

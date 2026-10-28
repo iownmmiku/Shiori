@@ -1,6 +1,6 @@
 """Verify v0.9 workflows against an EXE with isolated data and a local fake model.
 
-This does not import mikubot source, log in to QQ, contact a paid model, enable
+This does not import shiori source, log in to QQ, contact a paid model, enable
 remote management, or change autostart/firewall settings. All computer actions
 write only inside the fresh QA data directory selected by the caller.
 """
@@ -224,10 +224,10 @@ def main():
     parser.add_argument('--exe', type=Path, required=True)
     parser.add_argument('--data-dir', type=Path, required=True)
     parser.add_argument('--port', type=int, default=18915)
-    parser.add_argument('--expect-version', default='0.1.6')
+    parser.add_argument('--expect-version', default='0.2.0')
     args = parser.parse_args()
     exe, data = args.exe.resolve(), args.data_dir.resolve()
-    if not exe.is_file(): parser.error('--exe must point to the compiled mikubot executable')
+    if not exe.is_file(): parser.error('--exe must point to the compiled shiori executable')
     if data.exists(): parser.error('Use a fresh, nonexistent, disposable QA data directory')
     if not 1 <= args.port <= 65535: parser.error('Invalid port')
     client = Client(f'http://127.0.0.1:{args.port}')

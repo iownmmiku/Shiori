@@ -93,15 +93,15 @@ def local_model_fixture():
 
 
 def smoke_experience(request, upload, data, exe):
-    resource = exe.parent / '_internal/mikubot/resources/csp'
+    resource = exe.parent / '_internal/shiori/resources/csp'
     for relative in ('SKILL.md', 'LICENSE', 'references/persona-template.md', 'references/distillation-framework.md',
                      'references/character-mode.md', 'references/corpus-mode.md'):
         assert (resource / relative).is_file(), 'Missing frozen CSP resource: ' + relative
-    assert b'MikubotExperience' in request('/static/experience.js')
+    assert b'ShioriExperience' in request('/static/experience.js')
     assert b'experience.css' in request('/')
     assert '管理员' in request('/static/guide.md').decode('utf-8')
     admins = request('/api/admins')
-    assert len(admins) == 1 and admins[0]['platform'] == 'local' and admins[0]['account_id'] == 'mikubot'
+    assert len(admins) == 1 and admins[0]['platform'] == 'local' and admins[0]['account_id'] == 'shiori'
     for account in ('24242424', '25252525'):
         request('/api/admins', {'platform': 'onebot', 'account_id': account, 'instance_id': '39393939', 'label': '离线验收管理员'})
     assert len(request('/api/admins')) == 3
@@ -199,7 +199,7 @@ def main():
     parser.add_argument('exe', type=Path)
     parser.add_argument('--data-dir', required=True, type=Path)
     parser.add_argument('--port', type=int, default=18767)
-    parser.add_argument('--expect-version', '--expect', dest='expect_version', default='0.1.6')
+    parser.add_argument('--expect-version', '--expect', dest='expect_version', default='0.2.0')
     parser.add_argument('--mcp-fixture-url', default='')
     args = parser.parse_args()
     data = args.data_dir.resolve()
@@ -226,7 +226,7 @@ def main():
         with urllib.request.urlopen(req, timeout=15) as response:
             return json.load(response)
     def restore(content):
-        boundary='mikubot-smoke-restore-boundary'
+        boundary='shiori-smoke-restore-boundary'
         body=(f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="smoke.zip"\r\nContent-Type: application/zip\r\n\r\n'.encode()
               +content+f'\r\n--{boundary}--\r\n'.encode())
         req=urllib.request.Request(url+'/api/backup/restore',body,headers={**headers,'Content-Type':f'multipart/form-data; boundary={boundary}'},method='POST')
@@ -244,7 +244,7 @@ def main():
                 time.sleep(.25)
         else:
             raise RuntimeError('Portable application did not become ready')
-        assert b'mikubot' in request('/static/app.js').lower()
+        assert b'shiori' in request('/static/app.js').lower()
         try:
             request('/api/bootstrap')
             raise AssertionError('Unauthenticated request was accepted')
@@ -254,7 +254,7 @@ def main():
         boot = request('/api/bootstrap')
         assert boot['setup_required'] and boot['stats']['messages'] == 0
         if version >= (0, 5):
-            assert boot['name'] == 'mikubot' and boot['personas'][0]['name'] == '初音未来' and len(boot['personas']) == 1
+            assert boot['name'] == 'Shiori' and boot['personas'][0]['name'] == '初音未来' and len(boot['personas']) == 1
             assert b'personaKnowledge' in request('/static/workspace-features.js')
         fixture_key = 'qa-disposable-model-key'
         result = request('/api/settings', {'model': {'api_key': fixture_key}}, 'PUT')
@@ -427,7 +427,7 @@ def main():
             assert replay.wait(timeout=25)==0
             report=json.loads(replay_output.read_text('utf-8'))
             assert report['mode']=='scripted_routing_regression' and report['summary']['errors']==0 and report['summary']['decision_accuracy']==1
-        checks = 'standalone mikubot EXE, auth, DPAPI, restart, scoped memory, tools, MCP once-only approval, knowledge, output, replay'
+        checks = 'standalone shiori EXE, auth, DPAPI, restart, scoped memory, tools, MCP once-only approval, knowledge, output, replay'
         if version >= (0, 8):
             checks += ', frozen Python worker, administrators, reference attachments, computer approvals, CSP corpus persona, read-only job restore'
         (data / 'portable-smoke.json').write_text(json.dumps({'version': args.expect_version, 'passed': True,

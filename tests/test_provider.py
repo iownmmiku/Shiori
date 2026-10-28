@@ -4,8 +4,8 @@ import httpx
 import pytest
 
 from qunyu.db import Store
-from mikubot.provider import Provider, ProviderError, endpoint
-from mikubot.settings import Settings
+from shiori.provider import Provider, ProviderError, endpoint
+from shiori.settings import Settings
 
 
 def test_provider_http_contract_fallback_usage_and_no_secret_leak(tmp_path, monkeypatch):

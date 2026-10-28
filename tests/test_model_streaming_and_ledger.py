@@ -9,12 +9,12 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from mikubot.api import create_app
-from mikubot.db import Store
-from mikubot.model_stream import ModelStreamError, receive_chat
-from mikubot.provider import Provider, ProviderError, ProviderTimeoutError, ProviderStreamError, ProviderOutputBudgetError, is_budget_exceeded
-from mikubot.settings import Settings, PROVIDER_DEFAULTS
-from mikubot.usage_ledger import reconcile, breakdown
+from shiori.api import create_app
+from shiori.db import Store
+from shiori.model_stream import ModelStreamError, receive_chat
+from shiori.provider import Provider, ProviderError, ProviderTimeoutError, ProviderStreamError, ProviderOutputBudgetError, is_budget_exceeded
+from shiori.settings import Settings, PROVIDER_DEFAULTS
+from shiori.usage_ledger import reconcile, breakdown
 
 
 class Chunks(httpx.AsyncByteStream):
@@ -99,7 +99,7 @@ def test_reasoning_exhaustion_is_not_misreported_as_network_or_daily_budget(setu
 
 
 def test_real_provider_analysis_retry_preserves_two_separate_usage_records(setup_provider, tmp_path):
-    from mikubot.distillation import DistillationService
+    from shiori.distillation import DistillationService
     provider, _, store, transport = setup_provider
     seen = []
     def handler(request):
@@ -225,7 +225,7 @@ def test_unconfirmed_usage_api_requires_local_authenticated_admin(tmp_path):
 
 
 def test_cgroup_metrics_report_limits_and_oom_without_touching_host(tmp_path):
-    from mikubot.resource_metrics import read_resources
+    from shiori.resource_metrics import read_resources
     group, proc = tmp_path / 'group', tmp_path / 'proc'
     for name,value in {'memory.current':'950','memory.max':'1000','memory.peak':'980','cpu.max':'50000 100000','memory.events':'oom 2\noom_kill 1\n'}.items():
         (group / name).parent.mkdir(parents=True, exist_ok=True)
@@ -259,7 +259,7 @@ def test_repeated_request_settlement_is_idempotent(setup_provider):
 
 
 def test_parser_admission_cancellation_does_not_leak_permits():
-    from mikubot.work_limits import WorkLimiter,WorkBusy
+    from shiori.work_limits import WorkLimiter,WorkBusy
     from types import SimpleNamespace
     gate=WorkLimiter(SimpleNamespace(get=lambda:{'scheduler':{'parsing_concurrency':1,'parsing_queue_limit':1}}),'parsing',1,1)
     entered,release=asyncio.Event(),asyncio.Event()
@@ -320,7 +320,7 @@ def test_first_content_deadline_includes_waiting_for_headers():
 
 
 def test_semantic_deadline_settles_dispatched_embedding_and_releases_model_queue(tmp_path,monkeypatch):
-    from mikubot.memory import MemoryEngine
+    from shiori.memory import MemoryEngine
     store,settings=Store(tmp_path),Settings(tmp_path)
     settings.update({'model':{'base_url':'https://fixture.invalid/v1','model':'chat'},'memory':{'semantic_enabled':True,'embedding_model':'embed'}})
     store.create_memory({'scope_id':'web:default','user_id':'owner','content':'喜欢咖啡'})

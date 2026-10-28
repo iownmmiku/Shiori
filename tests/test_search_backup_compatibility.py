@@ -3,7 +3,7 @@ import sqlite3
 
 import pytest
 
-from mikubot.db import Store
+from shiori.db import Store
 
 
 def test_restore_backup_without_new_search_index_preserves_data_and_quota(tmp_path):

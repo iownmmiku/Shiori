@@ -9,12 +9,12 @@ import pytest
 from fastapi.testclient import TestClient
 
 from auth_helpers import password_login
-from mikubot.api import create_app
-from mikubot.db import Store
-from mikubot.provider import Provider
-from mikubot.settings import Settings
-from mikubot.statistics import snapshot
-from mikubot.timezones import config_zone, day_bounds
+from shiori.api import create_app
+from shiori.db import Store
+from shiori.provider import Provider
+from shiori.settings import Settings
+from shiori.statistics import snapshot
+from shiori.timezones import config_zone, day_bounds
 from test_stickers_and_batching import library, collect
 
 
@@ -38,7 +38,7 @@ def test_store_and_planner_share_the_configured_day(tmp_path,monkeypatch):
     class Clock(datetime):
         @classmethod
         def now(cls,tz=None):return datetime(2026,10,20,12,tzinfo=timezone.utc).astimezone(tz)
-    monkeypatch.setattr('mikubot.timezones.datetime',Clock)
+    monkeypatch.setattr('shiori.timezones.datetime',Clock)
     for stamp,tokens in [('2026-10-20T02:00:00.000000Z',10),('2026-10-20T16:00:00.000000Z',20)]:
         store.record_usage({'created_at':stamp,'scope_id':'web:default','purpose':'planner','input_tokens':tokens,'output_tokens':0,'cost':0})
     assert store.usage_totals(day='2026-10-20')['tokens']==10
@@ -73,7 +73,7 @@ def test_shared_quota_is_atomic_under_parallel_attempts(library):
 
 
 def test_fixed_sandbox_digest_is_checked_and_executes_an_immutable_reference(monkeypatch):
-    from mikubot import sandbox
+    from shiori import sandbox
     monkeypatch.setattr(sandbox,'docker_prefix',lambda:['docker','--host','local-test-engine'])
     seen=[];valid=True
     def run(command,**kwargs):

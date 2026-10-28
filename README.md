@@ -1,8 +1,10 @@
-# mikubot 0.1.6
+# Shiori 0.2.0
+
+> **0.2.0**：全新「Analysis OS」界面（暖灰纸面、墨色实心按钮、青色状态灯与对角线“解密”动效），并随 mikubot → Shiori 更名同步将 GitHub 仓库改为 `iownmmiku/Shiori`（旧链接自动跳转）。完整变化见[更新日志](RELEASE_NOTES.md)。**0.1.6 及更早版本因内置旧仓库地址无法应用内更新，请手动覆盖安装；数据会保留。**
 
 > **0.1.6 正式版**：整合消息防抖、时间来源、集中模型配置、规范插件包与自定义侧边栏，并补齐 QQ 回复、记忆与上下文、兴趣探索、网页搜索及便携托盘修复。原预发布归档为 [0.1.6 beta](https://github.com/iownmmiku/mikubot/releases/tag/v0.1.6-beta)。详见[更新日志](RELEASE_NOTES.md)和[测试报告](TEST_REPORT.md)。
 
-当前正式版本为 **0.1.6**，提供 Windows 安装版、便携版与源码部署。安装包和便携包无需 Python，源码支持 Python 3.11–3.13。
+当前源码版本为 **0.2.0**。Windows 安装版和便携版尚未为 0.2.0 构建，请先用源码部署；下方 0.1.6 安装包是历史版本。安装包和便携包无需 Python，源码支持 Python 3.11–3.13。
 
 本机运行的 AI 聊天机器人与任务助手。预装可删除的初音未来人格，支持独立聊天、QQ 接入、记忆、黑话学习、人格蒸馏和管理员电脑任务。
 
@@ -12,14 +14,14 @@
 
 人格蒸馏采用“检索 → 选择角色 → 自动整理资料”的流程，可在“机器人配置 → 模型”的高级分工中指定专用模型。记忆档案与群语言页提供状态、七日新增、来源、审核和修改；群词默认共享确认后的词义，私聊及原始例句保持隔离。
 
-## 下载与选择
+## 下载与选择（历史 0.1.6 发行版）
 
-前往 **[GitHub Releases 下载0.1.6正式版](https://github.com/iownmmiku/mikubot/releases/tag/v0.1.6)**，展开Assets，按用途选择。
+0.2.0 的 Windows 安装包暂未发布。需要预编译程序时，可前往 **[GitHub Releases 下载0.1.6正式版](https://github.com/iownmmiku/Shiori/releases/tag/v0.1.6)**（旧链接 `iownmmiku/mikubot` 会自动跳转），展开Assets，按用途选择；资产文件名保留 `mikubot-` 原名。
 
 | 文件 | 适合谁 | 使用方式 |
 | --- | --- | --- |
-| [mikubot-0.1.6-Windows-Setup.exe](https://github.com/iownmmiku/mikubot/releases/download/v0.1.6/mikubot-0.1.6-Windows-Setup.exe) | Windows 用户，推荐 | 选择父目录后自动创建 mikubot 文件夹，安装后从快捷方式打开 |
-| [mikubot-0.1.6-Windows-x64.zip](https://github.com/iownmmiku/mikubot/releases/download/v0.1.6/mikubot-0.1.6-Windows-x64.zip) | 希望解压即用 | 完整解压后双击 `mikubot.exe`，不要只取出 EXE |
+| [mikubot-0.1.6-Windows-Setup.exe](https://github.com/iownmmiku/mikubot/releases/download/v0.1.6/mikubot-0.1.6-Windows-Setup.exe) | Windows 用户，推荐 | 已发布的旧品牌安装包；新 Shiori 安装包待发布 |
+| [mikubot-0.1.6-Windows-x64.zip](https://github.com/iownmmiku/mikubot/releases/download/v0.1.6/mikubot-0.1.6-Windows-x64.zip) | 希望解压即用 | 该历史下载解压后运行 `mikubot.exe`；本地新包使用 `shiori.exe` |
 | [mikubot-0.1.6-source.zip](https://github.com/iownmmiku/mikubot/releases/download/v0.1.6/mikubot-0.1.6-source.zip) | 希望运行或修改代码 | 安装 Python 3.12，按下方命令启动 |
 
 安装版和便携版无需 Python、Node 或 Git，默认打开独立桌面窗口。它们不包含模型账号、API Key、QQ 客户端或 NapCat/SnowLuma，需要自行准备。模型调用按所选服务商规则计费。
@@ -41,7 +43,7 @@
 
 **嵌入模型**：打开“机器人配置 → 模型 → 嵌入模型 → 添加嵌入模型”，复用已有供应商或填写新连接，获取型号或手动输入，点击“保存、测试并启用检索”。系统实际调用 `/embeddings`，验证向量后启用记忆检索；无需再去高级设置指定路由。页面直接显示当前模型和开关，也可单独测试、调整参数或关闭。此模型独立于聊天，测试同样计入模型用量。
 
-桌面窗口依赖 Microsoft Edge WebView2 运行时。缺少组件或桌面加载失败时会自动切换系统浏览器，并提示切换结果；也可运行 `mikubot.exe --browser`。有托盘时关闭窗口会继续运行，从托盘选择“退出”才完全停止。
+桌面窗口依赖 Microsoft Edge WebView2 运行时。缺少组件或桌面加载失败时会自动切换系统浏览器，并提示切换结果；也可运行 `shiori.exe --browser`。有托盘时关闭窗口会继续运行，从托盘选择“退出”才完全停止。
 
 ## 接入 QQ
 
@@ -50,7 +52,7 @@
 1. 自行启动连接器，完成 QQ 登录与必要的设备验证。
 2. 在快速入门选择接入方式，使用默认黑名单，点击“保存并自动配对”；无需先填 QQ 号或群号。旧白名单会保留，可明确切换。
 3. 填入连接器的本机 WebUI 地址与管理口令；SnowLuma 多账号时选择实际使用的账号。
-4. mikubot 会通过连接器管理接口创建专属**反向 WebSocket**。口令不保存，其他连接配置保留。
+4. Shiori 会通过连接器管理接口创建专属**反向 WebSocket**。口令不保存，其他连接配置保留。
 5. 等待页面显示实际在线，再用自己的账号私聊或在未屏蔽的群里 @ 机器人。收到的聊天自动收集到“群与会话”，未单独设置时继承默认配置。
 
 默认探测 NapCat 的 `http://127.0.0.1:6099`、SnowLuma 的 `http://127.0.0.1:5099`，可手动修改。自动配对适用于本机回环地址；其他环境可展开手动配置，将页面显示的 `/onebot/v11/ws` 地址与相同 Access Token 填入连接器。扫码登录、连接器安装和初始化需要自行完成。
@@ -63,7 +65,7 @@
 
 ## 管理员与电脑任务
 
-“允许聊天”和“管理员”分别设置。默认管理员 `mikubot` 代表通过管理台认证的本地账户；QQ 管理员可以添加多个，按平台真实发送者 ID 识别。昵称、群主身份、转发或引用不会授予权限。不确定账号标识时，可使用“绑定我的 QQ”：在本地开启60秒快速配对，由目标 QQ 私聊发送配对码即完成绑定；也保留手动核对模式。
+“允许聊天”和“管理员”分别设置。默认管理员 `shiori` 代表通过管理台认证的本地账户；QQ 管理员可以添加多个，按平台真实发送者 ID 识别。昵称、群主身份、转发或引用不会授予权限。不确定账号标识时，可使用“绑定我的 QQ”：在本地开启60秒快速配对，由目标 QQ 私聊发送配对码即完成绑定；也保留手动核对模式。
 
 在“机器人配置 → 电脑与管理员”开启能力、选择工作目录，然后在聊天中选择“电脑任务”，或由 QQ 管理员发送 `/执行 具体任务`。支持 Shell、Python、文件读取、搜索、新建与修改；新安装默认选择 Docker 隔离执行，原有本机模式不强制迁移；默认自动执行，可在任务卡片停止。`/任务 任务编号` 查看进度，`/停止 任务编号` 停止。
 
@@ -84,7 +86,7 @@
 
 ## 从源码运行
 
-Windows 安装 **Python 3.11–3.13（推荐3.12）**，完整解压`mikubot-0.1.6-source.zip`，或克隆本仓库。在包含 `requirements.txt` 的目录打开 PowerShell：
+Windows 安装 **Python 3.11–3.13（推荐3.12）**，完整解压`shiori-0.1.6-source.zip`，或克隆本仓库。在包含 `requirements.txt` 的目录打开 PowerShell：
 
 ```powershell
 # 首次：创建 .venv、安装依赖并启动，下载依赖需要网络
@@ -101,18 +103,18 @@ powershell -ExecutionPolicy Bypass -File .\start.ps1 -Stop
 需要指定数据目录时，首次、日常启动与停止都使用同一路径：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\setup-source.ps1 -DataDir 'D:\mikubot-data'
-powershell -ExecutionPolicy Bypass -File .\start.ps1 -DataDir 'D:\mikubot-data'
-powershell -ExecutionPolicy Bypass -File .\start.ps1 -DataDir 'D:\mikubot-data' -Stop
+powershell -ExecutionPolicy Bypass -File .\scripts\setup-source.ps1 -DataDir 'D:\shiori-data'
+powershell -ExecutionPolicy Bypass -File .\start.ps1 -DataDir 'D:\shiori-data'
+powershell -ExecutionPolicy Bypass -File .\start.ps1 -DataDir 'D:\shiori-data' -Stop
 ```
 
-源码运行无需 Node、Git 或前端构建。只准备环境使用 `-SetupOnly`；显式浏览器模式使用 `-Browser`。手动 Python 部署、HTTPS 反代、修复环境与实验性 Linux 运行见[源码部署指南](docs/SOURCE_DEPLOY.md)。核心包已迁为 `mikubot`，旧 `qunyu` 导入和启动入口暂保留兼容，计划0.3.0移除，数据库文件名不变。无头部署安装 `requirements-server.txt`，Windows 桌面依赖单独放在 `requirements-desktop.txt`；Docker 与 HTTPS 见同一部署指南。
+源码运行无需 Node、Git 或前端构建。只准备环境使用 `-SetupOnly`；显式浏览器模式使用 `-Browser`。手动 Python 部署、HTTPS 反代、修复环境与实验性 Linux 运行见[源码部署指南](docs/SOURCE_DEPLOY.md)。核心包已迁为 `shiori`，旧 `qunyu` 导入和启动入口暂保留兼容，计划0.3.0移除，数据库文件名不变。无头部署安装 `requirements-server.txt`，Windows 桌面依赖单独放在 `requirements-desktop.txt`；Docker 与 HTTPS 见同一部署指南。
 
 ## 数据、密码与远程管理
 
-Windows 默认数据在 **`%LOCALAPPDATA%\mikubot\data`**，独立于程序目录；替换或移除程序时可保留。聊天、记忆、配置与运行日志使用这份数据；显式 `--data-dir` 时以实际指定路径为准。
+Windows 默认数据在 **`%LOCALAPPDATA%\shiori\data`**，独立于程序目录；替换或移除程序时可保留。聊天、记忆、配置与运行日志使用这份数据；显式 `--data-dir` 时以实际指定路径为准。
 
-专用密码文件是数据目录中的 **`security\webui-password.json`**：保存加盐 scrypt 校验值，Windows 外层再由当前账户 DPAPI 加密。忘记密码时，可在运行电脑的托盘菜单选择“重置 WebUI 密码”，或执行 `python -m mikubot --reset-password`（使用同一数据目录）。也可完全退出 mikubot，只删除此文件，再从运行电脑打开并重新设密；聊天与记忆保留，旧登录失效。不要删除整个数据目录。换设备或 Windows 账户后，连接密钥可能需要重新填写。
+专用密码文件是数据目录中的 **`security\webui-password.json`**：保存加盐 scrypt 校验值，Windows 外层再由当前账户 DPAPI 加密。忘记密码时，可在运行电脑的托盘菜单选择“重置 WebUI 密码”，或执行 `python -m shiori --reset-password`（使用同一数据目录）。也可完全退出 Shiori，只删除此文件，再从运行电脑打开并重新设密；聊天与记忆保留，旧登录失效。不要删除整个数据目录。换设备或 Windows 账户后，连接密钥可能需要重新填写。
 
 默认只监听本机。需要其他设备访问时，先设置密码，再在“登录与远程管理”启用入口、保存并重启，默认要求通过自己的 HTTPS 域名登录；页面可生成 Caddy 配置。只有明确勾选“可信局域网允许明文HTTP”后，才可使用实际 IP 与端口的 HTTP 入口。仅本机免密不接受远程访问。普通 HTTP 不加密传输；跨不可信网络使用 HTTPS 代理或加密隧道，具体 Host 与代理要求见[部署说明](docs/SOURCE_DEPLOY.md#使用-https-反向代理)。不要分享启动链接中的本机初始化凭据。
 
@@ -138,10 +140,18 @@ Windows 默认数据在 **`%LOCALAPPDATA%\mikubot\data`**，独立于程序目�
 - [测试报告](TEST_REPORT.md)：实际检查与限制。
 - [发布说明](RELEASE_NOTES.md)：本次发行内容。
 
-正式桌面目标为 Windows。QQ 使用模拟连接器与本地消息链路回归，仍需在你的账号与连接器环境验收；不把模拟通过视为真实 QQ 登录或模型质量验证。Linux无头核心与Docker隔离的实际CI结果见测试报告；真实QQ和长期部署仍需在目标环境验收，未验证macOS桌面或WSL。mikubot 未附赠付费模型服务。
+正式桌面目标为 Windows。QQ 使用模拟连接器与本地消息链路回归，仍需在你的账号与连接器环境验收；不把模拟通过视为真实 QQ 登录或模型质量验证。Linux无头核心与Docker隔离的实际CI结果见测试报告；真实QQ和长期部署仍需在目标环境验收，未验证macOS桌面或WSL。Shiori 未附赠付费模型服务。
 
 ## 贡献者
 
 感谢所有参与代码、测试和问题反馈的贡献者。
 
 - [HuangGuaKnn](https://github.com/HuangGuaKnn)：贡献高级模型生成参数配置与回归测试（[PR #8](https://github.com/iownmmiku/mikubot/pull/8)）、可自定义分组侧边栏（[PR #11](https://github.com/iownmmiku/mikubot/pull/11)）；并提交历史/上下文管线审计与复现材料（[Issue #10](https://github.com/iownmmiku/mikubot/issues/10)）。
+
+## Shiori 更名兼容
+
+全新安装默认使用系统用户目录的 `shiori/data`。若新目录为空、旧 `mikubot/data` 或 `qunyu/data` 已有数据，启动器直接沿用旧目录，不复制或合并。`--data-dir`、原密码、记忆、QQ 接入和管理员继续有效；数据库文件名 `qunyu.db` 保持兼容。新环境变量为 `SHIORI_DATA_DIR`，旧 `MIKUBOT_DATA_DIR`、`QUNYU_DATA_DIR` 仍可使用。
+
+旧 `python -m mikubot`、`python -m qunyu` 和导入路径保留薄兼容层，统一转到 `shiori`，计划在 0.3.0 移除。安装器与更新器识别旧安装记录、旧发布文件名和旧服务名。历史发行说明、审计记录、第三方许可证及真实 GitHub 链接保留原始名称。默认初音未来人格不因软件更名而改变。
+
+Docker 命名卷不会随产品目录自动迁移。已有容器部署升级前先确认原卷名，将 `SHIORI_DATA_VOLUME` 设为该卷的完整名称，再使用新 Compose；全新部署默认使用 `shiori-data`。不要让新旧容器同时写同一卷。

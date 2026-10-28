@@ -6,9 +6,9 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
-from mikubot.db import Store
-from mikubot.provider import Provider, ProviderError, ProviderTimeoutError
-from mikubot.settings import DEFAULTS, Settings, resolve_model
+from shiori.db import Store
+from shiori.provider import Provider, ProviderError, ProviderTimeoutError
+from shiori.settings import DEFAULTS, Settings, resolve_model
 
 
 @pytest.fixture
@@ -284,8 +284,8 @@ async def test_cancellation_while_running_releases_exactly_once(provider):
 @pytest.mark.anyio
 @pytest.mark.parametrize('deadline', [False, True])
 async def test_cancelled_or_expired_wait_is_in_turn_timing_without_capacity_leak(provider, monkeypatch, deadline):
-    from mikubot import provider as module
-    from mikubot.timing import TurnTiming
+    from shiori import provider as module
+    from shiori.timing import TurnTiming
     clock, traces = [1.0], []
     monkeypatch.setattr(module, 'time', SimpleNamespace(monotonic=lambda: clock[0]))
     active = await provider._scheduler.acquire('a', False)
@@ -368,7 +368,7 @@ def transport(monkeypatch, handler):
 @pytest.mark.anyio
 @pytest.mark.parametrize('embedding', [False, True])
 async def test_real_usage_separates_queue_wait_from_transport_latency(actual_provider, monkeypatch, embedding):
-    from mikubot import provider as module
+    from shiori import provider as module
     provider, settings, store = actual_provider
     clock = [0.0]
     monkeypatch.setattr(module, 'time', SimpleNamespace(monotonic=lambda: clock[0]))
@@ -404,7 +404,7 @@ async def test_real_usage_separates_queue_wait_from_transport_latency(actual_pro
 
 @pytest.mark.anyio
 async def test_uncertain_dispatched_usage_retains_queue_wait(actual_provider, monkeypatch):
-    from mikubot import provider as module
+    from shiori import provider as module
     provider, _, store = actual_provider
     clock = [0.0]
     monkeypatch.setattr(module, 'time', SimpleNamespace(monotonic=lambda: clock[0]))

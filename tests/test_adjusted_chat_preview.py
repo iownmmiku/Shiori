@@ -1,8 +1,8 @@
 """Output preferences must apply before provisional browser content appears."""
 import pytest
 
-from mikubot import output
-from mikubot.chat_preview import (MAX_ADJUSTED_PREVIEW_CHARS, MAX_ADJUSTED_PREVIEW_CHECKPOINTS,
+from shiori import output
+from shiori.chat_preview import (MAX_ADJUSTED_PREVIEW_CHARS, MAX_ADJUSTED_PREVIEW_CHECKPOINTS,
                                  _AdjustedPublicText, emit_preview, preview_events, preview_filter)
 
 

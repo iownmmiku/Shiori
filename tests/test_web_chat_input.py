@@ -8,8 +8,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from auth_helpers import password_login
-from mikubot.api import create_app
-from mikubot.web_chat_input import chat_input
+from shiori.api import create_app
+from shiori.web_chat_input import chat_input
 
 
 IMAGE = 'data:image/png;base64,YQ=='

@@ -7,19 +7,19 @@ import zipfile
 import pytest
 from fastapi.testclient import TestClient
 from auth_helpers import password_login, FIXTURE_PASSWORD
-from mikubot import update_runtime as worker
-from mikubot.api import create_app
+from shiori import update_runtime as worker
+from shiori.api import create_app
 
 def archive(path, entries):
     with zipfile.ZipFile(path,'w',zipfile.ZIP_DEFLATED) as output:
         for name,value in entries.items():
-            info=zipfile.ZipInfo('placeholder');info.filename='mikubot/'+name
+            info=zipfile.ZipInfo('placeholder');info.filename='shiori/'+name
             output.writestr(info,value)
 
 @pytest.mark.parametrize('name',['../escape','data/private.txt','.venv/python','C:/escape','folder/../../escape','CON','a:stream'])
 def test_update_archive_rejects_unsafe_destinations(tmp_path,name):
     package=tmp_path/'app.zip';stage=tmp_path/'stage';stage.mkdir()
-    archive(package,{'mikubot.exe':b'MZfixture',name:b'unsafe'})
+    archive(package,{'shiori.exe':b'MZfixture',name:b'unsafe'})
     with pytest.raises(ValueError):worker.stage_archive(package,stage,'portable','0.1.4')
     assert not (tmp_path/'escape').exists()
 
@@ -58,10 +58,10 @@ def test_data_backup_excludes_worker_and_download_recursion(tmp_path):
 @pytest.mark.parametrize('healthy',[True,False])
 def test_worker_switches_files_and_recovers_program_and_data_on_failed_health(tmp_path,monkeypatch,healthy):
     target,data=tmp_path/'program',tmp_path/'data';target.mkdir();data.mkdir()
-    (target/'mikubot.exe').write_bytes(b'old-program');(target/'personal.txt').write_text('keep')
+    (target/'shiori.exe').write_bytes(b'old-program');(target/'personal.txt').write_text('keep')
     (data/'admin.token').write_text('isolated-token');(data/'qunyu.db').write_bytes(b'old-database')
     work=data/'updates'/('1'*32);work.mkdir(parents=True)
-    package=work/'update.zip';archive(package,{'mikubot.exe':b'new-program'})
+    package=work/'update.zip';archive(package,{'shiori.exe':b'new-program'})
     cfg={'target':str(target),'data':str(data),'archive':str(package),'sha256':worker.digest(package),
          'download_id':'1'*32,'kind':'portable','version':'0.1.4','parent_pid':42,'port':18700,'launch':['fixture-program']}
     path=work/'switch.json';path.write_text(json.dumps(cfg))
@@ -76,7 +76,7 @@ def test_worker_switches_files_and_recovers_program_and_data_on_failed_health(tm
     worker.run(path)
     result=json.loads((data/'updates/install-result.json').read_text('utf-8'))
     assert result['status']==('completed' if healthy else 'failed')
-    assert (target/'mikubot.exe').read_bytes()==(b'new-program' if healthy else b'old-program')
+    assert (target/'shiori.exe').read_bytes()==(b'new-program' if healthy else b'old-program')
     assert (target/'personal.txt').read_text()=='keep'
     assert (data/'qunyu.db').read_bytes()==(b'migrated-database' if healthy else b'old-database')
     assert len(launches)==(1 if healthy else 2)
@@ -109,13 +109,13 @@ def test_update_health_gate_blocks_mutations_and_chat_but_keeps_status(tmp_path)
 def test_real_source_program_replacement_restarts_on_same_port_and_preserves_memory(tmp_path):
     """Real launcher, socket, SQLite, detached restart and authenticated shutdown."""
     import hashlib,shutil,socket,subprocess,sys,time,urllib.request
-    from mikubot import __version__
+    from shiori import __version__
     target,data=tmp_path/'program',tmp_path/'data';target.mkdir();data.mkdir()
     source=Path(__file__).resolve().parents[1]
-    shutil.copytree(source/'mikubot',target/'mikubot',ignore=shutil.ignore_patterns('__pycache__','*.pyc'))
+    shutil.copytree(source/'shiori',target/'shiori',ignore=shutil.ignore_patterns('__pycache__','*.pyc'))
     (target/'requirements-server.txt').write_text('# unchanged fixture requirements\n')
     with socket.socket() as sock:sock.bind(('127.0.0.1',0));port=sock.getsockname()[1]
-    launch=[sys.executable,'-m','mikubot','--no-browser','--data-dir',str(data),'--port',str(port),'--strict-port']
+    launch=[sys.executable,'-m','shiori','--no-browser','--data-dir',str(data),'--port',str(port),'--strict-port']
     work=data/'updates'/('c'*32);work.mkdir(parents=True)
     package=work/'update.zip'
     entries={p.relative_to(target).as_posix():p.read_bytes() for p in target.rglob('*') if p.is_file()}
@@ -123,7 +123,7 @@ def test_real_source_program_replacement_restarts_on_same_port_and_preserves_mem
     manifest={'version':__version__,'files':{name:hashlib.sha256(raw).hexdigest() for name,raw in entries.items()}}
     entries['SOURCE_MANIFEST.json']=json.dumps(manifest).encode()
     with zipfile.ZipFile(package,'w',zipfile.ZIP_DEFLATED) as out:
-        for name,raw in entries.items():out.writestr(f'mikubot-{__version__}-source/'+name,raw)
+        for name,raw in entries.items():out.writestr(f'shiori-{__version__}-source/'+name,raw)
     first=subprocess.Popen(launch,cwd=target,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
     opener=urllib.request.build_opener(urllib.request.ProxyHandler({}))
     def shutdown():
@@ -134,7 +134,7 @@ def test_real_source_program_replacement_restarts_on_same_port_and_preserves_mem
         deadline=time.monotonic()+30
         while not (data/'admin.token').exists() and time.monotonic()<deadline:time.sleep(.1)
         assert worker.health(data,port,__version__,seconds=30)
-        from mikubot.db import Store
+        from shiori.db import Store
         store=Store(data);saved=store.create_memory({'content':'升级前已经存在的记忆'});store.close()
         shutdown();first.wait(timeout=30)
         config={'target':str(target),'data':str(data),'archive':str(package),'sha256':worker.digest(package),'download_id':'c'*32,

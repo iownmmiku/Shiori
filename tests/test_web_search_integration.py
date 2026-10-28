@@ -7,7 +7,7 @@ import zipfile
 from fastapi.testclient import TestClient
 
 from auth_helpers import password_login
-from mikubot.api import create_app
+from shiori.api import create_app
 
 
 def test_authenticated_search_routes_and_background_injection(tmp_path):

@@ -2,8 +2,8 @@
 from fastapi.testclient import TestClient
 
 from auth_helpers import password_login
-from mikubot.api import create_app
-from mikubot.db import message_fingerprint
+from shiori.api import create_app
+from shiori.db import message_fingerprint
 
 
 def test_context_status_selects_valid_summary_without_full_memory_projection(tmp_path, monkeypatch):

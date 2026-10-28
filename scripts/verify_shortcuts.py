@@ -18,7 +18,7 @@ import uuid
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-from mikubot import installer  # noqa: E402
+from shiori import installer  # noqa: E402
 
 
 def powershell_string(value: str) -> str:
@@ -36,7 +36,7 @@ def main() -> int:
     target = qa / "安装 中文 'quote' $(whoami) `符号"
     target.mkdir()
     # A harmless placeholder gives COM an existing target; it is never launched.
-    (target / "mikubot.exe").write_bytes(b"QA shortcut target; never execute")
+    (target / "shiori.exe").write_bytes(b"QA shortcut target; never execute")
     real_run = subprocess.run
     calls = []
 
@@ -67,7 +67,7 @@ def main() -> int:
     assert not warnings, warnings
     assert len(calls) == 1
     links = sorted(qa.rglob("*.lnk"))
-    expected_links = {desktop / "mikubot.lnk", programs / "mikubot" / "mikubot.lnk", programs / "mikubot" / "退出 mikubot.lnk"}
+    expected_links = {desktop / "shiori.lnk", programs / "shiori" / "shiori.lnk", programs / "shiori" / "退出 shiori.lnk"}
     assert set(links) == expected_links, [str(path) for path in links]
     # Read properties through the actual COM server as a separate invocation.
     read_script = """$ErrorActionPreference = 'Stop'
@@ -88,9 +88,9 @@ ConvertTo-Json -InputObject $items -Compress
     properties = json.loads(result.stdout.decode("utf-8-sig"))
     assert len(properties) == 3
     for item in properties:
-        assert Path(item["TargetPath"]) == target / "mikubot.exe", item
+        assert Path(item["TargetPath"]) == target / "shiori.exe", item
         assert Path(item["WorkingDirectory"]) == target, item
-        expected_arguments = "--stop --no-browser" if Path(item["Path"]).name == "退出 mikubot.lnk" else ""
+        expected_arguments = "--stop --no-browser" if Path(item["Path"]).name == "退出 shiori.lnk" else ""
         assert item["Arguments"] == expected_arguments, item
         assert "token" not in item["Arguments"].casefold(), item
     report = {"passed": True, "qa_directory": str(qa), "links": properties,

@@ -5,11 +5,11 @@ import json
 import httpx
 import pytest
 
-from mikubot.context import ContextEngine
+from shiori.context import ContextEngine
 from qunyu.db import Store
-from mikubot.memory import MemoryEngine
-from mikubot.provider import Provider
-from mikubot.settings import DEFAULTS
+from shiori.memory import MemoryEngine
+from shiori.provider import Provider
+from shiori.settings import DEFAULTS
 
 
 @pytest.fixture
@@ -296,7 +296,7 @@ def legacy_seed(store):
     with store._lock, store._conn:
         for persona in LEGACY_PERSONAS:
             store._write("personas", copy.deepcopy(persona), ())
-        store._conn.execute("DELETE FROM events WHERE kind='mikubot_persona_seed_v1'")
+        store._conn.execute("DELETE FROM events WHERE kind='shiori_persona_seed_v1'")
     store.upsert_scope({"id": "qq:group:1", "persona_id": "quiet"})
 
 
@@ -307,7 +307,7 @@ def test_old_templates_migrate_once_and_rebind_references(store):
     assert store.get_persona("default")["name"] == "初音未来"
     assert store.get_scope("qq:group:1")["persona_id"] == "default"
     store._seed()
-    assert len([e for e in store.list_events() if e["kind"] == "mikubot_persona_seed_v1"]) == 1
+    assert len([e for e in store.list_events() if e["kind"] == "shiori_persona_seed_v1"]) == 1
 
 
 def test_edited_and_custom_personas_are_preserved_and_deleted_do_not_reappear(store):

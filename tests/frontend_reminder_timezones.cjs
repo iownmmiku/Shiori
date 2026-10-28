@@ -8,7 +8,7 @@ const sandbox={state,Date,Intl,
   select:()=>""
 };
 vm.createContext(sandbox);
-vm.runInContext(fs.readFileSync(path.join(__dirname,"../mikubot/static/tasks-page.js"),"utf8"),sandbox);
+vm.runInContext(fs.readFileSync(path.join(__dirname,"../shiori/static/tasks-page.js"),"utf8"),sandbox);
 assert.equal(sandbox.toLocal("2026-11-01T14:00:00Z","America/New_York"),"2026-11-01T09:00");
 assert.equal(sandbox.toLocal("2026-10-31T13:00:00Z","America/New_York"),"2026-10-31T09:00");
 const saved={id:"reminder-1",title:"开会",kind:"reminder",repeat:"daily",timezone:"America/New_York",due_at:"2026-11-01T14:00:00Z"};

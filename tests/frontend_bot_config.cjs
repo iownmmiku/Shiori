@@ -4,13 +4,13 @@ const fs=require('node:fs');
 const path=require('node:path');
 const vm=require('node:vm');
 const calls=[];
-const sandbox={window:{MikubotExperience:{renderPersonas:async()=>'',renderSettings:async()=>'',handleAction:async()=>false}},
+const sandbox={window:{ShioriExperience:{renderPersonas:async()=>'',renderSettings:async()=>'',handleAction:async()=>false}},
   state:{botTab:'personas',scopes:[{id:'qq:group:456',enabled:true},{id:'web:default',enabled:true}],settings:{onebot:{chat_policy:'blacklist',blocked_groups:[]}}},
   api:async(...args)=>{calls.push(args);return {};},bootstrap:async()=>calls.push(['bootstrap']),toast:()=>{},
   navigate:async page=>calls.push(['navigate',page]),renderPage:async()=>calls.push(['render'])};
 vm.createContext(sandbox);
-vm.runInContext(fs.readFileSync(path.join(__dirname,'../mikubot/static/bot-config.js'),'utf8'),sandbox);
-const action=sandbox.window.MikubotExperience.handleAction;
+vm.runInContext(fs.readFileSync(path.join(__dirname,'../shiori/static/bot-config.js'),'utf8'),sandbox);
+const action=sandbox.window.ShioriExperience.handleAction;
 const plain=value=>JSON.parse(JSON.stringify(value));
 async function main(){
   assert.equal(await action('bot-default',{}),true);

@@ -12,12 +12,12 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from mikubot import tools
-from mikubot.db import Store
-import mikubot.db as db_module
-import mikubot.search as search_module
-from mikubot.search import SearchError, SearchService, _request_json
-from mikubot.settings import DEFAULTS, SEARCH_ENDPOINTS, Settings
+from shiori import tools
+from shiori.db import Store
+import shiori.db as db_module
+import shiori.search as search_module
+from shiori.search import SearchError, SearchService, _request_json
+from shiori.settings import DEFAULTS, SEARCH_ENDPOINTS, Settings
 
 
 @pytest.fixture

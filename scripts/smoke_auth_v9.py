@@ -42,7 +42,7 @@ def main():
     parser.add_argument('exe', type=Path)
     parser.add_argument('--data-dir', required=True, type=Path)
     parser.add_argument('--port', type=int, default=18773)
-    parser.add_argument('--expect-version', default='0.1.6')
+    parser.add_argument('--expect-version', default='0.2.0')
     args = parser.parse_args()
     data, exe = args.data_dir.resolve(), args.exe.resolve()
     assert not data.exists(), 'Use a fresh disposable data directory'
@@ -86,7 +86,7 @@ def main():
         assert first.request('/api/auth/status')['local_setup_allowed']
         first.request('/api/bootstrap', expected=401)  # Setup proof never logs in.
         first.request('/api/auth/setup', {'mode':'password','password':alpha})
-        cookie = first.cookie('mikubot_session')
+        cookie = first.cookie('shiori_session')
         assert cookie and cookie.has_nonstandard_attr('HttpOnly')
         assert first.request('/api/auth/status')['authenticated']
         record = json.loads(password_file.read_text('utf-8'))
@@ -98,10 +98,10 @@ def main():
         assert original_messages and original_memories
         second.request('/api/auth/login', {'password':'incorrect'}, expected=401)
         second.request('/api/auth/login', {'password':alpha})
-        old_cookie = second.cookie('mikubot_session').value
+        old_cookie = second.cookie('shiori_session').value
         first.request('/api/auth/password', {'current_password':alpha,'new_password':beta})
         second.request('/api/bootstrap', expected=401)
-        anonymous.request('/api/bootstrap', expected=401, headers={'Cookie':'mikubot_session=' + old_cookie})
+        anonymous.request('/api/bootstrap', expected=401, headers={'Cookie':'shiori_session=' + old_cookie})
         second.request('/api/auth/login', {'password':alpha}, expected=401)
         second.request('/api/auth/login', {'password':beta})
         second.request('/api/auth/logout', {})
@@ -128,7 +128,7 @@ def main():
         first.request('/api/bootstrap', expected=401)
         first.request('/api/auth/setup', {'mode':'local_only'})
         assert anonymous.request('/api/auth/status')['mode'] == 'local_only'
-        assert anonymous.request('/api/bootstrap')['name'] == 'mikubot'
+        assert anonymous.request('/api/bootstrap')['name'] == 'shiori'
         first.request('/api/auth/access', {'remote_enabled':True}, method='PUT', expected=400)
         first.request('/api/auth/password', {'current_password':'','new_password':delta})
         anonymous.request('/api/bootstrap', expected=401)

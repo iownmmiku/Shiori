@@ -14,10 +14,10 @@ import uvicorn
 from websockets.asyncio.client import connect
 from websockets.exceptions import InvalidStatus
 
-from mikubot.api import create_app
-from mikubot.db import Store
-from mikubot.provider import Provider, ProviderError
-from mikubot.settings import Settings
+from shiori.api import create_app
+from shiori.db import Store
+from shiori.provider import Provider, ProviderError
+from shiori.settings import Settings
 
 
 @contextmanager
@@ -77,7 +77,7 @@ def test_real_http_stall_is_bounded_and_does_not_repeat_dispatched_request(tmp_p
     def fast_timeout(*args,**kwargs):
         kwargs['timeout']=httpx.Timeout(.15,connect=.15)
         return original(*args,**kwargs)
-    monkeypatch.setattr('mikubot.provider.httpx.AsyncClient',fast_timeout)
+    monkeypatch.setattr('shiori.provider.httpx.AsyncClient',fast_timeout)
     with model_server([(200,b'{}',.5,False)]) as (url,hits):
         provider,store=provider_at(tmp_path,url)
         with pytest.raises(ProviderError,match='超时'):asyncio.run(provider.complete([{'role':'user','content':'ping'}]))
@@ -86,7 +86,7 @@ def test_real_http_stall_is_bounded_and_does_not_repeat_dispatched_request(tmp_p
 
 
 def test_real_websocket_auth_bad_frame_disconnect_and_reconnect(tmp_path,monkeypatch):
-    from mikubot.qq_pairing import LocalQQPairing
+    from shiori.qq_pairing import LocalQQPairing
     async def no_external_ports(self):return {'candidates':[]}
     monkeypatch.setattr(LocalQQPairing,'discover',no_external_ports)
     app=create_app(tmp_path,start_workers=False)

@@ -7,9 +7,9 @@ import zipfile
 
 import pytest
 
-from mikubot.corpus import corpus_chunks, inspect_corpus, read_file
-from mikubot.distillation import DistillationService
-from mikubot.provider import ProviderStreamError, ProviderError
+from shiori.corpus import corpus_chunks, inspect_corpus, read_file
+from shiori.distillation import DistillationService
+from shiori.provider import ProviderStreamError, ProviderError
 
 
 @pytest.fixture

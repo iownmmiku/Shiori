@@ -1,7 +1,7 @@
 """Publication metadata and RSS parsing use authored network substitutes."""
 import pytest
 
-from mikubot.tools import _TextParser, _parse_feed, _read_public, public_date
+from shiori.tools import _TextParser, _parse_feed, _read_public, public_date
 
 
 def test_html_dates_keep_publication_update_and_event_separate():
@@ -38,7 +38,7 @@ def test_rss_and_atom_preserve_article_dates_but_do_not_fetch_links():
 
 
 def test_redirected_rss_fetch_revalidates_dns_for_every_hop(monkeypatch):
-    import mikubot.tools as module
+    import shiori.tools as module
     resolved = []
     def addresses(url):
         resolved.append(url)

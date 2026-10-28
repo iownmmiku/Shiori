@@ -7,11 +7,11 @@ import pytest
 from fastapi.testclient import TestClient
 
 from auth_helpers import password_login
-from mikubot.api import create_app
-from mikubot.db import Store
-from mikubot.settings import Settings
-from mikubot.output import OutputLimitError, generation_instructions, model_reply_parts, output_config, split_output
-from mikubot.official import OfficialBridge
+from shiori.api import create_app
+from shiori.db import Store
+from shiori.settings import Settings
+from shiori.output import OutputLimitError, generation_instructions, model_reply_parts, output_config, split_output
+from shiori.official import OfficialBridge
 from test_output_v5 import bridge_setup, Settings as FixtureSettings, Chat as FixtureChat
 
 

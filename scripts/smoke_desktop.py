@@ -63,7 +63,7 @@ def main():
             if pid.value == process.pid and bool(user32.IsWindowVisible(hwnd)) == visible:
                 title = ctypes.create_unicode_buffer(512)
                 user32.GetWindowTextW(hwnd, title, len(title))
-                if title.value == 'mikubot':
+                if title.value == 'shiori':
                     found.append(hwnd)
             return True
         user32.EnumWindows(enum_callback(inspect), 0)

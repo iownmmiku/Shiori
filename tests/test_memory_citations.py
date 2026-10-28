@@ -2,10 +2,10 @@ import asyncio
 
 import pytest
 
-from mikubot.chat import ChatService
+from shiori.chat import ChatService
 from qunyu.db import Store
-from mikubot.output import split_output, strip_memory_citations
-from mikubot.settings import Settings
+from shiori.output import split_output, strip_memory_citations
+from shiori.settings import Settings
 
 
 KEY = '7ab675d0-1111-2222-3333-444444444444'

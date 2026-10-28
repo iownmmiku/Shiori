@@ -11,15 +11,15 @@ import pytest
 from fastapi.testclient import TestClient
 
 from auth_helpers import password_login
-from mikubot.api import create_app
-from mikubot.chat import ChatService
-from mikubot.db import Store
-from mikubot.model_catalog import ModelCatalog
-from mikubot.onebot import is_quiet
-from mikubot.scheduler import TaskScheduler
-from mikubot.settings import Settings
-from mikubot.timeparse import calendar_fields, next_occurrence, parse_due
-import mikubot.timeparse as timeparse
+from shiori.api import create_app
+from shiori.chat import ChatService
+from shiori.db import Store
+from shiori.model_catalog import ModelCatalog
+from shiori.onebot import is_quiet
+from shiori.scheduler import TaskScheduler
+from shiori.settings import Settings
+from shiori.timeparse import calendar_fields, next_occurrence, parse_due
+import shiori.timeparse as timeparse
 
 
 NY = 'America/New_York'
@@ -231,8 +231,8 @@ def test_quiet_default_and_full_natural_chat_calendar(tmp_path, monkeypatch):
     monkeypatch.setattr(timeparse, 'datetime', FixedDatetime)
     # Receipt, original-message interpretation and future-time validation now
     # share a clock; freezing only the parser would model a delayed replay.
-    monkeypatch.setattr('mikubot.timezones.datetime', FixedDatetime)
-    monkeypatch.setattr('mikubot.chat.datetime', FixedDatetime)
+    monkeypatch.setattr('shiori.timezones.datetime', FixedDatetime)
+    monkeypatch.setattr('shiori.chat.datetime', FixedDatetime)
     store, settings, provider = Store(tmp_path), Settings(tmp_path), SummaryProvider()
     settings.update({'time': {'timezone': NY}})
     chat = ChatService(store, settings, provider)

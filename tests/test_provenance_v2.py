@@ -5,9 +5,9 @@ import json
 
 import pytest
 
-from mikubot.chat import ChatService
+from shiori.chat import ChatService
 from qunyu.db import Store
-from mikubot.settings import Settings
+from shiori.settings import Settings
 
 
 @pytest.fixture

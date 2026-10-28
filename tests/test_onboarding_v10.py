@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 import pytest
 
 from auth_helpers import password_login
-from mikubot.api import create_app
+from shiori.api import create_app
 
 
 def frontend_requests(settings):
@@ -24,7 +24,7 @@ const sandbox={window:{},state:{},routeNames:{chat:'聊天',memory:'记忆'},
 vm.createContext(sandbox);
 for(const file of ['quick-start.js','workspace-pages.js'])vm.runInContext(fs.readFileSync(input.static+'/'+file,'utf8'),sandbox);
 (async()=>{
-  const quick=sandbox.window.MikubotQuickStart,pages=sandbox.window.MikubotPages;
+  const quick=sandbox.window.ShioriQuickStart,pages=sandbox.window.ShioriPages;
   const defaults=quick.buildPatch(1,{chat_model_id:'default'},input.settings);
   const source=quick.buildPatch(1,{chat_model_id:input.source_model},input.settings);
   await pages.handleAction('route-chat-model',{dataset:{id:'default'}});
@@ -33,7 +33,7 @@ for(const file of ['quick-start.js','workspace-pages.js'])vm.runInContext(fs.rea
 })().catch(error=>{console.error(error);process.exitCode=1;});
 '''
     result = subprocess.run([node, '-e', script], input=json.dumps({
-        'static': str(Path(__file__).resolve().parents[1] / 'mikubot' / 'static'),
+        'static': str(Path(__file__).resolve().parents[1] / 'shiori' / 'static'),
         'settings': settings, 'source_model': next(item['id'] for item in settings['providers'] if item.get('source_id')),
     }), capture_output=True, text=True, encoding='utf-8', timeout=20)
     assert result.returncode == 0, result.stdout + result.stderr

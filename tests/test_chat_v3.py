@@ -6,9 +6,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from mikubot.chat import ChatService
+from shiori.chat import ChatService
 from qunyu.db import Store
-from mikubot.settings import DEFAULTS
+from shiori.settings import DEFAULTS
 
 
 @pytest.fixture

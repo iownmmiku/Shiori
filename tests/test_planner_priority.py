@@ -5,8 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from mikubot.provider import Provider, ProviderError
-from mikubot.settings import DEFAULTS
+from shiori.provider import Provider, ProviderError
+from shiori.settings import DEFAULTS
 
 
 @pytest.fixture

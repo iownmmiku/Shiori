@@ -13,8 +13,8 @@ const sandbox={window:{},state,Date:Clock,AbortController,
   toast:(text,error)=>notices.push([text,error]),
   api:async(url,opts)=>{calls.push([url,opts]);if(url==='/api/chat'){if(fail)throw new Error('transport interrupted');return{reply:'complete'};}return{};}
 };
-vm.createContext(sandbox);vm.runInContext(fs.readFileSync(path.join(__dirname,'../mikubot/static/experience-chat.js'),'utf8'),sandbox);
-const ui=sandbox.window.MikubotExperienceChat.create(runtime,{}), sent=()=>calls.filter(([url])=>url==='/api/chat');
+vm.createContext(sandbox);vm.runInContext(fs.readFileSync(path.join(__dirname,'../shiori/static/experience-chat.js'),'utf8'),sandbox);
+const ui=sandbox.window.ShioriExperienceChat.create(runtime,{}), sent=()=>calls.filter(([url])=>url==='/api/chat');
 async function advance(ms){const end=now+ms;for(;;){const next=[...timers].filter(([,t])=>t.at<=end).sort((a,b)=>a[1].at-b[1].at)[0];if(!next)break;timers.delete(next[0]);now=next[1].at;await next[1].fn();await new Promise(resolve=>setImmediate(resolve));}now=end;}
 async function say(text){input.value=text;state.draft=text;await ui.sendChat();}
 function reset(){ui.close();calls.length=0;notices.length=0;timers.clear();now=0;state.scope='web:default';state.images=[];state.draft='';state.sending=false;state.chatMode='chat';runtime.attachments=[];input.value='';fail=false;overrides={};state.settings.debounce={enabled:true,seconds:3,max_wait_seconds:30};}

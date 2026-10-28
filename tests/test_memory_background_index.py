@@ -4,9 +4,9 @@ import json
 
 import pytest
 
-from mikubot.db import Store
-from mikubot.memory import MemoryEngine, _documents, _record_hash, _digest
-from mikubot.settings import DEFAULTS
+from shiori.db import Store
+from shiori.memory import MemoryEngine, _documents, _record_hash, _digest
+from shiori.settings import DEFAULTS
 
 
 @pytest.fixture
@@ -209,7 +209,7 @@ def test_old_prune_cannot_recreate_index_after_clear(tmp_path, monkeypatch):
 
 
 def test_old_cache_batch_cannot_recreate_index_after_clear(tmp_path, monkeypatch):
-    import mikubot.memory as memory_module
+    import shiori.memory as memory_module
     store = Store(tmp_path)
     records = [fact(store, f'缓存片段{number}') for number in range(70)]
     engine = MemoryEngine(store, config())

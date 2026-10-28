@@ -6,11 +6,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from mikubot.chat import ChatService
-from mikubot.db import Store
-import mikubot.db as db_module
-import mikubot.memory_lifecycle as lifecycle_module
-from mikubot.settings import DEFAULTS
+from shiori.chat import ChatService
+from shiori.db import Store
+import shiori.db as db_module
+import shiori.memory_lifecycle as lifecycle_module
+from shiori.settings import DEFAULTS
 
 
 @pytest.fixture

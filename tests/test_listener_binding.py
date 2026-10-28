@@ -12,7 +12,7 @@ import urllib.request
 
 import pytest
 
-import mikubot.__main__ as launcher
+import shiori.__main__ as launcher
 
 
 def close_listeners(listeners):
@@ -131,7 +131,7 @@ def test_real_launcher_reports_actual_port_or_exits_without_starting(tmp_path, s
         requested = owner.getsockname()[1]
         if requested > 65505:
             pytest.skip('Ephemeral port too close to the upper bound for fallback')
-        command = [sys.executable, '-m', 'mikubot', '--data-dir', str(data),
+        command = [sys.executable, '-m', 'shiori', '--data-dir', str(data),
                    '--port', str(requested), '--no-browser', '--no-tray']
         if strict:
             command.append('--strict-port')
@@ -150,7 +150,7 @@ def test_real_launcher_reports_actual_port_or_exits_without_starting(tmp_path, s
                     try:
                         record = json.loads((data / 'server.json').read_text('utf-8'))
                         with client.open(f'http://127.0.0.1:{record["port"]}/healthz', timeout=.5) as response:
-                            assert json.load(response)['name'] == 'mikubot'
+                                assert json.load(response)['name'] == 'Shiori'
                         break
                     except (OSError, ValueError):
                         time.sleep(.1)

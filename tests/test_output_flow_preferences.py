@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from mikubot.output import prepare_reply, reply_char_count
+from shiori.output import prepare_reply, reply_char_count
 from test_output_v5 import bridge_setup
 
 

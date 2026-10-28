@@ -3,9 +3,9 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from mikubot.chat import ChatService
+from shiori.chat import ChatService
 from qunyu.db import Store
-from mikubot.settings import Settings
+from shiori.settings import Settings
 
 
 class FakeProvider:
@@ -75,7 +75,7 @@ def test_tool_cannot_create_task_from_dictionary_or_web_instruction(tmp_path):
 
 
 def test_missing_model_not_fake_reply(tmp_path):
-    from mikubot.provider import Provider, ProviderError
+    from shiori.provider import Provider, ProviderError
     store, settings = Store(tmp_path), Settings(tmp_path)
     chat = ChatService(store, settings, Provider(settings, store))
     async def scenario():

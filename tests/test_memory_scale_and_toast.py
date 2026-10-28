@@ -4,10 +4,10 @@ from unittest.mock import Mock
 from fastapi.testclient import TestClient
 
 from auth_helpers import password_login
-from mikubot.api import create_app
-from mikubot.context import ContextEngine
-from mikubot.db import Store
-from mikubot.memory import MemoryEngine, _TermCache
+from shiori.api import create_app
+from shiori.context import ContextEngine
+from shiori.db import Store
+from shiori.memory import MemoryEngine, _TermCache
 
 
 def seed(store, count=240):

@@ -15,14 +15,14 @@ def render_version_info(version: str, kind: str) -> str:
     if kind not in {'app', 'installer'}:
         raise ValueError('Version resource kind must be app or installer')
     numeric = (*parts, 0)
-    name = 'mikubot' if kind == 'app' else f'mikubot-{version}-Windows-Setup'
-    description = 'mikubot Desktop' if kind == 'app' else 'mikubot Setup'
+    name = 'shiori' if kind == 'app' else f'shiori-{version}-Windows-Setup'
+    description = 'Shiori Desktop' if kind == 'app' else 'Shiori Setup'
     strings = {
         'FileDescription': description,
         'FileVersion': version,
         'InternalName': name,
         'OriginalFilename': name + '.exe',
-        'ProductName': 'mikubot',
+        'ProductName': 'Shiori',
         'ProductVersion': version,
     }
     entries = ',\n'.join(f'          StringStruct({key!r}, {value!r})' for key, value in strings.items())

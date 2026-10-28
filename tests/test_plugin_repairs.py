@@ -7,9 +7,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from auth_helpers import password_login
-from mikubot.api import create_app
-from mikubot.plugin_packages import inspect_archive, validate_code
-from mikubot.plugins import PluginService, requested, create_and_run
+from shiori.api import create_app
+from shiori.plugin_packages import inspect_archive, validate_code
+from shiori.plugins import PluginService, requested, create_and_run
 from test_computer_auto_v9 import automatic
 from test_plugin_packages import files, packed, install
 
@@ -71,7 +71,7 @@ def test_excessively_nested_manifest_is_a_candidate_error():
 
 
 def test_manifest_parser_recursion_has_a_friendly_candidate_local_error(monkeypatch):
-    from mikubot import plugin_packages
+    from shiori import plugin_packages
     bad_manifest = '{"nested":"force-parser-recursion"}'
     members = {**{'good/' + name: raw for name, raw in files().items()},
                'bad/plugin.json': bad_manifest.encode()}
@@ -178,8 +178,8 @@ def test_plugin_repair_requires_an_explicit_edit_intent(text, allowed):
 def fake_windows_crypto(monkeypatch):
     # API fixture only: do not require Windows DPAPI outside its OS user session.
     if os.name == 'nt':
-        monkeypatch.setattr('mikubot.web_auth._protect', lambda value: 'dpapi:' + base64.b64encode(value.encode()).decode())
-        monkeypatch.setattr('mikubot.web_auth._unprotect', lambda value: base64.b64decode(value.split(':', 1)[1]).decode())
+        monkeypatch.setattr('shiori.web_auth._protect', lambda value: 'dpapi:' + base64.b64encode(value.encode()).decode())
+        monkeypatch.setattr('shiori.web_auth._unprotect', lambda value: base64.b64decode(value.split(':', 1)[1]).decode())
 
 
 def test_http_import_returns_errors_for_complex_sources_instead_of_500(tmp_path, monkeypatch):

@@ -6,9 +6,9 @@ import json
 
 import pytest
 
-from mikubot.db import Store
-from mikubot.knowledge import PersonaKnowledge
-import mikubot.knowledge as module
+from shiori.db import Store
+from shiori.knowledge import PersonaKnowledge
+import shiori.knowledge as module
 
 
 @pytest.fixture

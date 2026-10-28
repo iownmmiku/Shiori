@@ -7,7 +7,7 @@ const sandbox={state:{settings:{onebot:{},qq_official:{}}},e,
   getForm:form=>form.values,splitIds:value=>String(value||'').split(/[\s,，;；]+/).filter(Boolean),
   api:async(...args)=>{calls.push(args);return {};},toast:()=>{},bootstrap:async()=>{}};
 vm.createContext(sandbox);
-const source=fs.readFileSync(path.join(__dirname,'../mikubot/static/settings-page.js'),'utf8');vm.runInContext(source,sandbox);
+const source=fs.readFileSync(path.join(__dirname,'../shiori/static/settings-page.js'),'utf8');vm.runInContext(source,sandbox);
 const plain=value=>JSON.parse(JSON.stringify(value));
 function hidden(html,mode){return /\bhidden\b/.test(html.match(new RegExp(`data-admission-mode="${mode}"([^>]*)>`))[1]);}
 async function main(){

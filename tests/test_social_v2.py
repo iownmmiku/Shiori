@@ -7,10 +7,10 @@ from unittest.mock import AsyncMock
 import pytest
 
 from qunyu.db import Store
-from mikubot.onebot import OneBotBridge
-from mikubot.official import OfficialBridge
-from mikubot.settings import DEFAULTS
-from mikubot.social import SocialEngine
+from shiori.onebot import OneBotBridge
+from shiori.official import OfficialBridge
+from shiori.settings import DEFAULTS
+from shiori.social import SocialEngine
 
 
 @pytest.fixture

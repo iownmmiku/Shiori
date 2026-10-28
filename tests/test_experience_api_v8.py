@@ -13,10 +13,10 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from mikubot.api import create_app
-from mikubot.mcp_client import schema_hash
-from mikubot.provider import ProviderError
-from mikubot.runs import RunManager
+from shiori.api import create_app
+from shiori.mcp_client import schema_hash
+from shiori.provider import ProviderError
+from shiori.runs import RunManager
 from auth_helpers import password_login
 
 
@@ -96,15 +96,15 @@ def test_cross_site_and_remote_host_cannot_use_authenticated_experience_api(expe
 def test_administrators_are_multiple_and_builtin_local_account_is_fixed(experience):
     client, app = experience
     local = require_ok(client.get("/api/admins"))[0]
-    assert local["built_in"] and local["account_id"] == "mikubot"
+    assert local["built_in"] and local["account_id"] == "shiori"
     assert client.delete("/api/admins/" + local["id"]).status_code == 400
     for account in ("123456", "654321"):
         entries = require_ok(client.post("/api/admins", json={"platform": "onebot", "account_id": account}))
-    assert {entry["account_id"] for entry in entries} == {"mikubot", "123456", "654321"}
+    assert {entry["account_id"] for entry in entries} == {"shiori", "123456", "654321"}
     assert set(app.state.settings.get()["onebot"]["allowed_users"]) == {"123456", "654321"}
     # Payload flags, local names, and unknown platforms never create built-in credentials.
-    assert client.post("/api/admins", json={"platform": "local", "account_id": "mikubot", "built_in": True}).status_code == 400
-    assert client.post("/api/admins", json={"platform": "onebot", "account_id": "mikubot", "is_admin": True}).status_code == 400
+    assert client.post("/api/admins", json={"platform": "local", "account_id": "shiori", "built_in": True}).status_code == 400
+    assert client.post("/api/admins", json={"platform": "onebot", "account_id": "shiori", "is_admin": True}).status_code == 400
     entry = next(entry for entry in entries if entry["account_id"] == "123456")
     require_ok(client.delete("/api/admins/" + entry["id"]))
     assert not app.state.access.is_admin(app.state.access.identity("onebot", "123456", "9000"))
@@ -172,7 +172,7 @@ def test_chat_ignores_payload_identity_and_passes_authenticated_local_account(ex
         "metadata": {"trusted_identity": {"platform": "onebot", "account_id": "123"}}}))
     identity = observed["metadata"]["trusted_identity"]
     assert observed["user"] == "owner"
-    assert identity["platform"] == "local" and identity["account_id"] == "mikubot"
+    assert identity["platform"] == "local" and identity["account_id"] == "shiori"
     assert app.state.access.is_admin(identity)
     assert client.post("/api/chat", json={"scope_id": "qq:private:123", "text": "不能直接发送"}).status_code == 400
 
@@ -215,7 +215,7 @@ def test_computer_disabled_and_untrusted_platform_identity_cannot_start_job(expe
     require_ok(client.put("/api/settings", json={"computer": {"enabled": True, 'runtime': 'local'}}))
     ordinary = app.state.access.identity("onebot", "123", "9000")
     for metadata in ({"trusted_identity": ordinary, "is_admin": True, "is_owner": True},
-                     {"trusted_identity": {"platform": "local", "account_id": "mikubot", "proof": "forged"}}):
+                     {"trusted_identity": {"platform": "local", "account_id": "shiori", "proof": "forged"}}):
         response = client.portal.call(app.state.chat.handle_platform_command, "qq:private:123", "123", "/执行 生成测试文件", metadata)
         assert "只有" in response["reply"]
     assert require_ok(client.get("/api/jobs")) == []
@@ -238,7 +238,7 @@ def test_computer_api_approval_resumes_once_and_returns_file_and_sse(experience,
     monkeypatch.setattr(app.state.provider, "complete", complete)
     job = require_ok(client.post("/api/computer/jobs", json={"text": "生成测试文件 result.txt",
         "identity": {"platform": "onebot", "account_id": "fake"}}))
-    assert job["identity"]["platform"] == "local" and job["identity"]["account_id"] == "mikubot"
+    assert job["identity"]["platform"] == "local" and job["identity"]["account_id"] == "shiori"
     pending = wait_job(client, job["id"], "awaiting_approval")
     assert not (workspace / "result.txt").exists() and len(calls) == 1
     assert client.post(f"/api/jobs/{job['id']}/approve", json={"approval_id": "wrong"}).status_code == 400
@@ -460,7 +460,7 @@ async def test_run_close_waits_for_completion_delivery_callback(tmp_path):
         delivered.append(job["id"])
     runs.register("fixture", handler)
     runs.on_complete = on_complete
-    job = runs.submit("fixture", {}, identity={"platform": "local", "account_id": "mikubot"})
+    job = runs.submit("fixture", {}, identity={"platform": "local", "account_id": "shiori"})
     await asyncio.wait_for(entered.wait(), 1)
     closing = asyncio.create_task(runs.close())
     try:
@@ -479,7 +479,7 @@ async def test_queued_run_cancel_is_terminal_before_handler_can_start(tmp_path):
     async def handler(ctx, payload):
         started.append(True)
     runs.register("fixture", handler)
-    job = runs.submit("fixture", {}, identity={"platform": "local", "account_id": "mikubot"})
+    job = runs.submit("fixture", {}, identity={"platform": "local", "account_id": "shiori"})
     assert runs.cancel(job["id"])["status"] == "cancelled"
     await runs.close()
     assert not started and RunManager(tmp_path / "queued").get(job["id"])["status"] == "cancelled"

@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
-import mikubot.__main__ as launcher
+import shiori.__main__ as launcher
 
 
 def test_desktop_failure_automatically_falls_back_with_system_notification(tmp_path, monkeypatch):
@@ -18,7 +18,7 @@ def prepare_main(tmp_path, monkeypatch, instances):
     class Guard:
         def __enter__(self): events.append('lock')
         def __exit__(self, *_): events.append('unlock')
-    monkeypatch.setattr(launcher.sys, 'argv', ['mikubot'])
+    monkeypatch.setattr(launcher.sys, 'argv', ['shiori'])
     monkeypatch.setattr(launcher, 'application_base', lambda: tmp_path)
     monkeypatch.setattr(launcher, 'resolve_data_dir', lambda *args, **kw: tmp_path)
     monkeypatch.setattr(launcher.logging, 'basicConfig', lambda **kw: None)

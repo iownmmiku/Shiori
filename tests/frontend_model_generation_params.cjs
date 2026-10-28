@@ -3,7 +3,7 @@
 // CSP-safe range/number pairing, one shared advanced-parameter component,
 // a single temperature input in the catalog modal and shared JSON validation.
 const assert=require("node:assert/strict"),fs=require("node:fs"),path=require("node:path"),vm=require("node:vm");
-const root=path.join(__dirname,"../mikubot/static");
+const root=path.join(__dirname,"../shiori/static");
 const read=name=>fs.readFileSync(path.join(root,name),"utf8");
 const escape=value=>String(value??"").replace(/[&<>"']/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
 const calls=[];let modal=null;
@@ -34,7 +34,7 @@ sandbox.getForm=form=>form.values;
 sandbox.openModal=(...args)=>{modal=args;};
 sandbox.closeModal=()=>{modal=null;};
 sandbox.toast=()=>{};
-const pages=sandbox.window.MikubotPages;
+const pages=sandbox.window.ShioriPages;
 const plain=value=>JSON.parse(JSON.stringify(value));
 const count=(text,needle)=>text.split(needle).length-1;
 const inputs=html=>[...html.matchAll(/<input\b[^>]*>/g)].map(match=>match[0]);

@@ -5,8 +5,8 @@ import json
 
 import pytest
 
-from mikubot.character_catalog import CharacterCatalog
-from mikubot.distillation import DistillationService
+from shiori.character_catalog import CharacterCatalog
+from shiori.distillation import DistillationService
 
 
 @pytest.fixture
@@ -148,7 +148,7 @@ async def test_identity_and_source_checkpoint_resume_does_not_refetch(catalog, t
 
 
 def test_json_reader_rejects_private_dns_and_never_replays_redirect(monkeypatch):
-    from mikubot import tools
+    from shiori import tools
     with pytest.raises(ValueError):
         tools._request_public_json('https://127.0.0.1/private', {'keyword': 'private'})
     class Response:
@@ -166,7 +166,7 @@ def test_json_reader_rejects_private_dns_and_never_replays_redirect(monkeypatch)
 
 
 def test_json_response_preserves_long_evidence_without_text_preview_truncation(monkeypatch):
-    from mikubot import tools
+    from shiori import tools
     class Response:
         status = 200
         def getheader(self, key, default=''): return 'application/json'

@@ -6,13 +6,13 @@ const sandbox={window:{},state:{settings:{time:{timezone:'Asia/Hong_Kong',awaren
   field:(name,title,value)=>`<input name="${name}" value="${escape(value)}">`,e:escape,
   heading:()=>'',button:()=>'',configuredModel:()=>({}),identitySection:()=>'<p>identity</p>'};
 vm.createContext(sandbox);
-vm.runInContext(fs.readFileSync(path.join(__dirname,'../mikubot/static/workspace-features.js'),'utf8'),sandbox);
-sandbox.timeAwarenessSection=sandbox.window.MikubotFeatures.timeAwarenessSection;
+vm.runInContext(fs.readFileSync(path.join(__dirname,'../shiori/static/workspace-features.js'),'utf8'),sandbox);
+sandbox.timeAwarenessSection=sandbox.window.ShioriFeatures.timeAwarenessSection;
 let html=sandbox.timeAwarenessSection();
 assert.match(html,/data-form="time-awareness"/);assert.match(html,/感知现实时间/);assert.ok(!html.includes('checked'));
 sandbox.state.settings.time.awareness_enabled=true;html=sandbox.timeAwarenessSection();assert.match(html,/checked/);
 sandbox.state.settings.time.timezone='"><img src=x onerror=evil>';
 assert.ok(!sandbox.timeAwarenessSection().includes('<img'));
-sandbox.window.MikubotExperience={renderPersonas:async()=>'',renderSettings:async()=>'',profilePanel:async()=>'',handleAction:async()=>false};
-vm.runInContext(fs.readFileSync(path.join(__dirname,'../mikubot/static/bot-config.js'),'utf8'),sandbox);
-sandbox.window.MikubotExperience.renderPersonas().then(result=>assert.match(result,/id="time-awareness-section"/)).catch(error=>{console.error(error);process.exitCode=1;});
+sandbox.window.ShioriExperience={renderPersonas:async()=>'',renderSettings:async()=>'',profilePanel:async()=>'',handleAction:async()=>false};
+vm.runInContext(fs.readFileSync(path.join(__dirname,'../shiori/static/bot-config.js'),'utf8'),sandbox);
+sandbox.window.ShioriExperience.renderPersonas().then(result=>assert.match(result,/id="time-awareness-section"/)).catch(error=>{console.error(error);process.exitCode=1;});

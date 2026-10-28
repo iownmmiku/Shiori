@@ -7,11 +7,11 @@ from types import SimpleNamespace
 
 import pytest
 
-import mikubot.db as db_module
-import mikubot.memory_lifecycle as lifecycle_module
-from mikubot.db import Store
-from mikubot.memory_lifecycle import MemoryLifecycle
-from mikubot.settings import DEFAULTS
+import shiori.db as db_module
+import shiori.memory_lifecycle as lifecycle_module
+from shiori.db import Store
+from shiori.memory_lifecycle import MemoryLifecycle
+from shiori.settings import DEFAULTS
 
 
 @pytest.fixture

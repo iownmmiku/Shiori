@@ -7,11 +7,11 @@ import pytest
 from fastapi.testclient import TestClient
 
 from auth_helpers import password_login
-from mikubot.api import create_app
-from mikubot.character_catalog import CharacterCatalog
-from mikubot.chat import _schema
-from mikubot.distillation import DistillationService
-from mikubot.provider import input_size
+from shiori.api import create_app
+from shiori.character_catalog import CharacterCatalog
+from shiori.chat import _schema
+from shiori.distillation import DistillationService
+from shiori.provider import input_size
 
 
 @pytest.fixture

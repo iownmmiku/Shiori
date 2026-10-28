@@ -4,10 +4,10 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-from mikubot import __version__
-from mikubot.api import create_app
+from shiori import __version__
+from shiori.api import create_app
 from qunyu.db import Store
-from mikubot.distillation import DistillationService
+from shiori.distillation import DistillationService
 from auth_helpers import password_login
 
 
@@ -158,7 +158,7 @@ def test_direct_generation_job_saves_only_on_apply(tmp_path, monkeypatch):
 
 
 def test_qq_self_test_does_not_claim_offline_token_mismatch(tmp_path, monkeypatch):
-    from mikubot.qq_pairing import LocalQQPairing
+    from shiori.qq_pairing import LocalQQPairing
     async def discover(self):
         return {'candidates':[{'adapter':'napcat','reachable':False,'message':'标准端口未响应'}]}
     monkeypatch.setattr(LocalQQPairing,'discover',discover)

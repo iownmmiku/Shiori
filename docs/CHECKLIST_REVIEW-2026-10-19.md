@@ -10,7 +10,7 @@
 | 远程HTTP传输 | 代码防护已实现，部署未验收 | 默认拒绝远程明文HTTP，包括登录；支持显式代理IP、公网Host与HTTPS转发头校验，生成Caddy配置。软件没有内置签发证书或自动安装代理；公网TLS仍未实测。 |
 | Windows依赖与服务器部署 | 部分完成 | 无头依赖已拆出，密码非Windows路径使用scrypt和文件权限，提供Linux脚本、Dockerfile和Compose。Linux/Docker实际启动与macOS桌面尚未验收。 |
 | Python仅限3.12 | 已放宽 | 当前要求>=3.11,<3.14；Windows上3.11/3.12/3.13已分别跑过完整回归。3.10仍不支持。 |
-| 核心仍叫qunyu | 已实现 | 核心包为mikubot，旧qunyu只保留兼容入口，导入指向同一模块。数据库文件名保持兼容，不需要手工改名。 |
+| 核心仍叫qunyu | 已实现 | 核心包为Shiori，旧qunyu只保留兼容入口，导入指向同一模块。数据库文件名保持兼容，不需要手工改名。 |
 | 蒸馏/大型语料中断需全部重做 | 原清单所指流程已实现 | 蒸馏保存成功阶段与来源快照，可手动续作，保留预算并拒绝材料/模型/参数变化的旧缓存。不是所有电脑任务的通用恢复；外部命令不重放，未知模型请求可能再次计费。 |
 | SQLite和单机扩展瓶颈 | 仅缓解 | 已加入索引、分页、WAL与可调有界队列；记忆计算有界移至后台，及时清理已取消模型请求。8线程、8会话、160次本地写入未丢记录。仍是一份数据目录一个写入实例，没有PostgreSQL、多节点存储或真实高活跃群压测。 |
 | 测试依赖替身，缺真实场景 | 未全部完成 | 增加真实本地TCP故障注入，覆盖HTTP429/坏响应/断流/超时及WebSocket认证、坏帧和重连。对端仍是测试程序，真实QQ风控、官方平台、实际模型和长时间运行未验收。 |
@@ -32,13 +32,13 @@
 
 主要核对位置：
 
-- [sandbox.py](../mikubot/sandbox.py)、[computer.py](../mikubot/computer.py)：容器与宿主边界。
-- [auth_api.py](../mikubot/auth_api.py)、[web_auth.py](../mikubot/web_auth.py)：HTTPS与密码。
-- [db.py](../mikubot/db.py)、[chat.py](../mikubot/chat.py)：旧数据、分页与偏好读取。
-- [runs.py](../mikubot/runs.py)、[distillation.py](../mikubot/distillation.py)：检查点和恢复范围。
-- [workspace-pages.js](../mikubot/static/workspace-pages.js)：预设、目录推荐、实际测试和默认路由绑定。
-- [notifications.py](../mikubot/notifications.py)、[__main__.py](../mikubot/__main__.py)：非模态通知、密码重置和自动回退。
-- [experience_api.py](../mikubot/experience_api.py)、[access.py](../mikubot/access.py)：配对、审批与连接自检。
+- [sandbox.py](../shiori/sandbox.py)、[computer.py](../shiori/computer.py)：容器与宿主边界。
+- [auth_api.py](../shiori/auth_api.py)、[web_auth.py](../shiori/web_auth.py)：HTTPS与密码。
+- [db.py](../shiori/db.py)、[chat.py](../shiori/chat.py)：旧数据、分页与偏好读取。
+- [runs.py](../shiori/runs.py)、[distillation.py](../shiori/distillation.py)：检查点和恢复范围。
+- [workspace-pages.js](../shiori/static/workspace-pages.js)：预设、目录推荐、实际测试和默认路由绑定。
+- [notifications.py](../shiori/notifications.py)、[__main__.py](../shiori/__main__.py)：非模态通知、密码重置和自动回退。
+- [experience_api.py](../shiori/experience_api.py)、[access.py](../shiori/access.py)：配对、审批与连接自检。
 
 不能将本次结果描述为“原始清单已全部清零”，也不能把当前源码行为当成已发布安装包的行为。
 

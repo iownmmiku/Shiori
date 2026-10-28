@@ -1,10 +1,10 @@
-"""Deprecated compatibility, scheduled for removal in 0.3.0; use mikubot."""
+"""Deprecated compatibility, scheduled for removal in 0.3.0; use shiori."""
 import importlib
 import importlib.abc
 import importlib.util
 import sys
 
-from mikubot import __version__
+from shiori import __version__
 
 REMOVAL_VERSION = '0.3.0'
 
@@ -30,7 +30,7 @@ class _AliasLoader(importlib.abc.Loader):
 class _LegacyImports(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
         if not fullname.startswith('qunyu.') or fullname=='qunyu.__main__': return None
-        name='mikubot'+fullname[len('qunyu'):]
+        name='shiori'+fullname[len('qunyu'):]
         spec=importlib.util.find_spec(name)
         if spec is None: return None
         return importlib.util.spec_from_loader(fullname,_AliasLoader(name),is_package=spec.submodule_search_locations is not None)

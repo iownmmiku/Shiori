@@ -4,10 +4,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from mikubot.chat import ChatService
-from mikubot.db import Store, message_fingerprint
-from mikubot.memory import MemoryEngine
-from mikubot.settings import DEFAULTS
+from shiori.chat import ChatService
+from shiori.db import Store, message_fingerprint
+from shiori.memory import MemoryEngine
+from shiori.settings import DEFAULTS
 
 
 @pytest.fixture

@@ -6,7 +6,7 @@ import zipfile
 import pytest
 from fastapi.testclient import TestClient
 
-from mikubot.api import create_app
+from shiori.api import create_app
 from auth_helpers import password_login
 
 

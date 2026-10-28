@@ -10,7 +10,7 @@ let activeForm = null;
 const calls = [];
 let responder = async () => ({}), quickModelCallback = null;
 const sandbox = {
-  window:{MikubotPages:{startQuickModel:async callback => {quickModelCallback=callback;}},MikubotExperience:{handleAction:async action => calls.push(["experience",action])}},
+  window:{ShioriPages:{startQuickModel:async callback => {quickModelCallback=callback;}},ShioriExperience:{handleAction:async action => calls.push(["experience",action])}},
   state:{settings:{identity:{name:"原称呼",aliases:["旧别名"],planner_enabled:false},model:{base_url:"https://example.test/v1",model:"existing"}},boot:{setup_required:false}},
   location:{protocol:"http:",host:"127.0.0.1:18765"},
   navigator:{clipboard:{writeText:async value => calls.push(["clipboard",value])}},
@@ -29,8 +29,8 @@ const sandbox = {
   bootstrap:async () => {},navigate:async page => calls.push(["navigate",page]),closeModal:() => {modal.open=false;},
 };
 vm.createContext(sandbox);
-vm.runInContext(fs.readFileSync(path.join(__dirname,"../mikubot/static/quick-start.js"),"utf8"),sandbox);
-const quick = sandbox.window.MikubotQuickStart;
+vm.runInContext(fs.readFileSync(path.join(__dirname,"../shiori/static/quick-start.js"),"utf8"),sandbox);
+const quick = sandbox.window.ShioriQuickStart;
 const plain = value => JSON.parse(JSON.stringify(value));
 
 async function main() {
@@ -114,7 +114,7 @@ async function main() {
   assert.equal(quick.recommendations({model:{configured:true},qq:{enabled:true,allowed_groups:1,status:{connected:true}}}).length,0);
   assert.match(quick.diagnosticsPanel({checks:[],model:{configured:true},qq:{enabled:true,allowed_groups:1,status:{connected:true}}}),/模型是否可用需单独测试/);
 
-  const app = fs.readFileSync(path.join(__dirname,"../mikubot/static/ui-core.js"),"utf8");
+  const app = fs.readFileSync(path.join(__dirname,"../shiori/static/ui-core.js"),"utf8");
   assert.match(app,/function button\([^\n]+<button type="button"/);
   console.log("PASS: quick setup preserves settings, skips without writes, uses selected QQ adapter, copies no credentials, and reports local facts.");
 }
