@@ -1,10 +1,10 @@
 # Shiori 0.2.0
 
-> **0.2.0**：全新「Analysis OS」界面（暖灰纸面、墨色实心按钮、青色状态灯与对角线“解密”动效），并随 mikubot → Shiori 更名同步将 GitHub 仓库改为 `iownmmiku/Shiori`（旧链接自动跳转）。完整变化见[更新日志](RELEASE_NOTES.md)。**0.1.6 及更早版本因内置旧仓库地址无法应用内更新，请手动覆盖安装；数据会保留。**
+> **0.2.0**：全新「Analysis OS」界面（暖灰纸面、墨色实心按钮、青色状态灯与对角线“解密”动效），并随 mikubot → Shiori 更名同步将 GitHub 仓库改为 `iownmmiku/Shiori`。完整变化见[更新日志](RELEASE_NOTES.md)。原仓库名 `mikubot` 现在是一个只含迁移说明的空占位仓库，不再跳转到本仓库。**0.1.6 及更早版本因内置旧仓库地址无法在应用内更新，请下载下方安装包覆盖安装；数据会保留。**
 
-> **0.1.6 正式版**：整合消息防抖、时间来源、集中模型配置、规范插件包与自定义侧边栏，并补齐 QQ 回复、记忆与上下文、兴趣探索、网页搜索及便携托盘修复。原预发布归档为 [0.1.6 beta](https://github.com/iownmmiku/mikubot/releases/tag/v0.1.6-beta)。详见[更新日志](RELEASE_NOTES.md)和[测试报告](TEST_REPORT.md)。
+> **0.1.6 正式版**：整合消息防抖、时间来源、集中模型配置、规范插件包与自定义侧边栏，并补齐 QQ 回复、记忆与上下文、兴趣探索、网页搜索及便携托盘修复。原预发布归档为 [0.1.6 beta](https://github.com/iownmmiku/Shiori/releases/tag/v0.1.6-beta)。详见[更新日志](RELEASE_NOTES.md)和[测试报告](TEST_REPORT.md)。
 
-当前源码版本为 **0.2.0**。Windows 安装版和便携版尚未为 0.2.0 构建，请先用源码部署；下方 0.1.6 安装包是历史版本。安装包和便携包无需 Python，源码支持 Python 3.11–3.13。
+当前版本为 **0.2.0**，提供 Windows 安装版、便携版与源码部署。安装包和便携包无需 Python，源码支持 Python 3.11–3.13。
 
 本机运行的 AI 聊天机器人与任务助手。预装可删除的初音未来人格，支持独立聊天、QQ 接入、记忆、黑话学习、人格蒸馏和管理员电脑任务。
 
@@ -14,21 +14,21 @@
 
 人格蒸馏采用“检索 → 选择角色 → 自动整理资料”的流程，可在“机器人配置 → 模型”的高级分工中指定专用模型。记忆档案与群语言页提供状态、七日新增、来源、审核和修改；群词默认共享确认后的词义，私聊及原始例句保持隔离。
 
-## 下载与选择（历史 0.1.6 发行版）
+## 下载与选择
 
-0.2.0 的 Windows 安装包暂未发布。需要预编译程序时，可前往 **[GitHub Releases 下载0.1.6正式版](https://github.com/iownmmiku/Shiori/releases/tag/v0.1.6)**（旧链接 `iownmmiku/mikubot` 会自动跳转），展开Assets，按用途选择；资产文件名保留 `mikubot-` 原名。
+前往 **[GitHub Releases 下载 0.2.0](https://github.com/iownmmiku/Shiori/releases/tag/v0.2.0)**，展开 Assets，按用途选择。安装包由本机构建，未做 Windows 代码签名，系统可能出现 SmartScreen 提示；每个文件旁有同名 `.sha256`，请核对后再运行。
 
 | 文件 | 适合谁 | 使用方式 |
 | --- | --- | --- |
-| [mikubot-0.1.6-Windows-Setup.exe](https://github.com/iownmmiku/mikubot/releases/download/v0.1.6/mikubot-0.1.6-Windows-Setup.exe) | Windows 用户，推荐 | 已发布的旧品牌安装包；新 Shiori 安装包待发布 |
-| [mikubot-0.1.6-Windows-x64.zip](https://github.com/iownmmiku/mikubot/releases/download/v0.1.6/mikubot-0.1.6-Windows-x64.zip) | 希望解压即用 | 该历史下载解压后运行 `mikubot.exe`；本地新包使用 `shiori.exe` |
-| [mikubot-0.1.6-source.zip](https://github.com/iownmmiku/mikubot/releases/download/v0.1.6/mikubot-0.1.6-source.zip) | 希望运行或修改代码 | 安装 Python 3.12，按下方命令启动 |
+| [shiori-0.2.0-Windows-Setup.exe](https://github.com/iownmmiku/Shiori/releases/download/v0.2.0/shiori-0.2.0-Windows-Setup.exe) | Windows 用户，推荐 | 一键安装 |
+| [shiori-0.2.0-Windows-x64.zip](https://github.com/iownmmiku/Shiori/releases/download/v0.2.0/shiori-0.2.0-Windows-x64.zip) | 希望解压即用 | 完整解压后运行 `shiori.exe` |
+| [shiori-0.2.0-source.zip](https://github.com/iownmmiku/Shiori/releases/download/v0.2.0/shiori-0.2.0-source.zip) | 希望运行或修改代码 | 安装 Python 3.12，按下方命令启动 |
 
 安装版和便携版无需 Python、Node 或 Git，默认打开独立桌面窗口。它们不包含模型账号、API Key、QQ 客户端或 NapCat/SnowLuma，需要自行准备。模型调用按所选服务商规则计费。
 
-0.1.5用户可在右上角“版本与更新”检查并选择正式版0.1.6，无需开启“显示测试版”。**原0.1.6 beta内部也显示0.1.6**：重新检查GitHub，选中正式发行记录后仍可点击“切换到 v0.1.6”；已下载的旧包需重新下载。原beta保留原文件与校验值，仅供手动历史下载，不作为自动切换目标。源码存在本地修改时不会自动覆盖。
+**0.1.6 及更早版本**（当时名为 mikubot）的“版本与更新”写死了旧仓库地址，无法在应用内更新到 0.2.0，请下载上方安装包覆盖安装；0.2.0 起可在应用内检查并切换版本。0.1.6 及更早发行版仍在 [Releases](https://github.com/iownmmiku/Shiori/releases) 中，文件名保留 `mikubot-` 原名。源码存在本地修改时不会自动覆盖。
 
-升级前退出旧实例并另存完整数据目录、原始材料、插件与电脑工作目录；自动更新的备份不代替这些独立副本。发现问题可提交[Issue](https://github.com/iownmmiku/mikubot/issues)，附版本、复现步骤与脱敏日志。
+升级前退出旧实例并另存完整数据目录、原始材料、插件与电脑工作目录；自动更新的备份不代替这些独立副本。发现问题可提交[Issue](https://github.com/iownmmiku/Shiori/issues)，附版本、复现步骤与脱敏日志。
 
 **运行与验收范围**：自动记忆遵守每日额度和持久化节奏，额度耗尽后等下一自然日恢复；模型空正文或错误格式会保留原消息进度并退避重试，合法空数组表示本批没有值得保存的内容。记忆页面展示旧记录不代表新消息已写入，旧版漏提取的历史也不会自动补回。真实QQ风控、各供应商模型质量与长期部署仍需在目标环境验收，实际检查见测试报告。
 
@@ -146,7 +146,7 @@ Windows 默认数据在 **`%LOCALAPPDATA%\shiori\data`**，独立于程序目录
 
 感谢所有参与代码、测试和问题反馈的贡献者。
 
-- [HuangGuaKnn](https://github.com/HuangGuaKnn)：贡献高级模型生成参数配置与回归测试（[PR #8](https://github.com/iownmmiku/mikubot/pull/8)）、可自定义分组侧边栏（[PR #11](https://github.com/iownmmiku/mikubot/pull/11)）；并提交历史/上下文管线审计与复现材料（[Issue #10](https://github.com/iownmmiku/mikubot/issues/10)）。
+- [HuangGuaKnn](https://github.com/HuangGuaKnn)：贡献高级模型生成参数配置与回归测试（[PR #8](https://github.com/iownmmiku/Shiori/pull/8)）、可自定义分组侧边栏（[PR #11](https://github.com/iownmmiku/Shiori/pull/11)）；并提交历史/上下文管线审计与复现材料（[Issue #10](https://github.com/iownmmiku/Shiori/issues/10)）。
 
 ## Shiori 更名兼容
 

@@ -1,11 +1,11 @@
 # Shiori 0.2.0
 
-发布日期：2026-10-28（Asia/Hong_Kong）。发布通道：正式版。本版把项目正式更名为 **Shiori**，GitHub 仓库由 `iownmmiku/mikubot` 改为 `iownmmiku/Shiori`，并带来全新界面与近期的群聊、记忆修复。本版尚未构建 Windows 安装包和便携包，请先用源码部署（见 README 与 `docs/SOURCE_DEPLOY.md`）。
+发布日期：2026-10-28（Asia/Hong_Kong）。发布通道：正式版。本版把项目正式更名为 **Shiori**，GitHub 仓库由 `iownmmiku/mikubot` 改为 `iownmmiku/Shiori`，并带来全新界面与近期的群聊、记忆修复。本版提供 Windows 安装包、便携包和源码包，均由本机构建，未做 Windows 代码签名，请核对随附的 SHA-256 后再运行。
 
 ## 升级前必读
 
 - **0.1.6 及更早版本无法在应用内更新到 0.2.0。** 它们内置的更新地址是旧仓库名；仓库改名后 GitHub 会把接口重定向到新地址，而旧版更新器只接受原地址，会拒绝该响应。请到 [Releases](https://github.com/iownmmiku/Shiori/releases) 手动获取新版本覆盖安装。数据目录、密码、记忆和设置都会保留。0.2.0 起内置新仓库地址，应用内更新恢复。
-- 旧仓库链接会自动跳转到新仓库；0.1.6 及更早发行资产仍使用 `mikubot-…` 文件名，更新器同时接受 `shiori-…` 与历史 `mikubot-…`。
+- 原仓库名 `mikubot` 现在是只含迁移说明的空占位仓库，不再跳转到本仓库；该占位仓库的发行页也不提供任何下载文件。0.1.6 及更早发行资产仍使用 `mikubot-…` 文件名，位于 Shiori 的发行页；更新器同时接受 `shiori-…` 与历史 `mikubot-…`。
 - 数据库仍叫 `qunyu.db`，`mikubot` / `qunyu` 导入与启动入口继续转发到 `shiori`，计划在 0.3.0 移除。数据目录、环境变量（`SHIORI_DATA_DIR` 及旧名）、Docker 卷名的兼容规则见 `docs/SHIORI_RENAME.md`。
 - 升级前仍建议另存完整数据目录。
 

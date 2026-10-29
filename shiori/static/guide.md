@@ -1,4 +1,4 @@
-> 软件已更名为 **Shiori**（0.2.0 起 GitHub 仓库同步改名为 `iownmmiku/Shiori`，旧链接自动跳转）；以下历史下载链接和文件名保留 mikubot 原名。新源码入口为 `python -m shiori`，旧数据自动兼容。
+> 软件已更名为 **Shiori**（0.2.0 起 GitHub 仓库同步改名为 `iownmmiku/Shiori`；原名 `mikubot` 现为空占位仓库）；以下历史下载链接和文件名保留 mikubot 原名。新源码入口为 `python -m shiori`，旧数据自动兼容。
 
 # Shiori 0.1.4 使用指南
 
