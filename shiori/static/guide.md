@@ -1,4 +1,4 @@
-> 当前版本为 **Shiori 0.2.1-beta（预发布）**，稳定版仍为 **0.2.0**。本文包含统一 Chat 等后续本地整合；本次尚未重新打包，原 beta 下载文件不包含这些补充改动。主仓库为 `iownmmiku/Shiori`。旧 `mikubot` 地址是没有安装文件的迁移说明占位仓库，不再跳转。0.1.6 及更早版本需要手动获取新版，继续使用原数据目录。
+> 当前版本为 **Shiori 0.2.1-beta（修订重建，预发布）**，稳定版仍为 **0.2.0**。本次加入统一 Chat 工具流程等补充改动；此前 beta 用户需要重新切换同一版本或重新下载，用发行页本次 SHA-256 区分新旧文件。主仓库为 `iownmmiku/Shiori`。旧 `mikubot` 地址是没有安装文件的迁移说明占位仓库，不再跳转。0.1.6 及更早版本需要手动获取新版，继续使用原数据目录。
 
 > 连续消息、时间来源、模型入口和插件包的操作与兼容说明见[配置与消息处理](https://github.com/iownmmiku/Shiori/blob/main/docs/CONFIGURATION_WORKFLOWS.md)。
 
@@ -14,7 +14,7 @@ Shiori 是本机运行的聊天机器人和任务助手。默认人格为初音�
 
 在 [GitHub Releases 0.2.0](https://github.com/iownmmiku/Shiori/releases/tag/v0.2.0) 的 Assets 中下载：`shiori-0.2.0-Windows-Setup.exe` 是推荐安装版；`shiori-0.2.0-Windows-x64.zip` 是完整解压后运行的便携版；`shiori-0.2.0-source.zip` 需要 Python 3.11–3.13（推荐3.12）。安装包未做 Windows 代码签名，运行前核对旁置同名 `.sha256`。安装版与便携版无需 Python 或 Node，也不包含模型密钥、QQ 客户端和连接器。
 
-测试版文件为 `shiori-0.2.1-beta-Windows-Setup.exe`、`shiori-0.2.1-beta-Windows-x64.zip` 和 `shiori-0.2.1-beta-source.zip`，见 [0.2.1-beta 预发布页](https://github.com/iownmmiku/Shiori/releases/tag/v0.2.1-beta)。0.2.0 用户可在“版本与更新”开启“显示测试版”再选择。本文的后续本地整合须重新构建和发布后才会进入下载文件，不能仅凭相同版本号判断包含哪些修复。测试版不替代正式版，试用时使用单独的数据副本。
+测试版文件为 `shiori-0.2.1-beta-Windows-Setup.exe`、`shiori-0.2.1-beta-Windows-x64.zip` 和 `shiori-0.2.1-beta-source.zip`，见 [0.2.1-beta 预发布页](https://github.com/iownmmiku/Shiori/releases/tag/v0.2.1-beta)。0.2.0 用户可在“版本与更新”开启“显示测试版”再选择。此前 beta 用户重新检查后可切换同一版本，或重新下载覆盖安装；文件名与版本号未变，请核对本次 SHA-256。测试版不替代正式版，试用时使用单独的数据副本。
 
 ## Chat 工作台与 QQ 聊天管理
 
@@ -38,7 +38,7 @@ Chat 首次显示最近 80 条记录；向上点击“加载更早记录”可�
 
 ## 集中的配置入口
 
-本地后续开发已新增独立的 **自动化 → 角色日程** 页面，可管理人格周表、每日安排、节庆、纪念日与生活日记，并选择是否按忙闲状态延迟合并回复。功能默认关闭，日记独立于真实记忆，详见[角色日程使用说明](https://github.com/iownmmiku/Shiori/blob/main/docs/CHARACTER_SCHEDULE.md)。此功能尚未包含在已发布的 0.2.0 安装文件中。
+0.2.1-beta 新增独立的 **自动化 → 角色日程** 页面，可管理人格周表、每日安排、节庆、纪念日与生活日记，并选择是否按忙闲状态延迟合并回复。功能默认关闭，日记独立于真实记忆，详见[角色日程使用说明](https://github.com/iownmmiku/Shiori/blob/main/docs/CHARACTER_SCHEDULE.md)。此功能尚未包含在已发布的 0.2.0 安装文件中。
 
 **机器人配置 → 网页搜索**支持公共搜索、Tavily、DeepSeek Search、Brave Search，聊天和后台通用搜索共用。填写对应密钥、保存并测试即可；每日上限和失败回退可单独设置，详见[网页搜索](https://github.com/iownmmiku/Shiori/blob/main/docs/WEB_SEARCH.md)。此入口随0.1.6正式版提供，原beta包不包含。
 

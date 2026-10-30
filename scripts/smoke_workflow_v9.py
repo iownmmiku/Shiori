@@ -46,9 +46,8 @@ def fixture_reply(body):
     messages = body.get('messages', [])
     tool_results = [item for item in messages if item.get('role') == 'tool']
     last_user = next((str(item.get('content', '')) for item in reversed(messages) if item.get('role') == 'user'), '')
-    if {'write_file', 'execute_python'} <= names:
-        initiating_text = str(messages[1].get('content', '')) if len(messages) > 1 else ''
-        if STOP_MARKER in initiating_text:
+    if {'write_file', 'execute_python'} <= names and any(marker in last_user for marker in (COMPUTER_MARKER, STOP_MARKER)):
+        if STOP_MARKER in last_user:
             if not tool_results:
                 code = ("from pathlib import Path\nimport os, time\n"
                         "Path('workflow-stop-pid.txt').write_text(str(os.getpid()), encoding='utf-8')\n"
@@ -144,6 +143,13 @@ class Client:
             assert response.code == expected, (path, response.code, value)
             return value
 
+    def stream(self, path, payload):
+        request = urllib.request.Request(self.url + path, json.dumps(payload).encode('utf-8'),
+            headers={'Content-Type': 'application/json', 'Connection': 'close'})
+        response = self.opener.open(request, timeout=20)
+        assert response.status == 200 and 'text/event-stream' in response.headers.get('Content-Type', '')
+        return response
+
 
 def wait_until(predicate, *, timeout=25, message='Workflow condition timed out'):
     deadline = time.monotonic() + timeout
@@ -168,11 +174,34 @@ def wait_job(client, id, statuses, *, timeout=30):
     return wait_until(poll, timeout=timeout), observed
 
 
-def task_from_chat(result):
-    matches = [item['result']['job_id'] for item in result.get('actions', [])
-        if item.get('tool') == 'start_computer_task' and item.get('ok') and isinstance(item.get('result'), dict) and item['result'].get('job_id')]
-    assert len(matches) == 1, 'Normal chat did not create exactly one START_TOOL computer task'
-    return matches[0]
+def inline_jobs_from_chat(result):
+    actions = result.get('actions') or []
+    assert [item.get('tool') for item in actions] == ['write_file', 'execute_python'], 'Chat did not run both direct tools in order'
+    assert all(item.get('ok') is True for item in actions), 'An inline tool failed'
+    job_ids = [item['result']['job_id'] for item in actions]
+    assert len(set(job_ids)) == 2, 'Each inline operation must have its own receipt'
+    jobs = result.get('jobs') or []
+    assert [job['id'] for job in jobs] == job_ids
+    assert all(job.get('inline') is True and job.get('kind') == 'computer' and job.get('status') == 'completed' for job in jobs)
+    assert result.get('reply') and result.get('message_id'), 'A submitted task is not a completed Chat response'
+    return job_ids
+
+
+def first_inline_job(stream):
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline:
+        line = stream.readline(256 * 1024)
+        assert line, 'Chat stream closed before publishing its inline job'
+        assert len(line) < 256 * 1024, 'Unexpectedly large Chat SSE event'
+        if not line.startswith(b'data: '):
+            continue
+        event = json.loads(line[6:])
+        assert event.get('type') not in ('error', 'result'), 'Chat ended before the long-running tool was observable'
+        if event.get('type') == 'job':
+            job = event['data']
+            assert job.get('inline') is True and job.get('kind') == 'computer'
+            return job['id']
+    raise AssertionError('Chat did not publish inline tool progress in time')
 
 
 def process_active(pid):
@@ -281,24 +310,24 @@ def main():
                 'max_steps': 8, 'timeout_seconds': 30}}, 'PUT')
             request_text = '请在本机目录写入文件并运行 Python 脚本生成结果。' + COMPUTER_MARKER
             result = client.request('/api/chat', {'scope_id': scope['id'], 'text': request_text})
-            job_id = task_from_chat(result)
-            done, observed = wait_job(client, job_id, {'completed'})
+            job_ids = inline_jobs_from_chat(result)
+            done = [wait_job(client, job_id, {'completed'})[0] for job_id in job_ids]
             assert (workspace / 'workflow-note.txt').read_text('utf-8') == WRITE_TEXT
             assert (workspace / 'workflow-python.txt').read_text('utf-8') == PYTHON_TEXT
-            tool_events = [item['data'] for item in done['events'] if item['type'] == 'tool_result']
+            tool_events = [item['data'] for job in done for item in job['events'] if item['type'] == 'tool_result']
             assert [item['tool'] for item in tool_events] == ['write_file', 'execute_python']
             assert all(item['result'].get('ok') is True for item in tool_events)
             assert PYTHON_OUTPUT in tool_events[1]['result']['output']
-            authorized = [item['data'] for item in done['events'] if item['type'] == 'authorized']
+            authorized = [item['data'] for job in done for item in job['events'] if item['type'] == 'authorized']
             assert len(authorized) == 2 and all(item['mode'] == 'automatic' for item in authorized)
-            artifact = next(item for item in done['result']['artifacts'] if item['name'] == 'workflow-python.txt')
+            artifact = next(item for item in done[-1]['result']['artifacts'] if item['name'] == 'workflow-python.txt')
             assert client.request(artifact['url']).decode('utf-8') == PYTHON_TEXT
-            report.update(chat_started_computer_task=True, automatic_execution=True, awaiting_approval=False,
+            history = client.request('/api/messages?' + urllib.parse.urlencode({'scope_id': scope['id']}))
+            final = [item for item in history if item['role'] == 'assistant' and item.get('metadata', {}).get('job_ids')]
+            assert len(final) == 1 and final[0]['id'] == result['message_id'] and final[0]['metadata']['job_ids'] == job_ids
+            report.update(unified_chat_inline_tools=True, same_chat_final_reply=True, automatic_execution=True, awaiting_approval=False,
                 ordered_real_tools=['write_file', 'execute_python'], artifact_download=True)
 
-            stop_result = client.request('/api/chat', {'scope_id': scope['id'],
-                'text': '请运行本机 Python 脚本执行隔离的停止功能验收。' + STOP_MARKER})
-            stop_id = task_from_chat(stop_result)
             pid_file = workspace / 'workflow-stop-pid.txt'
             def child_started():
                 try:
@@ -306,13 +335,17 @@ def main():
                     return int(value) if value.isdecimal() and int(value) > 0 else None
                 except OSError:
                     return None
-            child_pid = wait_until(child_started, timeout=15, message='Stop-test Python child did not start')
-            assert process_active(child_pid)
-            client.request('/api/jobs/' + stop_id + '/cancel', {})
+            # Keep the request open until the actual child starts, then close
+            # it just as Chat's "stop this turn" action closes the HTTP stream.
+            with client.stream('/api/chat', {'scope_id': scope['id'], 'stream': True,
+                    'text': '请运行本机 Python 脚本执行隔离的停止功能验收。' + STOP_MARKER}) as stream:
+                stop_id = first_inline_job(stream)
+                child_pid = wait_until(child_started, timeout=15, message='Stop-test Python child did not start')
+                assert process_active(child_pid)
             stopped, _ = wait_job(client, stop_id, {'cancelled'})
             wait_until(lambda: not process_active(child_pid), timeout=8, message='Cancelled job left its Python child running')
             assert not (workspace / 'workflow-stop-forbidden.txt').exists()
-            report.update(stop_cancelled=True, cancelled_child_exited=True)
+            report.update(stop_cancelled=True, chat_disconnect_cancelled=True, inline_job_sse=True, cancelled_child_exited=True)
 
             assert smoke_qq(client, by_model['workflow-beta'], record['port'])
             report.update(qq_reverse_private_reply=True, qq_delivery_ack=True)

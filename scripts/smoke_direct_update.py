@@ -7,6 +7,7 @@ wrong target version exercises health-check failure and rollback.
 """
 from __future__ import annotations
 import argparse
+import ctypes
 import hashlib
 import json
 import os
@@ -24,13 +25,102 @@ from shiori import __version__
 from shiori import updates
 
 
+TERMINAL_STATUSES = {'completed', 'failed', 'unknown', 'recovery_required'}
+
+
+def bounded_seconds(value):
+    seconds = int(value)
+    if not 30 <= seconds <= 900:
+        raise argparse.ArgumentTypeError('Timeout must be between 30 and 900 seconds')
+    return seconds
+
+
+class WorkerProcess:
+    """Keep a handle to this exact helper, avoiding recycled-PID cleanup."""
+    def __init__(self, pid):
+        from ctypes import wintypes
+        self.kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+        self.kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        self.kernel.OpenProcess.restype = wintypes.HANDLE
+        self.kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+        self.kernel.WaitForSingleObject.restype = wintypes.DWORD
+        self.kernel.TerminateProcess.argtypes = [wintypes.HANDLE, wintypes.UINT]
+        self.kernel.TerminateProcess.restype = wintypes.BOOL
+        self.kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+        self.kernel.CloseHandle.restype = wintypes.BOOL
+        self.handle = self.kernel.OpenProcess(0x100000 | 0x0001, False, pid)
+        if not self.handle and ctypes.get_last_error() != 87:
+            raise ctypes.WinError(ctypes.get_last_error())
+
+    def wait(self, seconds=0):
+        if not self.handle:
+            return True
+        result = self.kernel.WaitForSingleObject(self.handle, int(seconds * 1000))
+        if result == 0xFFFFFFFF:
+            raise ctypes.WinError(ctypes.get_last_error())
+        return result == 0
+
+    def terminate(self):
+        if not self.wait() and not self.kernel.TerminateProcess(self.handle, 1):
+            raise ctypes.WinError(ctypes.get_last_error())
+
+    def close(self):
+        if self.handle:
+            self.kernel.CloseHandle(self.handle)
+            self.handle = None
+
+
+def wait_for_update(result_path, worker, seconds):
+    started = time.monotonic()
+    deadline = started + seconds
+    result, last_status = {}, None
+    while time.monotonic() < deadline:
+        try:
+            result = json.loads(result_path.read_text('utf-8'))
+        except (OSError, ValueError):
+            pass
+        status = result.get('status')
+        if status != last_status:
+            print(f'update_status={status} elapsed={time.monotonic() - started:.1f}s', flush=True)
+            last_status = status
+        # A terminal file alone does not exclude a later restart by the helper.
+        if status in TERMINAL_STATUSES and worker.wait():
+            return result
+        time.sleep(.25)
+    raise AssertionError(f'Update helper did not finish within {seconds}s: {result}')
+
+
+def settle_worker(worker, seconds):
+    """Do not leave a helper able to relaunch the QA app after test failure."""
+    deadline = time.monotonic() + seconds
+    while not worker.wait():
+        if time.monotonic() >= deadline:
+            worker.terminate()
+            if not worker.wait(15):
+                raise AssertionError('QA update helper could not be stopped')
+            return False
+        time.sleep(.25)
+    return True
+
+
+def port_open(port):
+    with socket.socket() as connection:
+        connection.settimeout(.2)
+        return connection.connect_ex(('127.0.0.1', port)) == 0
+
+
 def main():
+    smoke_started = time.monotonic()
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--program',type=Path,required=True)
     parser.add_argument('--archive',type=Path,required=True)
     parser.add_argument('--work-dir',type=Path,required=True)
     parser.add_argument('--mode',choices=['installed','portable'],default='installed')
     parser.add_argument('--rollback',action='store_true')
+    parser.add_argument('--update-timeout',type=bounded_seconds,default=360,
+                        help='Seconds for extraction, replacement, health check and rollback (30-900)')
+    parser.add_argument('--cleanup-timeout',type=bounded_seconds,default=180,
+                        help='Additional seconds to let an unfinished helper settle before QA cleanup (30-900)')
     args=parser.parse_args()
     if sys.platform!='win32':raise RuntimeError('Frozen acceptance requires Windows')
     work=args.work_dir.resolve()
@@ -50,6 +140,8 @@ def main():
                               creationflags=subprocess.CREATE_NO_WINDOW)
     opener=urllib.request.build_opener(urllib.request.ProxyHandler({}),urllib.request.HTTPCookieProcessor())
     token=''
+    worker = None
+    output = None
     def request(path,body=None):
         headers={'Authorization':'Bearer '+token}
         if body is not None:headers['Content-Type']='application/json'
@@ -84,15 +176,11 @@ def main():
         with patch.object(updates,'application_base',lambda:target),patch.object(updates.os,'getpid',lambda:original.pid),patch.object(updates.sys,'argv',command):
             receipt=manager.launch_replacement(key)
         assert receipt['ok'] and receipt['worker_pid']
+        worker = WorkerProcess(receipt['worker_pid'])
         request('/api/shutdown',{})
         original.wait(timeout=35)
-        result_path=data/'updates/install-result.json';deadline=time.monotonic()+150
-        result={}
-        while time.monotonic()<deadline:
-            try:result=json.loads(result_path.read_text('utf-8'))
-            except (OSError,ValueError):pass
-            if result.get('status') in ('completed','failed','unknown'):break
-            time.sleep(.25)
+        result_path=data/'updates/install-result.json'
+        result=wait_for_update(result_path,worker,args.update_timeout)
         assert result.get('status')==('failed' if args.rollback else 'completed'),result
         deadline=time.monotonic()+30
         while time.monotonic()<deadline:
@@ -112,13 +200,35 @@ def main():
         output={'passed':True,'version':__version__,'mode':args.mode,'rollback':args.rollback,'frozen_helper':True,
                 'status':result['status'],'same_port':True,'password_preserved':True,'memory_preserved':True,
                 'user_files_preserved':True,'data_backup':(folder/'data-backup').is_dir()}
-        (work/'result.json').write_text(json.dumps(output,indent=2),'utf-8');print(json.dumps(output))
     finally:
-        try:request('/api/shutdown',{})
-        except (OSError,ValueError):pass
+        # First release the original process in case handoff itself failed.
         if original.poll() is None:
+            try:request('/api/shutdown',{})
+            except (OSError,ValueError):pass
             try:original.wait(timeout=10)
             except subprocess.TimeoutExpired:original.terminate();original.wait(timeout=15)
+        helper_settled = True
+        try:
+            if worker is not None:
+                helper_settled = settle_worker(worker,args.cleanup_timeout)
+        finally:
+            if worker is not None:worker.close()
+            # The helper can no longer start another instance. Stop only this
+            # fresh QA data directory, then verify both discovery and listener.
+            stopped=subprocess.run([str(exe),'--data-dir',str(data),'--stop','--no-browser'],cwd=target,
+                                   stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,
+                                   timeout=40,creationflags=subprocess.CREATE_NO_WINDOW)
+            deadline=time.monotonic()+30
+            while time.monotonic()<deadline:
+                if not (data/'server.json').exists() and not port_open(port):break
+                time.sleep(.2)
+            else:raise AssertionError(f'QA instance did not exit after cleanup (stop exit={stopped.returncode})')
+        assert helper_settled,'QA helper exceeded cleanup deadline and required termination; acceptance failed'
+        print('cleanup=complete helper_exited=true server_file_absent=true port_closed=true',flush=True)
+    # Never leave a passing result for a run whose cleanup did not complete.
+    output.update(elapsed_seconds=round(time.monotonic()-smoke_started,2),cleanup_verified=True,
+                  helper_exited=True,update_timeout_seconds=args.update_timeout)
+    (work/'result.json').write_text(json.dumps(output,indent=2),'utf-8');print(json.dumps(output))
 
 
 if __name__=='__main__':main()

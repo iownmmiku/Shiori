@@ -1,5 +1,7 @@
 """Validate the external EXE smoke fixture's protocol without starting an app."""
 import importlib.util
+import copy
+import io
 import json
 from pathlib import Path
 
@@ -76,3 +78,46 @@ def test_job_poll_fails_if_automatic_mode_ever_requires_approval():
     client = type('Client', (), {'request': lambda self, path: {'status': 'awaiting_approval', 'events': []}})()
     with pytest.raises(AssertionError, match='approval'):
         smoke.wait_job(client, 'isolated', {'completed'})
+
+
+def test_inline_fixture_uses_current_request_instead_of_first_history_message():
+    names = ['write_file', 'execute_python']
+    assert smoke.fixture_reply(body(names, marker=smoke.NORMAL_MARKER))[1] == 'chat'
+    request = body(names, marker=smoke.COMPUTER_MARKER)
+    request['messages'] += [{'role': 'assistant', 'content': 'earlier work completed'},
+                            {'role': 'user', 'content': smoke.STOP_MARKER}]
+    assert smoke.fixture_reply(request)[1] == 'computer_stop'
+
+
+def inline_result():
+    return {'reply': 'done', 'message_id': 'final',
+        'actions': [{'tool': name, 'ok': True, 'result': {'job_id': key}}
+                    for name, key in [('write_file', 'write'), ('execute_python', 'python')]],
+        'jobs': [{'id': key, 'inline': True, 'kind': 'computer', 'status': 'completed'} for key in ['write', 'python']]}
+
+
+def test_inline_receipt_contract_requires_two_completed_jobs_and_one_final_reply():
+    assert smoke.inline_jobs_from_chat(inline_result()) == ['write', 'python']
+    mutations = [
+        lambda value: value['actions'][0].update(ok=False),
+        lambda value: value['actions'][0].update(tool='start_computer_task'),
+        lambda value: value['jobs'][0].update(status='queued'),
+        lambda value: value['jobs'][0].update(inline=False),
+        lambda value: value.update(message_id=None),
+    ]
+    for mutate in mutations:
+        value = copy.deepcopy(inline_result())
+        mutate(value)
+        with pytest.raises(AssertionError):
+            smoke.inline_jobs_from_chat(value)
+
+
+def test_inline_job_stream_requires_actual_progress_not_only_text_or_final_result():
+    records = [{'type': 'start'}, {'type': 'delta', 'text': 'working'},
+               {'type': 'job', 'data': {'id': 'running', 'inline': True, 'kind': 'computer'}}]
+    raw = b': heartbeat\n\n' + b''.join(b'data: ' + json.dumps(value).encode() + b'\n\n' for value in records)
+    assert smoke.first_inline_job(io.BytesIO(raw)) == 'running'
+    for event in [{'type': 'error'}, {'type': 'result', 'data': {}},
+                  {'type': 'job', 'data': {'id': 'background', 'kind': 'computer'}}]:
+        with pytest.raises(AssertionError):
+            smoke.first_inline_job(io.BytesIO(b'data: ' + json.dumps(event).encode() + b'\n\n'))
