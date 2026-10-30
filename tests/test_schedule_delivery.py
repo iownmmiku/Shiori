@@ -477,14 +477,33 @@ async def test_stop_after_handoff_preserves_other_members_sources_and_authority(
 async def test_twenty_busy_inputs_are_persisted_immediately_and_coalesce_one_blocked_review(setup, monkeypatch):
     _, _, chat, flow, sent, _, schedule, delivery = attach(setup)
     import shiori.schedule_delivery as module
-    monkeypatch.setattr(module, 'ADAPTIVE_REVIEW_DELAY', .01)
+    from types import SimpleNamespace
+
+    review_delay_started = asyncio.Event()
+    release_review = asyncio.Event()
+
+    async def gated_review_delay(seconds):
+        assert seconds == module.ADAPTIVE_REVIEW_DELAY
+        review_delay_started.set()
+        await release_review.wait()
+
+    # Hold only this module's collection delay. A 10 ms wall-clock sleep lets
+    # slower runners start the review before all twenty inputs have arrived.
+    # Keep asyncio itself unchanged for ingress, fixture timeouts and teardown.
+    monkeypatch.setattr(module, 'asyncio', SimpleNamespace(**{
+        **vars(asyncio), 'sleep': gated_review_delay,
+    }))
     schedule.settings['adaptive_enabled'] = True
     schedule.review_blocker = asyncio.Event()
     try:
         for index in range(20):
             result = await asyncio.wait_for(send(flow, f'连续留言{index}', user=str(100 + index)), .3)
             assert result['code'] == 'schedule_buffered'
+            assert sum(row['count'] for row in delivery.status()) == index + 1
         assert sum(row['count'] for row in delivery.status()) == 20
+        await asyncio.wait_for(review_delay_started.wait(), 1)
+        assert not schedule.reviews and len(delivery._reviews) == 1
+        release_review.set()
         await asyncio.wait_for(schedule.review_started.wait(), 1)
         assert len(schedule.reviews) == 1 and len(delivery._reviews) == 1
         combined = schedule.reviews[0][1]
@@ -494,8 +513,10 @@ async def test_twenty_busy_inputs_are_persisted_immediately_and_coalesce_one_blo
         # New input during the blocked request stays on the same review task.
         await asyncio.wait_for(send(flow, '等待模型时的新留言', user='404'), .3)
         assert len(schedule.reviews) == 1
+        assert sum(row['count'] for row in delivery.status()) == 21
         assert not chat.calls and not chat.provider.calls and not sent
     finally:
+        release_review.set()
         schedule.review_blocker.set()
         await delivery.stop()
         await flow.close()
