@@ -15,6 +15,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from .access import manager_for, normalize_administrators
 from .attachments import AttachmentLibrary, bounded_parse
 from .computer import ComputerService
+from .local_harness import LocalHarness
 from .distillation import DiscoveryError, DistillationService
 from .documents import MAX_BYTES, extract_document
 from .qq_pairing import LocalQQPairing
@@ -29,7 +30,8 @@ def install_experience(app, store, settings, provider, chat, router, data_dir, r
     computer = ComputerService(store, settings, provider, access, runs, data_dir, scope_allowed=lambda scope_id: chat.social._allowed(scope_id))
     computer.chat=chat
     distillation = DistillationService(provider, data_dir, search_fn=chat.search.search)
-    runs.register('computer', computer.run, computer.guard)
+    local_harness = LocalHarness(computer)
+    runs.register('computer', local_harness.run, local_harness.guard)
     def distill_guard(job):
         return not settings.get().get('paused') and access.is_admin(job['identity'])
     async def distill_handler(ctx, payload):
@@ -59,6 +61,7 @@ def install_experience(app, store, settings, provider, chat, router, data_dir, r
         return runs.submit('tool_summary',{'tool_run_id':item['id']},identity=identity,scope_id=item['scope_id'],user_id=item['user_id'],title='整理工具执行结果')
     app.state.resume_tool_result=resume_tool
     chat.computer, chat.runs = computer, runs
+    chat.local_harness = local_harness
     app.state.access, app.state.runs, app.state.computer, app.state.distillation = access, runs, computer, distillation
     library = AttachmentLibrary(data_dir, store, runs)
     app.state.attachments = library
@@ -82,6 +85,11 @@ def install_experience(app, store, settings, provider, chat, router, data_dir, r
 
     async def completed(job):
         # The control plane records actual completion independently of delivery.
+        if job.get('inline'):
+            runs._jobs[job['id']]['delivery_status'] = 'inline'
+            runs._save()
+            library.collect()
+            return
         result = job.get('result') or {}
         reply = str(result.get('reply') or ('人格草稿已生成，可预览后应用。'
                     if job['kind'] == 'distillation' and job['status'] == 'completed'

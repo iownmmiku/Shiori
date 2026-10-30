@@ -35,7 +35,12 @@
 :root button:focus-visible,:root a:focus-visible,:root input:focus-visible,:root select:focus-visible,:root textarea:focus-visible,:root summary:focus-visible{outline:2px solid var(--teal);outline-offset:2px}
 
 /* sidebar: the terminal index */
-:root .sidebar{background:var(--panel);border-right:1px solid var(--line);box-shadow:none;padding-top:30px}
+:root .sidebar{background:var(--panel);border-right:1px solid var(--line);box-shadow:none;padding-top:30px;overflow:hidden}
+:root #sidebar>.brand,:root #sidebar>.workspace-label,:root #sidebar>.sidebar-bottom{flex-shrink:0}
+:root #sidebar>#navigation{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;scrollbar-gutter:stable}
+:root #sidebar .workspace-label{white-space:nowrap;min-width:0;letter-spacing:.5px;gap:5px}
+:root #sidebar .workspace-label>span:last-child{flex:none;white-space:nowrap}
+:root #sidebar .nav-item>span:not(.nav-indicator){min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 :root .brand{color:var(--ink);gap:12px}
 :root .brand strong{font-family:var(--lab);font-weight:700;font-size:27px;letter-spacing:2.2px;text-transform:uppercase;line-height:1.05;color:var(--ink)}
 :root .brand-dot{color:var(--teal)}

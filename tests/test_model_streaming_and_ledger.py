@@ -183,6 +183,39 @@ def test_opt_in_timeout_fallback_retains_cost_and_never_replays_tool_continuatio
     assert sum(bool(item.get('unconfirmed')) for item in store.list_usage())==1
 
 
+@pytest.mark.parametrize('failure', [httpx.ReadError, httpx.RemoteProtocolError])
+@pytest.mark.parametrize('fallback,continuation', [(True, False), (False, False), (True, True)])
+def test_hard_stream_disconnect_obeys_uncertain_fallback(setup_provider, failure, fallback, continuation):
+    provider, settings, store, transport = setup_provider
+    settings.update({'providers': [dict(PROVIDER_DEFAULTS, id=key, model=key,
+        base_url=f'https://{key}.invalid/v1', stream_mode='on', timeout_fallback=fallback)
+        for key in ('a', 'b')], 'routing': {'chat': 'a', 'fallback': ['b']}})
+    class BrokenStream(Chunks):
+        async def __aiter__(self):
+            yield sse({'content': 'incomplete reply'})
+            raise failure('fixture relay disconnected')
+    calls = []
+    def handler(request):
+        calls.append(request.url.host)
+        if request.url.host == 'a.invalid':
+            return httpx.Response(200, headers={'content-type': 'text/event-stream'}, stream=BrokenStream([]))
+        return httpx.Response(200, json={'choices': [{'message': {'content': '完整的备用回答'}, 'finish_reason': 'stop'}]})
+    transport(handler)
+    messages = [{'role': 'user', 'content': 'hi'}]
+    if continuation:
+        messages.append({'role': 'tool', 'tool_call_id': 'c1', 'content': 'already executed'})
+    if fallback and not continuation:
+        assert asyncio.run(provider.complete(messages))['content'] == '完整的备用回答'
+        assert calls == ['a.invalid', 'b.invalid']
+    else:
+        from shiori.provider import ProviderConnectionError
+        with pytest.raises(ProviderConnectionError):
+            asyncio.run(provider.complete(messages))
+        assert calls == ['a.invalid']
+    assert sum(bool(item.get('unconfirmed')) for item in store.list_usage()) == 1
+    assert not provider._reservations
+
+
 def test_stream_capability_rejection_retries_only_rejected_request(setup_provider):
     provider,_,store,transport=setup_provider
     payloads=[]

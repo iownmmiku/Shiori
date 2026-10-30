@@ -7,6 +7,7 @@ from .output import strip_memory_citations
 
 
 _sink = ContextVar('shiori_chat_preview', default=None)
+_activity_sink = ContextVar('shiori_chat_activity', default=None)
 _filter = ContextVar('shiori_chat_preview_filter', default=None)
 MAX_ADJUSTED_PREVIEW_CHARS = 120000
 MAX_ADJUSTED_PREVIEW_CHECKPOINTS = 20
@@ -14,6 +15,22 @@ MAX_ADJUSTED_PREVIEW_CHECKPOINTS = 20
 
 def preview_active():
     return _sink.get() is not None
+
+
+@contextmanager
+def activity_events(sink):
+    token = _activity_sink.set(sink)
+    try:
+        yield
+    finally:
+        _activity_sink.reset(token)
+
+
+def emit_activity(kind, data):
+    """Application-owned tool progress, separate from untrusted model text."""
+    sink = _activity_sink.get()
+    if sink is not None:
+        sink(kind, data)
 
 
 class _PublicText:

@@ -94,6 +94,87 @@ def test_remote_update_policy_cannot_be_enabled_by_remote_api(tmp_path):
         assert local.post('/api/updates/remote-policy',json={'enabled':True}).status_code==200
         assert remote.get('/api/updates').json()['remote_switch_enabled'] is True
 
+
+@pytest.mark.parametrize('status,body,accepted,read_error', [
+    (200, b'{"ok":true}', True, False),
+    (200, b'{"ok":false}', False, False),
+    (200, b'not JSON', False, False),
+    (403, b'{"detail":"fixture denied"}', False, False),
+    (200, b'{"ok":true}', False, True),
+])
+def test_failed_health_drains_shutdown_reply_before_wait_or_rollback(tmp_path, monkeypatch, status, body, accepted, read_error):
+    import http.client
+    import io
+    import urllib.error
+
+    target, data = tmp_path / 'program', tmp_path / 'data'
+    target.mkdir(); data.mkdir()
+    (target / 'shiori.exe').write_bytes(b'old-program')
+    (data / 'admin.token').write_text('fixture-token')
+    (data / 'qunyu.db').write_bytes(b'old-data')
+    work = data / 'updates' / ('d' * 32)
+    work.mkdir(parents=True)
+    package = work / 'update.zip'
+    archive(package, {'shiori.exe': b'new-program'})
+    config = {'target': str(target), 'data': str(data), 'archive': str(package),
+        'sha256': worker.digest(package), 'download_id': 'd' * 32, 'kind': 'portable',
+        'version': '0.1.4', 'parent_pid': 42, 'port': 18700, 'launch': ['fixture-never-launched']}
+    path = work / 'switch.json'
+    path.write_text(json.dumps(config))
+
+    class Response(io.BytesIO):
+        status = 200
+        consumed = False
+        def read(self, size=-1):
+            if read_error:
+                raise http.client.IncompleteRead(super().read(4), len(body) - 4)
+            return super().read(size)
+        def close(self):
+            if not self.closed:
+                self.consumed = self.tell() == len(body)
+            super().close()
+
+    response = Response(body)
+    requests, waits, launches = [], [], []
+    def open_response(request, *, timeout):
+        requests.append(request)
+        assert request.full_url == 'http://127.0.0.1:18700/api/shutdown'
+        assert request.get_header('Authorization') == 'Bearer fixture-token'
+        assert timeout == 3
+        if status != 200:
+            raise urllib.error.HTTPError(request.full_url, status, 'fixture denied', {}, response)
+        return response
+
+    def wait(*, timeout):
+        assert response.closed and response.consumed, 'read the complete shutdown response before waiting for exit'
+        waits.append(timeout)
+
+    def launch(*args, **kwargs):
+        launches.append(args)
+        if len(launches) == 1:
+            (data / 'qunyu.db').write_bytes(b'migrated-data')
+        return SimpleNamespace(poll=lambda: None, wait=wait)
+
+    monkeypatch.setattr(worker.urllib.request, 'build_opener', lambda *_: SimpleNamespace(open=open_response))
+    monkeypatch.setattr(worker, 'wait_parent', lambda *args, **kwargs: None)
+    monkeypatch.setattr(worker.subprocess, 'Popen', launch)
+    monkeypatch.setattr(worker, 'health', lambda *args, **kwargs: False)
+    worker.run(path)
+    assert len(requests) == 1 and response.closed
+    assert response.consumed is (not read_error)
+    result = json.loads((data / 'updates' / 'install-result.json').read_text('utf-8'))
+    if accepted:
+        assert waits == [30] and len(launches) == 2
+        assert result['status'] == 'failed'
+        assert (target / 'shiori.exe').read_bytes() == b'old-program'
+        assert (data / 'qunyu.db').read_bytes() == b'old-data'
+    else:
+        assert not waits and len(launches) == 1
+        assert result['status'] == 'unknown'
+        assert (target / 'shiori.exe').read_bytes() == b'new-program'
+        assert (data / 'qunyu.db').read_bytes() == b'migrated-data'
+
+
 def test_update_health_gate_blocks_mutations_and_chat_but_keeps_status(tmp_path):
     app=create_app(tmp_path,start_workers=False)
     with TestClient(app) as client:
@@ -129,14 +210,21 @@ def test_real_source_program_replacement_restarts_on_same_port_and_preserves_mem
     def shutdown():
         token=(data/'admin.token').read_text().strip()
         request=urllib.request.Request(f'http://127.0.0.1:{port}/api/shutdown',data=b'',headers={'Authorization':'Bearer '+token})
-        opener.open(request,timeout=3).close()
+        with opener.open(request,timeout=3) as response:
+            assert json.load(response)['ok'] is True
     try:
         deadline=time.monotonic()+30
         while not (data/'admin.token').exists() and time.monotonic()<deadline:time.sleep(.1)
         assert worker.health(data,port,__version__,seconds=30)
         from shiori.db import Store
         store=Store(data);saved=store.create_memory({'content':'升级前已经存在的记忆'});store.close()
-        shutdown();first.wait(timeout=30)
+        shutdown()
+        try:
+            first.wait(timeout=30)
+        except subprocess.TimeoutExpired:
+            log = data / 'runtime.log'
+            tail = log.read_text('utf-8', errors='replace')[-8000:] if log.exists() else '(no runtime.log)'
+            pytest.fail(f'Initial instance did not exit within 30s after confirmed shutdown. Runtime log:\n{tail}')
         config={'target':str(target),'data':str(data),'archive':str(package),'sha256':worker.digest(package),'download_id':'c'*32,
                 'kind':'source','version':__version__,'parent_pid':first.pid,'port':port,'launch':launch}
         path=work/'switch.json';path.write_text(json.dumps(config))

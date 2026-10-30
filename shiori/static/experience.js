@@ -12,7 +12,7 @@ window.ShioriExperience = (() => {
   const safeLink = value => /^(https?:\/\/|\/(?!\/))/i.test(String(value || "")) ? String(value) : "";
   const safeId = id => encodeURIComponent(String(id || ""));
   const _pageRuntime={get liveSource(){return liveSource},set liveSource(value){liveSource=value},get watchedJob(){return watchedJob},set watchedJob(value){watchedJob=value},get renderedPage(){return renderedPage},set renderedPage(value){renderedPage=value},get pairTimer(){return pairTimer},set pairTimer(value){pairTimer=value},get attachments(){return attachments},set attachments(value){attachments=value},get attachmentScope(){return attachmentScope},set attachmentScope(value){attachmentScope=value},get distillDraft(){return distillDraft},set distillDraft(value){distillDraft=value},get currentJob(){return currentJob},set currentJob(value){currentJob=value},get pair(){return pair},set pair(value){pair=value}};
-  const {renderChat,sessionSidebar,attachmentChips,sendChat,releaseAttachments,removeAttachment,flushCollected,cancelCollected,saveDraft:saveChatDraft,parkDraft:parkChatDraft,activateScope:activateChatScope,handleAction:chatAction,handleSubmit:chatSubmit,handleInput:chatInput,close:closeChat}=window.ShioriExperienceChat.create(_pageRuntime,{inactive,jobDetail:(...args)=>jobDetail(...args)});
+  const {renderChat,sessionSidebar,attachmentChips,sendChat,releaseAttachments,removeAttachment,flushCollected,cancelCollected,saveDraft:saveChatDraft,parkDraft:parkChatDraft,activateScope:activateChatScope,refreshChatMessages,renderChatJobs,handleAction:chatAction,handleSubmit:chatSubmit,handleInput:chatInput,close:closeChat}=window.ShioriExperienceChat.create(_pageRuntime,{inactive,jobDetail:(...args)=>jobDetail(...args),onJob:receiveChatJob});
   const {jobDetail,renderJobs}=window.ShioriExperienceJobs.create(_pageRuntime,{jobNames,inactive,safeId,safeLink});
   const {renderSettings,localConnectorPanel,schedulerPanel,pollPairing}=window.ShioriExperienceConfig.create(_pageRuntime,{safeId});
   const {distillChooser,characterForm,generateForm,profilePanel,profileForm,profileBindForm,corpusForm,showDistillPreview}=window.ShioriExperiencePersona.create(_pageRuntime,{safeLink});
@@ -36,29 +36,46 @@ window.ShioriExperience = (() => {
     if (!job || inactive(job)) { closeStream(); return; }
     if (watchedJob === job.id && liveSource) return;
     closeStream(); watchedJob = job.id;
+    const expected = job.id, generation = state.authGeneration || 0;
+    const current = () => watchedJob === expected && generation === (state.authGeneration || 0) && state.authenticated !== false;
     liveSource = new EventSource(`/api/jobs/${safeId(job.id)}/stream`);
     const update = event => {
+      if (!current()) return;
       let data; try { data = JSON.parse(event.data); } catch { return; }
       const received = data.job || data;
-      if (received.id === watchedJob && received.status) applyLiveJob(received);
-      else api(`/api/jobs/${safeId(watchedJob)}`).then(value => applyLiveJob(unwrapJob(value))).catch(() => {});
+      if (received.id === expected && received.status) applyLiveJob(received);
+      else api(`/api/jobs/${safeId(expected)}`).then(value => { if (current()) applyLiveJob(unwrapJob(value)); }).catch(() => {});
     };
     liveSource.onmessage = update;
     for (const name of ["job","progress","update","completed","approval","state","snapshot"]) liveSource.addEventListener(name,update);
-    liveSource.onerror = () => { closeStream(); if ($("#live-job-detail")) $("#live-job-detail").insertAdjacentHTML("beforeend",'<p class="help-caption">实时连接已中断，任务仍保存在后台。点击刷新查看最新状态。</p>'); };
+    liveSource.onerror = () => { if (!current()) return; closeStream(); if ($("#live-job-detail")) $("#live-job-detail").insertAdjacentHTML("beforeend",'<p class="help-caption">实时连接已中断，任务仍保存在后台。点击刷新查看最新状态。</p>'); };
   }
 
   function closeStream() { if (liveSource) liveSource.close(); liveSource = null; watchedJob = ""; }
+  function receiveChatJob(job) {
+    applyLiveJob(job);
+    if (state.page === "chat" && job.scope_id === state.scope && !inactive(job)) watch(job);
+  }
+  async function refreshChangedJob(id,result) {
+    const job = unwrapJob(result);
+    if (job?.id === id && job.status) receiveChatJob(job);
+    else receiveChatJob(unwrapJob(await api(`/api/jobs/${safeId(id)}`)));
+    // Approving/stopping a tool in a streaming turn must not replace its
+    // composer or preview with a full page load.
+    if (state.page !== "chat" && state.page !== "jobs") await bootstrap();
+  }
   function applyLiveJob(job) {
+    if (!job?.id || !job.status || state.authenticated === false) return;
     const previous = (state.liveJobs || []).findIndex(item => item.id === job.id);
     if (previous >= 0) state.liveJobs[previous] = job;
+    else (state.liveJobs ||= []).unshift(job);
     currentJob = job;
-    if (state.page === "chat" && job.scope_id === state.scope && $("#live-job-detail")) $("#live-job-detail").innerHTML = jobDetail(job,true);
+    if (state.page === "chat" && job.scope_id === state.scope && $("#live-job-detail")) $("#live-job-detail").innerHTML = renderChatJobs ? renderChatJobs() : jobDetail(job,true);
     if ($('#modal [data-job-id]')?.dataset.jobId === job.id && !$('#modal form')) { const body=$('#modal .modal-body'); if(body)body.innerHTML=jobDetail(job); }
     if (state.page === "jobs") { const existing = $$('[data-job-id]').find(item => item.dataset.jobId === job.id); if (existing) existing.outerHTML = jobDetail(job); }
-    if (inactive(job)) { closeStream(); if (state.page === "chat") refreshMessages().catch(() => {}); }
+    if (inactive(job)) { closeStream(); if (state.page === "chat" && !state.sending) refreshMessages().catch(() => {}); }
   }
-  async function refreshMessages() { const scopeId=state.scope,revision=state.renderId; const messages=rows(await api(`/api/messages?${query({scope_id:scopeId})}`)); if(state.page!=="chat" || state.scope!==scopeId || state.renderId!==revision)return;state.messages=messages;const feed = $("#chat-feed"); if (feed) { const detail = $("#live-job-detail")?.outerHTML || '<div id="live-job-detail"></div>'; feed.innerHTML = state.messages.map(renderMessage).join("") + detail; feed.scrollTop = feed.scrollHeight; } }
+  async function refreshMessages() { const scopeId=state.scope,revision=state.renderId; const messages=rows(await api(`/api/messages?${query({scope_id:scopeId,limit:81})}`)); if(state.page!=="chat" || state.scope!==scopeId || state.renderId!==revision)return; const html=window.ShioriExperience.refreshChatMessages ? window.ShioriExperience.refreshChatMessages(messages,scopeId) : messages.map(renderMessage).join(""); if(html===null)return;state.messages=window.ShioriExperience.refreshChatMessages?state.messages:messages;const feed = $("#chat-feed"); if (feed) { const detail = $("#live-job-detail")?.outerHTML || '<div id="live-job-detail"></div>'; feed.innerHTML = html + detail; feed.scrollTop = feed.scrollHeight; } }
 
 
   // Small Markdown reader: raw HTML, remote images and script URLs remain text.
@@ -118,7 +135,7 @@ window.ShioriExperience = (() => {
     else if (action === "distill-corpus") corpusForm();
     else if (action === "choose-corpus") $("#corpus-input").click();
     else if (action === "view-job") await showJob(id);
-    else if (action === "job-cancel") { await api(`/api/jobs/${safeId(id)}/cancel`,{method:"POST",body:{}}); toast("已请求停止任务"); closeModal(); await bootstrap(); }
+    else if (action === "job-cancel") { const result=await api(`/api/jobs/${safeId(id)}/cancel`,{method:"POST",body:{}}); toast("已请求停止任务"); closeModal(); await refreshChangedJob(id,result); }
     else if (action === "job-approve") { const approvalId = target.dataset.approval, job = unwrapJob(await api(`/api/jobs/${safeId(id)}`)); if (job.approval?.id !== approvalId || job.status !== "awaiting_approval") throw new Error("这次审批已变化，请刷新任务。"); openModal("批准这一次动作",`${job.title || "任务"} · ${id}`,`<input type="hidden" name="job_id" value="${e(id)}"><input type="hidden" name="approval_id" value="${e(approvalId)}"><p class="record-text">${e(job.approval.summary)}</p><pre class="tool-review-json">${e(toolJSON(job.approval.details,12000))}</pre><p class="help-caption">批准只对本任务的本次动作生效；执行后自动继续任务。</p>`,"job-approval",null,"批准并继续"); }
     else if (action === "apply-distill") {
       const job=unwrapJob(await api(`/api/jobs/${safeId(id)}`)), result=job.result || {};
@@ -129,7 +146,7 @@ window.ShioriExperience = (() => {
     else if (action === "select-local-qq") { const form=target.closest("form");$('[name="webui_url"]',form).value=target.dataset.url;$('[name="adapter"]',form).value=target.dataset.adapter; }
     else if (action === "discover-local-qq") { const form=target.closest("form");target.disabled=true;try { const result=await api("/api/qq/local/discover",{method:"POST",body:{}});$("#local-qq-result").innerHTML=connectionResult(result); } finally { target.disabled=false; } }
     else if (action === "computer-settings") { await navigate("settings"); $("#computer-section")?.scrollIntoView({block:"start"}); }
-    else if (action === "computer-chat") { if (!state.scope.startsWith("web:")) state.scope=state.scopes.find(item=>item.id.startsWith("web:"))?.id || "web:default";state.chatMode="computer";await navigate("chat"); }
+    else if (action === "computer-chat") { if (!state.scope.startsWith("web:")) state.scope=state.scopes.find(item=>item.id.startsWith("web:"))?.id || "web:default";await navigate("chat"); }
     else if (action === "new-admin") openModal("添加管理员账号","填写连接器提供的真实发送者 ID。官方用户 OpenID 与普通 QQ 号不同。",`<div class="form-grid">${select("platform","账号来源",[["onebot","NapCat / SnowLuma（QQ 号）"],["qqofficial","QQ 官方机器人（OpenID）"]],"onebot","data-full")}${field("account_id","账号 ID","","text","不要填写昵称。","required data-full")}${field("label","显示备注","","text","例如：我的 QQ、小号。","data-full")}${field("instance_id","连接实例（可选）","","text","留空时由服务端按当前连接处理。","data-full")}</div>`,"new-admin",null,"添加管理员");
     else if (action === "remove-admin") await confirmAction("移除这个管理员？","后续电脑操作和任务继续时会重新校验权限。已发生的操作不会撤销。",async()=>{await api(`/api/admins/${safeId(id)}`,{method:"DELETE"});},"移除账号");
     else if (action === "pair-admin" || action === "pair-admin-auto") { pair=await api("/api/admins/pairing",{method:"POST",body:{automatic:action === "pair-admin-auto"}});openModal("绑定我的 QQ","使用目标 QQ 私聊机器人发送下方配对码。60秒快速配对将自动绑定，手动模式需回到此处核对账号。",`<div class="pairing-code">${e("/绑定 " + (pair.code || ""))}</div><p class="help-caption">有效至 ${e(fmt(typeof pair.expires_at === "number" ? pair.expires_at * 1000 : pair.expires_at,true))}。配对码只用于本次绑定。</p>${button("检查绑定消息","check-admin-pairing","primary","refresh")}<div id="pairing-result"></div>`); if(pair.automatic){$("#pairing-result").textContent="配对模式已开启60秒，持码账号私聊发送后将自动成为管理员。请只向自己的账号提供配对码。";pairTimer=setTimeout(pollPairing,1000);} }
@@ -228,7 +245,7 @@ window.ShioriExperience = (() => {
     else if(kind === "time-awareness") {await api('/api/settings',{method:'PUT',body:{time:{awareness_enabled:!!data.awareness_enabled,timezone:data.timezone}}});toast('时间设置已保存');await bootstrap();}
     else if(kind === "timezone-settings") {await api('/api/settings',{method:'PUT',body:{time:{timezone:data.timezone}}});toast('时区已保存');await bootstrap();}
     else if(kind === "queue-settings") {await api('/api/settings',{method:'PUT',body:{scheduler:Object.fromEntries(['model_concurrency','model_queue_limit','background_queue_limit','scope_queue_limit'].map(k=>[k,Number(data[k])]))}});toast('调度设置已保存');await bootstrap();}
-    else if(kind === "job-approval") { await api(`/api/jobs/${safeId(data.job_id)}/approve`,{method:"POST",body:{approval_id:data.approval_id}});closeModal();toast("已批准本次动作，任务继续处理。");await bootstrap(); }
+    else if(kind === "job-approval") { const result=await api(`/api/jobs/${safeId(data.job_id)}/approve`,{method:"POST",body:{approval_id:data.approval_id}});closeModal();toast("已批准本次动作，任务继续处理。");await refreshChangedJob(data.job_id,result); }
     else if(kind === "local-qq") {
       const result=await api("/api/qq/local/connect",{method:"POST",body:data});
       if(result.requires_account){$("#local-qq-result").innerHTML=notice("连接器中有多个 QQ 账号，请选择一个后再次创建连接。","warning")+select("selected_account","选择 QQ 账号",(result.accounts || []).map(item=>[item.account_id,`${item.label || "QQ"} · ${item.account_id}`]),"","data-full");return true;}
@@ -246,7 +263,6 @@ window.ShioriExperience = (() => {
     if(typeof updateAdmissionPolicy === "function" && updateAdmissionPolicy(target))return true;
     if(window.ShioriUpdates && await window.ShioriUpdates.handleChange(target))return true;
     if(target.name === "selected_account"){const form=target.closest("form");$('[name="account_id"]',form).value=target.value;return true;}
-    if(target.id === "chat-mode"){state.chatMode=target.value;if(target.value === "computer" && !state.settings.computer?.enabled)toast("电脑任务尚未开启，请在机器人设置中开启并指定工作目录。",true);state.draft=$("#chat-text")?.value || state.draft;await renderPage();return true;}
     if(target.id === "corpus-input" && target.files[0]){const file=target.files[0];target.value="";if(file.size>24*1024*1024)throw new Error("ZIP 文件不能超过 24 MB。请减少语料后重试。");const data=new FormData();data.append("file",file);toast("正在识别 ZIP 中的可读文件与说话者…");const result=await api("/api/persona/distill/corpus",{method:"POST",body:data});distillDraft={...result,mode:"corpus"};showDistillPreview();return true;}
     if(target.id === "attachment-input" && target.files[0]){
       const file=target.files[0],scopeId=state.scope,page=state.page,renderId=state.renderId,
@@ -281,7 +297,7 @@ window.ShioriExperience = (() => {
 
   // Capture aliases before exported methods are installed; recursion is avoided.
   const originalPersonas = () => globalThis.renderPersonas();
-  return {saveChatDraft,parkChatDraft,activateChatScope,profilePanel,renderOverview,renderChat,sendChat,renderJobs,renderSettings,renderHelp,renderPersonas:async()=>{
+  return {saveChatDraft,parkChatDraft,activateChatScope,refreshChatMessages,renderChatJobs,profilePanel,renderOverview,renderChat,sendChat,renderJobs,renderSettings,renderHelp,renderPersonas:async()=>{
     const html=await originalPersonas();return html.replace(button("创造人格","new-persona","primary","plus"),button("直接生成","persona-generate","primary","spark")+button("蒸馏人格","start-distill","","spark")+button("手动创建","new-persona","","plus"));
   },baseSettings:()=>globalThis.renderSettings(),afterRender,handleAction,handleSubmit,handleChange,handleInput,markdown,jobDetail,connectionResult,costLabel,close:()=>{closeChat();clearTimeout(pairTimer);closeStream();}};
 })();

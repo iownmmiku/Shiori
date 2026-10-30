@@ -184,6 +184,46 @@ def test_process_rechecks_revocation_before_starting_or_creating_script(computer
     assert not started and not (service.data_dir / 'computer_history').exists()
 
 
+@pytest.mark.parametrize('taskkill_error', [None, 'timeout', 'oserror'])
+def test_budget_timeout_reaps_child_even_when_taskkill_or_first_wait_fails(computer, monkeypatch, taskkill_error):
+    import shiori.computer as module
+    service, settings, _ = computer
+    settings['computer']['timeout_seconds'] = 1
+    root = service.workspace()
+    calls = []
+    class Process:
+        pid = 12345
+        stdout = io.BytesIO(b'fixture output')
+        returncode = None
+        def poll(self): return self.returncode
+        def kill(self): calls.append('kill')
+        def wait(self, timeout=None):
+            calls.append(('wait', timeout))
+            if timeout is not None:
+                raise module.subprocess.TimeoutExpired('fixture child', timeout)
+            self.returncode = -9
+            return -9
+    process = Process()
+    def taskkill(*args, **kwargs):
+        calls.append('taskkill')
+        if taskkill_error == 'timeout':
+            raise module.subprocess.TimeoutExpired('taskkill fixture', 10)
+        if taskkill_error == 'oserror':
+            raise OSError('fixture helper unavailable')
+        return SimpleNamespace(returncode=0)
+    monkeypatch.setattr(module, 'os', SimpleNamespace(name='nt', environ={}))
+    monkeypatch.setattr(module.subprocess, 'CREATE_NO_WINDOW', 0, raising=False)
+    monkeypatch.setattr(module.subprocess, 'Popen', lambda *args, **kwargs: process)
+    monkeypatch.setattr(module.subprocess, 'run', taskkill)
+    clock = iter((0, 2))
+    monkeypatch.setattr(module, 'time', SimpleNamespace(monotonic=lambda: next(clock), sleep=lambda _: None))
+    with pytest.raises(ValueError, match='时限'):
+        service._process(context(), root, 'execute_shell', 'fixture-not-executed')
+    assert calls[-2:] == ['kill', ('wait', None)]
+    assert calls.count('kill') == (2 if taskkill_error else 1)
+    assert ('wait', 5) in calls and process.returncode == -9 and process.stdout.closed
+
+
 def test_frozen_python_uses_special_child_entry_without_bot_startup(computer, monkeypatch):
     service, _, _ = computer
     captured = {}

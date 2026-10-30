@@ -157,7 +157,8 @@ async function fullScriptIntegration(){
   }
   await new Promise(resolve=>setTimeout(resolve,10));
   assert.match(element("#navigation").innerHTML,/运行概览/);
-  assert.match(element("#content").innerHTML,/聊天模式/);
+  assert.doesNotMatch(element("#content").innerHTML,/id="chat-mode"/);
+  assert.match(element("#content").innerHTML,/开启电脑能力/);
   assert.match(element("#content").innerHTML,/本会话模型/);
   assert.ok(!element("#navigation").innerHTML.includes('data-page="models"'),'models are managed inside bot configuration');
   assert.match(element("#navigation").innerHTML,/机器人配置/);

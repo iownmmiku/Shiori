@@ -66,7 +66,7 @@ async function main(){
     assert.equal(f.ui.handleAction("scope-chat",{dataset:{id:"qq:42"}}),false,"QQ scope changes remain owned by the monitor handler");
     assert.equal(f.ui.handleSubmit("model",{}),false,"unrelated forms keep the synchronous dispatch path");
     assert.ok(html.includes("chat-workspace-standalone"));assert.ok(html.includes("&lt;写作&gt;"));assert.ok(!html.includes("QQ消息"));
-    assert.ok(html.includes("返回机器人管理"));assert.ok(html.includes('id="chat-mode"'));assert.ok(html.includes('data-action="attachment-options"'));
+    assert.ok(html.includes("返回机器人管理"));assert.ok(!html.includes('id="chat-mode"'));assert.ok(html.includes('开启电脑能力'));assert.ok(html.includes('data-action="computer-settings"'));assert.ok(html.includes('data-action="attachment-options"'));
     assert.ok(html.indexOf("文章构思")<html.indexOf("日常聊天"),"pinned conversations precede recent unpinned conversations");
     assert.equal(f.state.scopes[0].name,"日常聊天");
     f.ui.handleInput({id:"chat-conversation-search",value:"写作"});assert.ok(f.nodes.get("#chat-conversation-list").innerHTML.includes("文章构思"));assert.ok(!f.nodes.get("#chat-conversation-list").innerHTML.includes("日常聊天"));

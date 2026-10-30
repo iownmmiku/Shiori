@@ -262,11 +262,17 @@ class ContextEngine:
         return json.dumps({key: message.get(key) for key in ("id", "user_id", "role", "created_at", "sent_at", "received_at", "content")}, ensure_ascii=False)
 
     def _latest_summary(self, scope_id, user_id):
-        candidates = self.store.memory_property_records(scope_id, 'conversation_digest', 'active')
-        summaries = [record for record in self._projection(scope_id, user_id, memory_ids=[item['id'] for item in candidates])[1].values()
-                     if record.get("property") == "conversation_digest" and record.get("derived")]
-        # visible_memories preserves insertion order, including timestamp ties.
-        return summaries[-1] if summaries else None
+        # Usually only the newest digest is needed. Older records remain
+        # available as a fallback when a correction revokes a later digest.
+        cursor = None
+        while candidates := self.store.context_summary_candidates(scope_id, user_id, before_rowid=cursor):
+            visible = self._projection(scope_id, user_id, memory_ids=[item[0] for item in candidates])[1]
+            for identifier, _ in candidates:
+                record = visible.get(identifier)
+                if record and record.get('derived'):
+                    return record
+            cursor = candidates[-1][1]
+        return None
 
     async def build(self, scope_id, user_id, history, *, max_chars=None):
         async with self._locks.setdefault((scope_id, str(user_id)), asyncio.Lock()):
@@ -442,7 +448,7 @@ class ContextEngine:
         if not force and not (_config(self.settings).get("context", {}).get("enabled", False) and scope.get("context_compress", False)):
             return False
         valid, _, _, _ = self._manifest(scope_id, user_id, selected)
-        blocked, visible, approved = self._projection(scope_id, user_id)
+        blocked, visible, approved = self._projection(scope_id, user_id, memory_ids=memories, jargon_ids=jargon)
         if len(valid) != len(selected) or set(fingerprints) & blocked:
             return False
         if any(key not in visible or visible[key].get("version") != version for key, version in memories.items()):

@@ -75,7 +75,9 @@ def test_real_http_bad_format_sse_and_disconnect_do_not_replay(tmp_path,body,dis
 def test_real_http_stall_is_bounded_and_does_not_repeat_dispatched_request(tmp_path,monkeypatch):
     original=httpx.AsyncClient
     def fast_timeout(*args,**kwargs):
-        kwargs['timeout']=httpx.Timeout(.15,connect=.15)
+        # Exercise a stalled response *after* dispatch, not a race to connect
+        # on a busy Windows test host before the server receives the request.
+        kwargs['timeout']=httpx.Timeout(3,read=.15,connect=3)
         return original(*args,**kwargs)
     monkeypatch.setattr('shiori.provider.httpx.AsyncClient',fast_timeout)
     with model_server([(200,b'{}',.5,False)]) as (url,hits):

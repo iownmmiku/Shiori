@@ -29,7 +29,9 @@ TEXT = {'type': 'string', 'maxLength': 200000}
 PATH = {'type': 'string', 'maxLength': 2000}
 TOOLS = [
     schema('list_files', '列出任务工作目录中的文件，不递归读取正文', {'path': PATH}, []),
-    schema('read_file', '读取工作目录中UTF-8文本', {'path': PATH}, ['path']),
+    schema('read_file', '读取工作目录中UTF-8文本，offset为从0开始的Unicode字符位置，limit为本次字符数；截断时按next_offset续读',
+           {'path': PATH, 'offset': {'type': 'integer', 'minimum': 0, 'maximum': 1048576},
+            'limit': {'type': 'integer', 'minimum': 1, 'maximum': 100000}}, ['path']),
     schema('search_files', '在工作目录内文本文件中搜索字面关键词', {'query': {'type': 'string', 'maxLength': 200}}, ['query']),
     schema('write_file', '新建或覆盖工作目录中的文本文件，覆盖前需管理员确认', {'path': PATH, 'content': TEXT}, ['path', 'content']),
     schema('edit_file', '将文件中唯一匹配的原文替换成新文，需管理员确认', {'path': PATH, 'old': TEXT, 'new': TEXT}, ['path', 'old', 'new']),
@@ -241,7 +243,17 @@ class ComputerService:
             path = self.path(root, args.get('path', '.'))
             return [{'name': p.name, 'directory': p.is_dir()} for p in sorted(path.iterdir())[:200] if not p.is_symlink()]
         if name == 'read_file':
-            return {'text': self._read(self.path(root, args['path']))[:self.settings.get()['computer']['max_output_chars']]}
+            offset = args.get('offset', 0)
+            maximum = self.settings.get()['computer']['max_output_chars']
+            limit = args.get('limit', maximum)
+            if type(offset) is not int or not 0 <= offset <= 1048576 or type(limit) is not int or not 1 <= limit <= 100000:
+                raise ValueError('读取位置须为非负整数，字符数须为1—100000')
+            text = self._read(self.path(root, args['path']))
+            offset = min(offset, len(text))
+            end = min(len(text), offset + min(limit, maximum))
+            return {'text': text[offset:end], 'offset': offset, 'characters': end - offset,
+                    'total_characters': len(text), 'truncated': end < len(text),
+                    'next_offset': end if end < len(text) else None}
         if name == 'search_files':
             results, examined = [], 0
             for path in root.rglob('*'):
@@ -365,8 +377,13 @@ class ComputerService:
         finally:
             if process.poll() is None:
                 if os.name == 'nt':
-                    subprocess.run(['taskkill', '/PID', str(process.pid), '/T', '/F'], stdout=subprocess.DEVNULL,
-                                   stderr=subprocess.DEVNULL, creationflags=subprocess.CREATE_NO_WINDOW, timeout=10)
+                    try:
+                        subprocess.run(['taskkill', '/PID', str(process.pid), '/T', '/F'], stdout=subprocess.DEVNULL,
+                                       stderr=subprocess.DEVNULL, creationflags=subprocess.CREATE_NO_WINDOW, timeout=10)
+                    except (OSError, subprocess.TimeoutExpired):
+                        # A stalled taskkill helper must not abort cleanup and
+                        # leave the direct child running after chat cancellation.
+                        process.kill()
                 else:
                     try:
                         os.killpg(process.pid, signal.SIGTERM)
@@ -380,6 +397,9 @@ class ComputerService:
                         except ProcessLookupError: pass
                     else:
                         process.kill()
+                    # A successful kill request is not an exit receipt. Keep
+                    # draining the worker until the operating system reaps it.
+                    process.wait()
             reader.join(timeout=2)
             process.stdout.close()
             if sandbox_id:

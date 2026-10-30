@@ -128,6 +128,9 @@ class UpdateManager:
         self._launching = False
         self._cleaning = False
         self._auto_task = None
+        self._recovery = {}
+        self._recovery_lock = asyncio.Lock()
+        self._recovery_stamp = None
         self.download = {'status': 'idle', 'message': '尚未下载更新'}
         try:
             self._safe_folder()
@@ -191,11 +194,11 @@ class UpdateManager:
         if result.is_file() and not is_link(result) and result.stat().st_size <= 4096:
             try:
                 raw = json.loads(result.read_text('utf-8-sig'))
-                if raw.get('status') in ('preparing','backing_up','replacing','restarting','completed', 'failed', 'unknown') and raw.get('download_id') == self.download.get('id'):
+                if raw.get('status') in ('preparing','backing_up','replacing','restarting','recovering','recovery_required','completed', 'failed', 'unknown') and raw.get('download_id') == self.download.get('id'):
                     outcome = {key: str(raw.get(key, ''))[:500] for key in ('status', 'message', 'at')}
                     if value.get('status') in ('interrupted','installing'): value.update(status=outcome['status'], message=outcome['message'])
             except (ValueError, OSError, AttributeError): pass
-        return {**self.runtime, 'automatic_active': bool(self._auto_task and not self._auto_task.done()) or outcome.get('status') in ('preparing','backing_up','replacing','restarting'), 'install_result': outcome, 'checked_at': self.checked_at, 'releases': copy.deepcopy(self.releases),
+        return {**self.runtime, 'recovery': copy.deepcopy(self._recovery), 'automatic_active': bool(self._auto_task and not self._auto_task.done()) or outcome.get('status') in ('preparing','backing_up','replacing','restarting','recovering'), 'install_result': outcome, 'checked_at': self.checked_at, 'releases': copy.deepcopy(self.releases),
                 'page': self.page, 'has_more': self.has_more, 'include_prerelease': self.include_prerelease, 'download': value}
 
     @staticmethod
@@ -264,6 +267,7 @@ class UpdateManager:
             return self.snapshot()
 
     def start_download(self, release_id, kind):
+        if self.startup_pending(): raise ValueError('上次更新尚未结束或需要恢复，请先核验更新状态')
         if self._cleaning: raise ValueError('正在清理历史更新，请稍后再试')
         if self._auto_task and not self._auto_task.done(): raise ValueError('一键更新进行中，请先取消或等待完成')
         if self._launching: raise ValueError('正在准备安装，请勿切换下载')
@@ -420,7 +424,51 @@ class UpdateManager:
         await self.cancel()
 
     def startup_pending(self):
-        return self.snapshot().get('install_result',{}).get('status') in ('preparing','backing_up','replacing','restarting')
+        return self.snapshot().get('install_result',{}).get('status') in ('preparing','backing_up','replacing','restarting','recovering','recovery_required','unknown')
+
+    async def reconcile_startup(self, *, force=False):
+        from .update_recovery import inspect_interruption
+        async with self._recovery_lock:
+            result = self.folder / 'install-result.json'
+            try:
+                stamp = (result.stat().st_mtime_ns, result.stat().st_size)
+            except OSError:
+                self._recovery = {}
+                return
+            # Active leases are rechecked until the worker finishes or exits.
+            if not force and self._recovery and self._recovery_stamp == stamp:
+                return
+            self._recovery = await asyncio.to_thread(inspect_interruption, self)
+            try: self._recovery_stamp = (result.stat().st_mtime_ns, result.stat().st_size)
+            except OSError: self._recovery_stamp = None
+
+    def launch_recovery(self, download_id):
+        from .update_recovery import recovery_config
+        from .update_runtime import atomic_json, regular
+        work, target, config = recovery_config(self, download_id)
+        if self.runtime.get('mode') == 'source':
+            worker = regular(work / 'recovery-worker.py')
+            worker.write_bytes((Path(__file__).parent / 'update_runtime.py').read_bytes())
+            command = [sys.executable, str(worker), '--config', str(work / 'recover.json')]
+        else:
+            helper = regular(work / ('recovery-helper-' + secrets.token_hex(6)))
+            helper.mkdir(exist_ok=False)
+            for directory, dirs, names in os.walk(target / '_internal', followlinks=False):
+                for name in [*dirs, *names]: regular(Path(directory) / name)
+            shutil.copy2(target / 'shiori.exe', helper / 'shiori.exe')
+            shutil.copytree(target / '_internal', helper / '_internal', symlinks=False)
+            command = [str(helper / 'shiori.exe'), '--update-worker', str(work / 'recover.json')]
+        atomic_json(work / 'recover.json', config)
+        if os.name != 'nt': (work / 'recover.json').chmod(0o600)
+        if config.get('service'):
+            subprocess.run(['systemd-run','--unit','shiori-recovery-'+download_id[:12], '--collect','--property=Type=exec', *command],
+                           check=True, timeout=15, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        else:
+            subprocess.Popen(command, cwd=target, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0), start_new_session=os.name != 'nt')
+        self.download.update(status='installing', message='正在恢复更新前的程序和数据，随后自动重启')
+        self._save()
+        return {'ok': True}
 
     def launch_replacement(self, download_id):
         if self._cleaning: raise ValueError('正在清理历史更新，请稍后再试')
@@ -558,6 +606,31 @@ def install_updates(app, data_dir):
         asyncio.get_running_loop().call_later(.5, app.state.shutdown)
         return result
 
+    @app.post('/api/updates/recover')
+    async def recover(request: Request, payload: dict = Body(...)):
+        if not snapshot(request)['switch_allowed']:
+            raise HTTPException(403, '请在运行电脑上恢复更新，或先由本机授权远程更新管理')
+        if payload.get('download_id') != manager.download.get('id'):
+            raise ValueError('更新记录已经改变，请重新核验')
+        await manager.reconcile_startup(force=True)
+        if not manager._recovery.get('can_rollback'):
+            raise ValueError('当前备份未通过恢复校验，不能自动回滚')
+        if manager._launching:
+            raise ValueError('更新恢复已经开始，请等待重启')
+        manager._launching = app.state.provider._updating = True
+        try:
+            result = await asyncio.to_thread(manager.launch_recovery, payload['download_id'])
+        except BaseException:
+            manager._launching = False
+            raise
+        asyncio.get_running_loop().call_later(.5, app.state.shutdown)
+        return result
+
+    @app.post('/api/updates/recheck')
+    async def recheck(request: Request):
+        await manager.reconcile_startup(force=True)
+        return snapshot(request)
+
     @app.post('/api/updates/switch')
     async def switch(request: Request, payload: dict = Body(...)):
         if not snapshot(request)['switch_allowed']: raise HTTPException(403,'服务器自动更新尚未由运行电脑授权开启')
@@ -582,6 +655,7 @@ def install_updates(app, data_dir):
 
     @app.get('/api/updates')
     async def status(request: Request):
+        await manager.reconcile_startup()
         return snapshot(request)
 
     @app.post('/api/updates/check')

@@ -166,8 +166,8 @@ def test_real_launcher_reports_actual_port_or_exits_without_starting(tmp_path, s
                 log = (data / 'runtime.log').read_text('utf-8')
                 assert 'WARNING' in log and 'OneBot' in log
                 assert str(requested) in log and str(record['port']) in log
-                with client.open(urllib.request.Request(root + '/api/shutdown', headers=headers, method='POST'), timeout=5):
-                    pass
+                with client.open(urllib.request.Request(root + '/api/shutdown', headers=headers, method='POST'), timeout=5) as response:
+                    assert json.load(response)['ok'] is True
                 process.wait(timeout=20)
                 assert process.returncode == 0
                 assert not (data / 'server.json').exists()

@@ -212,7 +212,7 @@ async def test_optional_per_action_mode_still_waits_for_an_explicit_approval(aut
         await item.runs.close()
 
 
-def test_regular_chat_explicit_computer_request_starts_an_automatic_background_task(tmp_path, monkeypatch):
+def test_local_chat_executes_computer_tools_in_the_same_turn_without_qq_expansion(tmp_path, monkeypatch):
     app = create_app(tmp_path / 'chat-computer', start_workers=False)
     with TestClient(app) as client:
         password_login(client, app)
@@ -224,13 +224,16 @@ def test_regular_chat_explicit_computer_request_starts_an_automatic_background_t
             purpose = kwargs.get('purpose', 'chat')
             assert kwargs['before_send']()
             counts[purpose] += 1
-            if purpose == 'computer':
-                response = call('write_file', {'path': 'from-chat.txt', 'content': 'ordinary chat triggered automatic task'}) if counts[purpose] == 1 else {'content': '已实际生成文件'}
-            elif counts[purpose] == 1:
-                assert 'start_computer_task' in {item['function']['name'] for item in kwargs['tools']}
-                response = call('start_computer_task', {'request': 'model-substituted task must be ignored'})
+            assert purpose == 'chat', 'local tools must not invoke a second computer-model conversation'
+            if counts[purpose] == 1:
+                names = {item['function']['name'] for item in kwargs['tools']}
+                assert 'write_file' in names and 'start_computer_task' not in names
+                response = call('write_file', {'path': 'from-chat.txt', 'content': 'same-turn automatic write'})
             else:
-                response = {'content': '电脑任务已在后台处理'}
+                assert messages[-1]['role'] == 'tool'
+                receipt = json.loads(messages[-1]['content'])
+                assert receipt['ok'] and receipt['status'] == 'completed'
+                response = {'content': '已实际生成文件'}
             message = dict(role='assistant', content=response.get('content', ''))
             if response.get('tool_calls'):
                 message['tool_calls'] = response['tool_calls']
@@ -239,13 +242,24 @@ def test_regular_chat_explicit_computer_request_starts_an_automatic_background_t
         text = '请在本机创建文件 from-chat.txt'
         response = client.post('/api/chat', json={'text': text})
         assert response.status_code == 200, response.text
-        deadline = time.monotonic() + 4
-        while time.monotonic() < deadline:
-            jobs = client.get('/api/jobs').json()
-            if jobs and jobs[0]['status'] in TERMINAL:
-                break
-            time.sleep(.01)
+        jobs = client.get('/api/jobs').json()
         assert len(jobs) == 1 and jobs[0]['kind'] == 'computer' and jobs[0]['status'] == 'completed', jobs
-        assert (workspace / 'from-chat.txt').read_text('utf-8') == 'ordinary chat triggered automatic task'
-        assert app.state.runs._jobs[jobs[0]['id']]['_payload']['text'] == text
+        assert jobs[0]['inline'] and jobs[0]['delivery_status'] == 'inline'
+        assert (workspace / 'from-chat.txt').read_text('utf-8') == 'same-turn automatic write'
+        assert counts == {'chat': 2, 'computer': 0}
+        assert app.state.runs._jobs[jobs[0]['id']]['_payload']['tool'] == 'write_file'
         assert not any(event['type'] == 'approval' for event in jobs[0]['events'])
+        assert len([message for message in app.state.store.list_messages('web:default') if message['role'] == 'assistant']) == 1
+        # QQ retains the existing administrator gate and explicit background
+        # task tool; introducing inline local tools must not widen QQ authority.
+        app.state.settings.update({'onebot': {'enabled': True, 'access_token': 'fixture-connector-token',
+            'chat_policy': 'whitelist', 'allowed_users': ['101', '102']},
+            'access': {'administrators': [{'platform': 'onebot', 'account_id': '101', 'instance_id': '9000'}]}})
+        async def qq_tools(account):
+            scope = app.state.store.upsert_scope({'id': 'qq:private:' + account})
+            identity = app.state.access.identity('onebot', account, '9000')
+            return {item['function']['name'] for item in app.state.chat._request_tools(scope, account, text,
+                {'platform': 'onebot', 'trusted_identity': identity}) or []}
+        admin_tools, other_tools = asyncio.run(qq_tools('101')), asyncio.run(qq_tools('102'))
+        assert 'start_computer_task' in admin_tools and 'write_file' not in admin_tools and 'execute_shell' not in admin_tools
+        assert 'start_computer_task' not in other_tools and 'execute_shell' not in other_tools

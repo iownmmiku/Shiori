@@ -49,7 +49,8 @@ def _digest(text: str) -> str:
 
 
 def _record_hash(record: dict) -> str:
-    return _digest(json.dumps({key: record.get(key) for key in ("id", "version", "content", "episode", "subject", "property", "scope_id", "user_id", "visibility")}, ensure_ascii=False, sort_keys=True))
+    return _digest(json.dumps({key: record.get(key) for key in ("id", "version", "content", "episode", "subject", "property", "scope_id", "user_id", "visibility",
+        "event_at", "occurred_at", "event_time_start", "event_time_end", "event_time_known")}, ensure_ascii=False, sort_keys=True))
 
 
 def tokenize(text: str) -> Counter:
@@ -149,6 +150,17 @@ def _time_window(query: str, now: datetime, zone=None) -> tuple[datetime, dateti
     return start.astimezone(UTC), end.astimezone(UTC)
 
 
+def _time_only_query(query: str) -> bool:
+    """Conservatively distinguish a date recall from a dated topic search."""
+    text = normalized(query)
+    text, count = re.subn(r'20\d{2}[-/年]\d{1,2}[-/月]\d{1,2}日?|昨天晚上|前天|昨天|昨晚|昨夜|今天|上周|最近|近期', '', text)
+    if not count:
+        return False
+    text = re.sub(r'\b(?:what|happened|did|i|we|do|on|in|at|then|remember|recall|events?)\b', '', text)
+    text = re.sub(r'帮我|请问|回忆|回顾|记得|记忆|经历|事情|事件|活动|发生|什么|哪些|干嘛|我们|自己|那天|当时|一下|还|曾经|都|我|做|干|过|有|了|的|在|是|呢|呀|啊|吗|啥|请', '', text)
+    return not re.search(r'\w', text)
+
+
 @dataclass
 class _Document:
     record: dict
@@ -166,6 +178,8 @@ class _Document:
     recency: float = 0.0
     person: float = 0.0
     time: float = 0.0
+    temporal_query: bool = False
+    temporal_match: bool = False
 
     @property
     def key(self) -> tuple[str, int]:
@@ -246,6 +260,7 @@ def _rank_lexical(docs: list[_Document], query: str, user_id: str, zone=None) ->
     average = sum(sum(doc.terms.values()) for doc in docs) / len(docs) or 1
     now = datetime.now(UTC)
     window = _time_window(query, reference_time(now),zone)
+    temporal_query = bool(window and _time_only_query(query))
     known_subjects = {normalized(doc.record.get("subject") or "") for doc in docs}
     requested_subjects = {subject for subject in known_subjects if subject and _phrase_match(subject, query)}
     for doc in docs:
@@ -271,12 +286,16 @@ def _rank_lexical(docs: list[_Document], query: str, user_id: str, zone=None) ->
         elif re.search(r"我|本人|自己|\bmy\b|\bme\b", query):
             doc.person = 0.08 if str(record.get("user_id")) == user_id else -0.04
         if window:
-            occurred = next((_date(record.get(key)) for key in ("event_at", "occurred_at", "event_time_start") if _date(record.get(key))), None)
+            occurred = (next((_date(record.get(key)) for key in ("event_at", "occurred_at", "event_time_start") if _date(record.get(key))), None)
+                        if record.get('event_time_known') is not False else None)
             end = _date(record.get('event_time_end'))
             matches = bool(occurred and (occurred < window[1] and end > window[0] if end and end > occurred else window[0] <= occurred < window[1]))
             # Old creation/update dates are provenance, not proof of when an
             # event happened. Unknown dates remain neutral rather than guessed.
             doc.time = 0.12 if matches else -0.06 if occurred else 0.0
+            doc.temporal_query = temporal_query and record.get('kind') == 'event'
+            doc.temporal_match = bool(matches and record.get('kind') == 'event'
+                                      and record.get('property') != 'conversation_digest')
         lexical = doc.bm25 / (doc.bm25 + 2.0) if doc.bm25 > 0 else 0.0
         doc.score = lexical + doc.importance + doc.recency + doc.person + doc.time
 
@@ -315,9 +334,11 @@ def _select(docs: list[_Document], query: str, limit: int, *, mode: str = "lexic
             preserve_content: bool = False) -> list[dict]:
     selected, counts = [], Counter()
     for doc in sorted(docs, key=lambda item: (item.score, item.record["updated_at"], item.record["id"], -item.index), reverse=True):
-        if query.strip() and doc.bm25 <= 0 and (doc.semantic is None or doc.semantic < 0.25):
+        if doc.temporal_query and not doc.temporal_match:
             continue
-        if counts[doc.record["id"]] >= per_memory:
+        if query.strip() and not (doc.temporal_query and doc.temporal_match) and doc.bm25 <= 0 and (doc.semantic is None or doc.semantic < 0.25):
+            continue
+        if counts[doc.record["id"]] >= (1 if doc.temporal_query else per_memory):
             continue
         counts[doc.record["id"]] += 1
         selected.append(_result(doc, mode, preserve_content=preserve_content))
@@ -956,13 +977,18 @@ class MemoryEngine:
     def _rank_snapshot(self, scope_id, user_id, config, query):
         if not self._permission(scope_id, config):
             return []
+        from .timezones import config_zone
+        zone = config_zone(self.settings)
+        window = _time_window(query, reference_time(), zone)
         candidates = self.store.memory_candidate_ids(scope_id, str(user_id), query,
                         scope_allowed=lambda origin: self._permission(origin, config))
+        if window:
+            candidates = list(dict.fromkeys([*candidates, *self.store.event_memory_candidate_ids(
+                scope_id, str(user_id), window, scope_allowed=lambda origin: self._permission(origin, config))]))
         records = [record for record in self._visible(scope_id, str(user_id), config, record_ids=candidates).values()
                    if record.get('property') != 'memory_relation']
         docs = _documents(records, self._term_cache.terms)
-        from .timezones import config_zone
-        _rank_lexical(docs, query, str(user_id),config_zone(self.settings))
+        _rank_lexical(docs, query, str(user_id), zone)
         return docs
 
     def _current_results(self, docs, scope_id, user_id, query, limit, mode):
@@ -971,8 +997,9 @@ class MemoryEngine:
         Cached tokens never substitute for this fresh dependency/consent check.
         No text from an earlier scope or memory version can pass this boundary.
         """
-        ordered = sorted((doc for doc in docs if not query.strip() or doc.bm25 > 0
-                          or doc.semantic is not None and doc.semantic >= 0.25),
+        ordered = sorted((doc for doc in docs if (not doc.temporal_query or doc.temporal_match)
+                          and (doc.temporal_query and doc.temporal_match or not query.strip() or doc.bm25 > 0
+                               or doc.semantic is not None and doc.semantic >= 0.25)),
                          key=lambda item: (item.score, item.record['updated_at'], item.record['id'], -item.index), reverse=True)
         accepted, snapshot_hashes = [], {}
         result = []
@@ -1083,7 +1110,7 @@ class MemoryEngine:
         with measure('memory_current_results_ms'):
             items = await self._read_async(self._current_results, docs, scope_id, str(user_id), query, limit, mode)
         with measure('memory_related_ms'):
-            related = await self._read_async(self._related, scope_id, str(user_id), items, min(4, max(0, limit - 1)), True) if query.strip() else []
+            related = await self._read_async(self._related, scope_id, str(user_id), items, min(4, max(0, limit - 1)), True) if query.strip() and not any(doc.temporal_query for doc in docs) else []
         combined = items[:max(1, limit - len(related))] + related
         # Worker completion is another await boundary. Revalidate the small
         # selected set synchronously so revocation during relation lookup wins.

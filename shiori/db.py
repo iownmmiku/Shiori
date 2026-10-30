@@ -222,6 +222,12 @@ class Store:
                 valid_from TEXT, valid_to TEXT, version INTEGER NOT NULL,
                 created_at TEXT NOT NULL, updated_at TEXT NOT NULL, data TEXT NOT NULL);
             CREATE INDEX IF NOT EXISTS memories_scope ON memories(scope_id, status, user_id);
+            CREATE INDEX IF NOT EXISTS memories_digest_scope ON memories(scope_id)
+                WHERE status='active' AND json_extract(data,'$.property')='conversation_digest';
+            CREATE INDEX IF NOT EXISTS memories_event_time ON memories(scope_id,status,
+                COALESCE(NULLIF(json_extract(data,'$.event_at'),''),
+                         NULLIF(json_extract(data,'$.occurred_at'),''),
+                         NULLIF(json_extract(data,'$.event_time_start'),''))) WHERE kind='event';
             CREATE INDEX IF NOT EXISTS memories_preference_rank ON memories(
                 scope_id, user_id, kind, status, (json_extract(data,'$.pinned') IS 1) DESC,
                 (CASE WHEN json_type(data,'$.importance') IN ('integer','real')
@@ -931,6 +937,19 @@ class Store:
         return {'active': counts.get('active', 0), 'pending': counts.get('pending', 0), 'digests': digests,
                 'expression_pending': jargon[0] or 0, 'jargon_pending': jargon[1] or 0}
 
+    def context_summary_candidates(self, scope_id, user_id, *, before_rowid=None, limit=8):
+        """Newest digest IDs only; callers still validate live provenance."""
+        clauses = ["scope_id=?", "status='active'", "json_extract(data,'$.property')='conversation_digest'",
+                   "(visibility='group' OR (visibility='private' AND user_id=? AND ?=0))"]
+        params = [scope_id, user_id, int(scope_id.startswith(('qq:group:', 'qqofficial:group:')))]
+        if before_rowid is not None:
+            clauses.append('rowid<?')
+            params.append(before_rowid)
+        with self._lock:
+            return [tuple(row) for row in self._conn.execute(
+                'SELECT id,rowid FROM memories WHERE ' + ' AND '.join(clauses) + ' ORDER BY rowid DESC LIMIT ?',
+                (*params, _limit(limit, 32)))]
+
     def memory_page(self, scope_id=None, q='', status=None, *, kind=None, limit=50, offset=0):
         limit = _limit(limit, 200)
         if type(offset) is not int or offset < 0:
@@ -1040,19 +1059,24 @@ class Store:
         if roots is not None:
             # Load only the dependency closure, never the whole memory table.
             pending = list(records)
+            examined = set(by_id)
             while pending:
-                current = pending.pop()
-                dependencies = list(current.get('dependencies', {}))
-                if current.get('property') == 'memory_relation':
-                    dependencies += [current.get('from_id'), current.get('to_id')]
-                for key in dependencies:
-                    if not key or key in by_id: continue
-                    try: dependency = self.get_memory(key)
-                    except KeyError: continue
-                    if dependency.get('status') == 'active' and in_boundary(dependency):
-                        by_id[key] = dependency
-                        records.append(dependency)
-                        pending.append(dependency)
+                dependencies = set()
+                for current in pending:
+                    dependencies.update(current.get('dependencies', {}))
+                    if current.get('property') == 'memory_relation':
+                        dependencies.update((current.get('from_id'), current.get('to_id')))
+                keys = list(dependencies - examined - {None, ''})
+                examined.update(keys)
+                pending = []
+                for start in range(0, len(keys), 400):
+                    part = keys[start:start + 400]
+                    for dependency in self._list('memories', ['id IN (' + ','.join('?' for _ in part) + ')'], part):
+                        if dependency.get('status') == 'active' and in_boundary(dependency):
+                            dependency = _memory_view(dependency)
+                            by_id[dependency['id']] = dependency
+                            records.append(dependency)
+                            pending.append(dependency)
         memo: dict[str, bool] = {}
         # Digests are disposable projections, not independent facts. This uses
         # JSON fields only, so old databases and backups retain schema version 1.
@@ -1065,7 +1089,24 @@ class Store:
         jargon = {}
         if digests:
             blocked = self.blocked_memory_sources(scope_id)
-            jargon = {item["id"]: item for item in self._list("jargon", ["scope_id=?"], [scope_id])}
+            jargon_ids = list({key for record in records for key in record.get('jargon_dependencies', {})})
+            for start in range(0, len(jargon_ids), 400):
+                part = jargon_ids[start:start + 400]
+                jargon.update((item['id'], item) for item in self._list('jargon',
+                    ['scope_id=?', 'id IN (' + ','.join('?' for _ in part) + ')'], [scope_id, *part]))
+
+        # Every cumulative digest shares most of its source messages with its
+        # ancestors. Read and hash each source once in this projection only;
+        # the next projection must observe edits, deletion and revocation.
+        source_ids = list({key for record in records
+                           if record.get('property') in ('conversation_digest', 'memory_relation')
+                           for key in record.get('source_ids', [])})
+        source_messages, source_hashes = {}, {}
+        for start in range(0, len(source_ids), 400):
+            part = source_ids[start:start + 400]
+            for source in self._list('messages', ['id IN (' + ','.join('?' for _ in part) + ')'], part):
+                source_messages[source['id']] = source
+                source_hashes[source['id']] = message_fingerprint(source)
 
         def allowed(record: dict, visiting: set[str]) -> bool:
             record_id = record["id"]
@@ -1095,12 +1136,9 @@ class Store:
                         return False
                 fingerprints = record.get("source_fingerprints", {})
                 for source_id in record.get("source_ids", []):
-                    try:
-                        source = self.get_message(source_id)
-                    except KeyError:
-                        memo[record_id] = False
-                        return False
-                    if source.get("scope_id") != record["scope_id"] or fingerprints.get(source_id) != message_fingerprint(source):
+                    source = source_messages.get(source_id)
+                    if (source is None or source.get("scope_id") != record["scope_id"]
+                            or fingerprints.get(source_id) != source_hashes[source_id]):
                         memo[record_id] = False
                         return False
             if record.get("property") == "conversation_digest":
@@ -1113,12 +1151,9 @@ class Store:
                     memo[record_id] = False
                     return False
                 for source_id in sources:
-                    try:
-                        source = self.get_message(source_id)
-                    except KeyError:
-                        memo[record_id] = False
-                        return False
-                    if source.get("scope_id") != scope_id or fingerprints.get(source_id) != message_fingerprint(source):
+                    source = source_messages.get(source_id)
+                    if (source is None or source.get("scope_id") != scope_id
+                            or fingerprints.get(source_id) != source_hashes[source_id]):
                         memo[record_id] = False
                         return False
                     if not public_group and source.get("role") == "user" and source.get("user_id") != user_id:
@@ -1392,6 +1427,30 @@ class Store:
                     'warning': self._memory_search_warning or (search.warning if search else ''),
                     'initialized': bool(search and search.initialized), 'revision': self._memory_revision,
                     'building': self._memory_search_thread is not None}
+
+    def event_memory_candidate_ids(self, scope_id, user_id, window, *, limit=64, scope_allowed=None):
+        """Bounded event-time candidates from current storage, including cold indexes.
+
+        An unknown occurrence date never falls back to creation/reporting time.
+        Rich records and dependencies still pass visible_memories afterwards.
+        """
+        from .timezones import utc_timestamp
+        lower, upper = (utc_timestamp(value) for value in window)
+        if lower is None or upper is None or lower >= upper:
+            return []
+        with self._lock:
+            boundary = self._memory_candidate_boundary(scope_id, user_id, scope_allowed)
+            if not boundary.origins:
+                return []
+            where, params = boundary.sql(alias='m')
+            start = "COALESCE(NULLIF(json_extract(m.data,'$.event_at'),''),NULLIF(json_extract(m.data,'$.occurred_at'),''),NULLIF(json_extract(m.data,'$.event_time_start'),''))"
+            end = "json_extract(m.data,'$.event_time_end')"
+            rows = self._conn.execute(f"""SELECT m.id FROM memories m WHERE {where}
+                AND m.kind='event' AND COALESCE(json_extract(m.data,'$.property'),'')!='conversation_digest'
+                AND json_extract(m.data,'$.event_time_known') IS NOT 0
+                AND {start}<? AND (CASE WHEN {end}>{start} THEN {end}>? ELSE {start}>=? END)
+                ORDER BY {start} DESC,m.id LIMIT ?""", (*params, upper, lower, lower, _limit(limit, 192)))
+            return [row[0] for row in rows]
 
     def message_sources_current(self, scope_id: str, source_ids) -> bool:
         """Check message existence/scope without decoding every historical body."""

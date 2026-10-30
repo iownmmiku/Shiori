@@ -853,7 +853,7 @@ class Provider:
                     except httpx.TimeoutException as exc:
                         raise ProviderTimeoutError('模型响应超时，本次消费无法确认，已保留预算估算，请稍后重试。', retryable=uncertain_fallback) from exc
                     except httpx.HTTPError as exc:
-                        raise ProviderConnectionError('模型连接中断，本次消费无法确认，已保留预算估算。') from exc
+                        raise ProviderConnectionError('模型连接中断，本次消费无法确认，已保留预算估算。', retryable=uncertain_fallback) from exc
                     except IncompleteModelStreamError as exc:
                         self.store.add_event('model_stream_incomplete',
                             '模型流缺少完整结束标记；本次消费待确认，未采用残缺结果',

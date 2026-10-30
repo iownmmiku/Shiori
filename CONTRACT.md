@@ -64,7 +64,7 @@ Python 3.11–3.13（推荐3.12），FastAPI、SQLite；正式入口为 `python 
 - `POST /api/persona/distill/character/search`：搜索并保存待确认角色来源；`POST .../corpus` 上传解析材料；`POST .../start` 必须带已确认标记，创建后台蒸馏。
 - `POST /api/persona/distill/{job_id}/trial`：无操作工具的草稿试聊；`POST .../apply` 另存人格；`GET .../artifact` 只允许角色模式下载 Skill。
 - `POST /api/chat/attachments`：multipart `file`、`scope_id`、`purpose`，用途为 `context`、`memory` 或 `distillation`；不默认为长期记忆。普通参考附件最多 8MB。
-- `POST /api/chat` 默认返回完整JSON；本地网页会话可传 `stream:true` 接收SSE。`data` 内事件类型为 `start`、`delta`、`reset`、`result`、`error`，注释心跳不含正文。`delta` 仅供临时预览，`result.data` 才是已校验的最终结果；`reset` 清除草稿。断连取消请求并保留未知消费，客户端不能因缺少最终事件自动重发工具操作。代理应禁用缓冲；QQ会话在管理界面仍为只读。
+- `POST /api/chat` 默认返回完整JSON；本地网页会话可传 `stream:true` 接收SSE。事件类型为 `start`、`delta`、`reset`、`job`、`result`、`error`，注释心跳不含正文。`delta` 仅供临时预览，`result.data` 才是已校验的最终结果；`reset` 只清除文本草稿，不清除工具执行记录。`job.data` 是公共任务记录，内联电脑任务为 `kind:computer, inline:true`；按任务 ID 更新状态，不把该事件作为模型正文。最终结果的 `jobs` 返回关联任务，持久助手消息的 `metadata.job_ids` 用于重新查看执行记录。断连取消当前请求及其内联电脑操作，等待子进程清理并保留未知消费；独立后台任务仍由任务接口管理。客户端不能因缺少最终事件自动重发工具操作。代理应禁用缓冲；QQ会话在管理界面仍为只读。
 - `POST /api/models`：使用当前表单配置读取模型列表；普通 `GET` 读取已保存配置。模型测试与列表读取按实际服务验证，不凭模型名推断工具或图片能力。
 - `GET/POST /api/model-providers`、`PUT/DELETE .../{id}`：供应商连接目录；`POST .../discover` 或 `.../{id}/discover` 使用当前表单读模型目录，不保存未提交密钥。`legacy` 来源只读，原模型 ID 和密钥保留。
 - `POST /api/model-catalog/models {provider_id,models}`：多选批量添加；`PATCH/DELETE .../models/{id}` 修改或删除模型；`PUT .../routing` 按用途选择模型。会话 `model_id:''` 继承全局聊天模型；在用模型删除需先解除路由和会话引用。

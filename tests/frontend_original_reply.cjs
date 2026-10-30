@@ -1,7 +1,7 @@
 "use strict";
 const assert = require("node:assert/strict"), fs = require("node:fs"), path = require("node:path"), vm = require("node:vm");
 const escape = value => String(value ?? "").replace(/[&<>"']/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
-const sandbox = {state:{scope:"web:default"},e:escape,scope:()=>({persona_id:"default"}),personaName:()=>"初音未来",fmt:()=>"",icon:()=>"",imageURL:value=>value};
+const sandbox = {state:{scope:"web:default"},e:escape,scope:()=>({persona_id:"default"}),personaName:()=>"初音未来",fmt:()=>"",icon:()=>"",imageURL:value=>value,button:(text,action,style,icon,attrs)=>`<button data-action="${action}" ${attrs}>${escape(text)}</button>`};
 vm.createContext(sandbox);
 vm.runInContext(fs.readFileSync(path.join(__dirname,"../shiori/static/chat-page.js"),"utf8"),sandbox,{filename:"chat-page.js"});
 const record = {id:"reply-1",role:"assistant",content:"保留第一段。\n\n保留第二段。",metadata:{reply_parts:["保留第一段。","保留第二段。"],
@@ -34,4 +34,10 @@ html = sandbox.renderMessageBase({...record,metadata:{reply_parts:["不匹配的
 assert.equal((html.match(/class="message-content"/g)||[]).length,2);
 assert.ok(!html.includes("不匹配的旧分段"));assert.ok(!html.includes("已应用字数限制"));
 assert.match(html,/旧原文/);
+html=sandbox.renderMessageBase({id:"qq-image",role:"user",content:"",metadata:{images:["onebot-image:secret-account:private-file"]}});
+assert.match(html,/QQ图片（回复时读取）/);
+assert.doesNotMatch(html,/secret-account|private-file|onebot-image:|<img|href=/);
 console.log("original reply foldout, default collapse, safe escaping, canonical paragraphs and historical source controls passed");
+
+html=sandbox.renderMessageBase({...record,metadata:{job_ids:["inline-1","inline-1","<script>bad</script>"],job_id:"inline-2"}});
+assert.equal((html.match(/data-action="view-job"/g)||[]).length,2);assert.match(html,/data-id="inline-1"/);assert.ok(!html.includes("<script>bad</script>"));

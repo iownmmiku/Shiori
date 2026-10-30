@@ -14,6 +14,10 @@ from jsonschema import Draft202012Validator
 from .db import message_fingerprint, utc_now
 
 
+MCP_CHAT_REFRESH_TIMEOUT = 5.0
+MCP_CHAT_REFRESH_BACKOFF = 30.0
+
+
 def encoded(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True, allow_nan=False)
 
@@ -74,6 +78,7 @@ class ToolActions:
         self.path = self.store.data_dir / 'tool_runs.json'
         self._lock = threading.RLock()
         self._catalog, self._status, self._runs = {}, {}, []
+        self._refresh_jobs, self._refresh_backoff = {}, {}
         self._closed = False
         self.recovery_warning = ''
         self.mcp_suspended = False
@@ -237,19 +242,133 @@ class ToolActions:
         config = self._config(server_id)
         try:
             result = await self.client.discover(dict(config,enabled=True))
-            if self._identity(config) != self._identity(self._config(server_id)) or self._closed:
-                raise ValueError('发现期间配置已变化，请重新发现')
-            accepted = []
-            for item in result['tools']:
-                try: bounded_schema(item['inputSchema'])
-                except ValueError: continue
-                accepted.append(item)
-            self._catalog[server_id] = dict(identity=self._identity(config), tools=accepted, expires=time.monotonic()+900)
-            self._status[server_id] = dict(last_error='', last_checked_at=utc_now())
+            accepted = self._accept_discovery(config, result)
             return self._redact(dict(result, tools=accepted, message=f'发现{len(accepted)}个可用工具；不支持的复杂参数定义已过滤。调用遵循电脑控制权限和当前执行模式。'))
         except Exception as exc:
             self._status[server_id] = dict(last_error='发现失败，请检查协议、地址和认证', last_checked_at=utc_now())
             raise ValueError('工具发现失败，请检查服务地址、认证和受支持的协议版本') from exc
+
+    def _accept_discovery(self, config, result):
+        server_id, identity = config['id'], self._identity(config)
+        if identity != self._identity(self._config(server_id)) or self._closed:
+            raise ValueError('发现期间配置已变化，请重新发现')
+        accepted = []
+        for item in result['tools']:
+            try: bounded_schema(item['inputSchema'])
+            except ValueError: continue
+            accepted.append(item)
+        self._catalog[server_id] = dict(identity=identity, tools=accepted, expires=time.monotonic()+900)
+        self._status[server_id] = dict(last_error='', last_checked_at=utc_now())
+        self._refresh_backoff.pop((server_id, identity), None)
+        return accepted
+
+    def _chat_refresh_allowed(self, scope_id, user_id, identity):
+        """Automatic discovery is confined to authenticated local chat."""
+        from .settings import resolve_model
+        cfg = self.settings.get()
+        if (self._closed or self.mcp_suspended or not str(scope_id).startswith('web:')
+                or cfg.get('paused') or getattr(self.chat.provider, '_updating', False)
+                or not self.external_tools_allowed()):
+            return False
+        access = getattr(self.chat, 'access', None)
+        if (access is None or not isinstance(identity, dict) or identity.get('platform') != 'local'
+                or not access.is_admin(identity)):
+            return False
+        try:
+            scope = self.store.get_scope(scope_id)
+        except KeyError:
+            return False
+        return bool(scope.get('enabled', True) and scope.get('allow_mcp', False)
+                    and scope.get('allow_tools', True) and self.chat.social._allowed(scope_id)
+                    and resolve_model(cfg, 'chat', model_id=scope.get('model_id') or None).get('tools', True))
+
+    def _refresh_entry_allowed(self, entry):
+        try:
+            config = self._config(entry['config']['id'])
+        except ValueError:
+            return False
+        return (config.get('enabled') and bool(config.get('allowed_tools'))
+                and self._identity(config) == self._identity(entry['config'])
+                and any(self._chat_refresh_allowed(*request) for request in entry['waiters'].values()))
+
+    def _refresh_failed(self, key):
+        self._refresh_backoff[key] = time.monotonic() + MCP_CHAT_REFRESH_BACKOFF
+        # A superseded connection must not overwrite the new service's status.
+        try:
+            if self._identity(self._config(key[0])) != key[1]:
+                return
+        except ValueError:
+            return
+        self._status[key[0]] = dict(last_error='聊天工具目录刷新失败，稍后重试或手动发现', last_checked_at=utc_now())
+
+    async def _refresh_catalog(self, key, entry):
+        try:
+            if not self._refresh_entry_allowed(entry):
+                return
+            result = await asyncio.wait_for(self.client.discover(copy.deepcopy(entry['config'])),
+                                            timeout=MCP_CHAT_REFRESH_TIMEOUT)
+            if self._refresh_entry_allowed(entry):
+                self._accept_discovery(entry['config'], result)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            # A failed refresh never renews or falls back to an expired catalog.
+            self._refresh_failed(key)
+
+    def _refresh_done(self, key, entry):
+        if self._refresh_jobs.get(key) is entry:
+            self._refresh_jobs.pop(key, None)
+
+    async def refresh_for_chat(self, scope_id, user_id, identity=None):
+        """Refresh permitted local-chat catalogs within one shared time budget.
+
+        Concurrent chats share discovery, not authorization. Each waiter retains
+        its own permission guard; cancelling the last waiter cancels discovery.
+        Ordinary connection failures degrade to unavailable tools, not a failed
+        chat. Explicit discovery remains available and bypasses retry backoff.
+        """
+        identity = self._identity_for(scope_id, user_id, identity)
+        if not self._chat_refresh_allowed(scope_id, user_id, identity):
+            return
+        token, joined, cancelled = object(), [], []
+        try:
+            configs = self.settings.get().get('mcp_servers', [])
+            current_keys = {(config['id'], self._identity(config)) for config in configs}
+            self._refresh_backoff = {key: until for key, until in self._refresh_backoff.items()
+                                     if key in current_keys and until > time.monotonic()}
+            for config in configs:
+                if not config.get('enabled') or not config.get('url') or not config.get('allowed_tools'):
+                    continue
+                key = (config['id'], self._identity(config))
+                cache = self._catalog.get(config['id'], {})
+                now = time.monotonic()
+                if ((cache.get('identity') == key[1] and cache.get('expires', 0) > now)
+                        or self._refresh_backoff.get(key, 0) > now):
+                    continue
+                entry = self._refresh_jobs.get(key)
+                if entry is not None and (entry['task'].done() or entry['task'].cancelling()):
+                    entry = None
+                if entry is None:
+                    entry = {'config': copy.deepcopy(config), 'waiters': {}}
+                    self._refresh_jobs[key] = entry
+                    entry['task'] = asyncio.create_task(self._refresh_catalog(key, entry))
+                    entry['task'].add_done_callback(lambda _, key=key, entry=entry: self._refresh_done(key, entry))
+                entry['waiters'][token] = (scope_id, str(user_id), copy.deepcopy(identity))
+                joined.append((key, entry))
+            if joined:
+                _, pending = await asyncio.wait([entry['task'] for _, entry in joined],
+                                                timeout=MCP_CHAT_REFRESH_TIMEOUT)
+                for key, entry in joined:
+                    if entry['task'] in pending:
+                        self._refresh_failed(key)
+        finally:
+            for key, entry in joined:
+                entry['waiters'].pop(token, None)
+                if not entry['waiters'] and not entry['task'].done():
+                    entry['task'].cancel()
+                    cancelled.append(entry['task'])
+            if cancelled:
+                await asyncio.gather(*cancelled, return_exceptions=True)
 
     def _identity_for(self,scope_id,user_id,identity=None):
         access = getattr(self.chat,'access',None)
@@ -264,7 +383,7 @@ class ToolActions:
                     and not computer.get('allow_external_tools', False))
 
     def available(self, scope_id, user_id, identity=None):
-        if self.mcp_suspended or not self.external_tools_allowed(): return []
+        if self._closed or self.mcp_suspended or not self.external_tools_allowed(): return []
         access=getattr(self.chat,'access',None)
         if access is not None and not access.is_admin(self._identity_for(scope_id,user_id,identity)): return []
         scope = self.store.get_scope(scope_id)
@@ -272,7 +391,7 @@ class ToolActions:
         items = []
         for cfg in self.settings.get().get('mcp_servers', []):
             cache = self._catalog.get(cfg['id'], {})
-            if not cfg['enabled'] or cache.get('identity') != self._identity(cfg) or cache.get('expires',0) < time.monotonic(): continue
+            if not cfg['enabled'] or cache.get('identity') != self._identity(cfg) or cache.get('expires',0) <= time.monotonic(): continue
             for tool in cache['tools']:
                 if tool['name'] not in cfg['allowed_tools']: continue
                 alias = 'mcp_' + hashlib.sha256((cfg['id']+':'+tool['name']).encode()).hexdigest()[:20]
@@ -383,7 +502,17 @@ class ToolActions:
 
     def close(self):
         self._closed = True
+        for entry in list(self._refresh_jobs.values()):
+            entry['task'].cancel()
         with self._lock:
             for item in self._runs:
                 if item['status'] == 'pending': item.update(status='cancelled',error='运行已结束，待审批不会重放',updated_at=utc_now())
             self._save()
+
+    async def aclose(self):
+        pending = [entry['task'] for entry in self._refresh_jobs.values()]
+        try:
+            self.close()
+        finally:
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)

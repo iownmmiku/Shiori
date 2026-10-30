@@ -245,6 +245,11 @@ class StickerLibrary:
                             and current['daily_recognitions']>0 and self.model()==model and self._source_current(record)
                             and (claim is None or self._claim_current(claim)))
                 if not guard() or not model.get('model') or not model.get('base_url') or not model.get('vision'): return
+                if str(url).startswith('onebot-image:'):
+                    resolver = getattr(self, 'resolve_image_refs', None)
+                    if not callable(resolver): return
+                    url = (await resolver(message['scope_id'], [url], before_send=guard))[0]
+                    if not guard(): return
                 raw, mime = await asyncio.to_thread(download_image, url)
                 if not guard(): return
                 digest = hashlib.sha256(raw).hexdigest()

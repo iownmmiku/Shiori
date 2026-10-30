@@ -7,7 +7,7 @@ import pytest
 
 from shiori.db import Store
 from shiori.model_stream import receive_chat
-from shiori.provider import (Provider, ProviderContentFilterError, ProviderError,
+from shiori.provider import (Provider, ProviderConnectionError, ProviderContentFilterError, ProviderError,
                               ProviderOutputBudgetError, ProviderStreamError)
 from shiori.settings import PROVIDER_DEFAULTS, Settings
 
@@ -54,9 +54,12 @@ def runtime(tmp_path, monkeypatch):
     provider, requests, streams = Provider(settings, store), [], []
     original = httpx.AsyncClient
 
-    def source(*, parts=None, body=None, close_error=None, read_error=None, content_type='text/event-stream'):
+    def source(*, parts=None, body=None, close_error=None, read_error=None,
+               content_type='text/event-stream', fallback_body=None):
         def handler(request):
             requests.append(request)
+            if fallback_body is not None and request.url.host == 'backup.invalid':
+                return httpx.Response(200, json=fallback_body)
             assert request.url.host == 'fixture.invalid', 'terminal failure must not dispatch a fallback'
             if parts is None:
                 return httpx.Response(200, json=body)
@@ -177,15 +180,41 @@ def test_json_response_is_preserved_after_a_complete_body_close_failure(runtime,
 
 
 @pytest.mark.parametrize('mode', ['off', 'on'])
-def test_json_partial_read_error_is_not_swallowed_or_retried_after_a_close_error(runtime, mode):
-    provider, _, source, _, _ = runtime
-    provider.settings.update({'model': {'stream_mode': mode}})
+@pytest.mark.parametrize('fallback', [False, True], ids=['fallback_off', 'fallback_on'])
+@pytest.mark.parametrize('continuation', [False, True], ids=['initial', 'tool_continuation'])
+def test_json_partial_read_error_preserves_cause_and_obeys_fallback_after_close_error(runtime, mode, fallback, continuation):
+    provider, store, source, requests, streams = runtime
+    provider.settings.update({'model': {'stream_mode': mode, 'timeout_fallback': fallback}})
+    read_failure = httpx.ReadError(PRIVATE)
+    may_fallback = fallback and not continuation
+    backup = {'choices': [{'message': {'content': 'complete backup reply'}, 'finish_reason': 'stop'}],
+              'usage': {'prompt_tokens': 8, 'completion_tokens': 5}}
     source(parts=[b'{"choices":'], content_type='application/json',
-        read_error=httpx.ReadError(PRIVATE), close_error=httpx.ReadTimeout(PRIVATE))
-    with pytest.raises(ProviderError) as failure:
-        asyncio.run(provider.complete([{'role': 'user', 'content': 'hello'}]))
-    assert PRIVATE not in str(failure.value)
-    assert_single_receipt(runtime, estimated=True)
+        read_error=read_failure, close_error=httpx.ReadTimeout(PRIVATE),
+        fallback_body=backup if may_fallback else None)
+    messages = [{'role': 'user', 'content': 'hello'}]
+    if continuation:
+        messages.append({'role': 'tool', 'tool_call_id': 'c1', 'content': 'already executed'})
+    if may_fallback:
+        result = asyncio.run(provider.complete(messages))
+        assert result['content'] == 'complete backup reply'
+        assert [request.url.host for request in requests] == ['fixture.invalid', 'backup.invalid']
+        records = store.list_usage()
+        assert len(records) == 2
+        primary = next(record for record in records if record['model'] == 'fixture')
+        actual = next(record for record in records if record['model'] == 'backup')
+        assert primary['estimated'] and primary['unconfirmed']
+        assert not actual.get('estimated') and not actual.get('unconfirmed')
+        assert actual['input_tokens'] == 8 and actual['output_tokens'] == 5
+        assert not provider._reservations and provider._global_gate.active == 0
+        assert all(stream.closed for stream in streams)
+        assert PRIVATE not in json.dumps(store.list_events())
+    else:
+        with pytest.raises(ProviderConnectionError) as failure:
+            asyncio.run(provider.complete(messages))
+        assert failure.value.__cause__ is read_failure, 'cleanup timeout must not replace the original read error'
+        assert not failure.value.retryable and PRIVATE not in str(failure.value)
+        assert_single_receipt(runtime, estimated=True)
 
 
 def test_json_read_failure_is_not_mistaken_for_eof_or_replaced_by_close_failure():

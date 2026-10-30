@@ -68,10 +68,12 @@ def create_app(data_dir=None, *, start_workers=True, allow_remote=False):
 
     @asynccontextmanager
     async def lifespan(app):
+        await app.state.updates.reconcile_startup()
         async def start_when_ready():
             while app.state.updates.startup_pending():
                 provider._updating = True
                 await asyncio.sleep(.25)
+                await app.state.updates.reconcile_startup()
             provider._updating = False
             await reconnect()
             await scheduler.start()
@@ -193,7 +195,8 @@ def create_app(data_dir=None, *, start_workers=True, allow_remote=False):
                 if not auth_http.authenticated(request):
                     return JSONResponse({'detail': '请登录 Shiori；登录可能已失效', 'code':'authentication_required'}, status_code=401)
             updating = getattr(provider, '_updating', False) or app.state.updates.startup_pending()
-            if updating and not (request.url.path.startswith('/api/updates') or request.url.path in ('/api/auth/status','/api/auth/login','/api/auth/logout','/api/shutdown')):
+            recovery_auth = bool(app.state.updates._recovery) and request.url.path in ('/api/session', '/api/auth/bootstrap', '/api/auth/setup')
+            if updating and not (request.url.path.startswith('/api/updates') or request.url.path in ('/api/auth/status','/api/auth/login','/api/auth/logout','/api/shutdown') or request.url.path == '/api/bootstrap' and app.state.updates._recovery or recovery_auth):
                 return JSONResponse({'detail':'正在切换版本并检查启动状态，请稍后重试','code':'update_in_progress'},status_code=503)
             if request.method in ('POST','PUT','PATCH'):
                 if request.url.path == '/api/backup/restore':
@@ -300,6 +303,9 @@ def create_app(data_dir=None, *, start_workers=True, allow_remote=False):
 
     @app.get('/api/bootstrap')
     async def bootstrap(request: Request):
+        if app.state.updates._recovery:
+            return {'version': __version__, 'name': 'Shiori', 'update_recovery': app.state.updates._recovery,
+                    'settings': {}, 'scopes': [], 'personas': [], 'setup_required': False}
         cfg = settings.public()
         model = resolve_model(settings.get(), 'chat')
         return {'version': __version__, 'name': 'Shiori', 'listener': auth_http.binding(request), 'setup_required': not (model.get('base_url') and model.get('model')),
@@ -604,7 +610,8 @@ def create_app(data_dir=None, *, start_workers=True, allow_remote=False):
     async def delete_knowledge(id: str): return chat.knowledge.delete(id)
 
     @app.get('/api/messages')
-    async def messages(scope_id: str = 'web:default', limit: int = 80): return store.list_messages(scope_id, limit=min(max(limit, 1), 200))
+    async def messages(scope_id: str = 'web:default', limit: int = 80, before: str | None = None):
+        return store.list_messages(scope_id, limit=min(max(limit, 1), 200), before=before)
 
     @app.get('/api/time')
     async def program_time():

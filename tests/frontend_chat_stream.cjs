@@ -1,6 +1,6 @@
 "use strict";
 const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),path=require('node:path');
-const calls=[],writes=[],notices=[],nodes=new Map();
+const calls=[],writes=[],notices=[],jobs=[],nodes=new Map();
 const state={scope:'web:default',page:'chat',images:[],chatMode:'chat',draft:'',sending:false};
 let response,bootstrap=0;
 const deferred=()=>{let resolve,reject;const promise=new Promise((a,b)=>{resolve=a;reject=b;});return{promise,resolve,reject};};
@@ -14,7 +14,7 @@ const sandbox={window:{},state,TextDecoder,AbortController,URLSearchParams,setTi
 vm.createContext(sandbox);
 vm.runInContext(fs.readFileSync(path.join(__dirname,'../shiori/static/experience-chat.js'),'utf8'),sandbox);
 const runtime={attachments:[],attachmentScope:'web:default'};
-const ui=sandbox.window.ShioriExperienceChat.create(runtime,{});
+const ui=sandbox.window.ShioriExperienceChat.create(runtime,{onJob:job=>jobs.push(job)});
 const frame=event=>'data: '+JSON.stringify(event)+'\n\n';
 function stream(events,options={}){
   const raw=new TextEncoder().encode(events.map(frame).join(''));
@@ -33,12 +33,19 @@ async function main(){
   response=stream([{type:'start'},{type:'delta',text:'你好<script>private</script>'},{type:'reset'},
     {type:'delta',text:'经过工具整理'},{type:'result',data:{reply:'最终回复'}}]);
   await ui.sendChat();
-  assert.equal(calls[0][0],'/api/chat');assert.equal(calls[0][1].body.stream,true);assert.equal(calls[0][1].raw,true);
+  assert.equal(calls[0][1].body.mode,'chat');assert.equal(calls[0][0],'/api/chat');assert.equal(calls[0][1].body.stream,true);assert.equal(calls[0][1].raw,true);
   assert.ok(writes.includes('你好<script>private</script>'),'split UTF-8 fragments are decoded intact');
   assert.ok(writes.includes('经过工具整理'));assert.equal(writes.at(-1),'最终回复');
   assert.equal(preview.innerHTML,'untouched','preview always uses textContent, never renders model HTML');
   assert.ok(writes.indexOf('')<writes.indexOf('经过工具整理'),'tool draft reset precedes the follow-up answer');
   assert.equal(state.draft,'');assert.equal(state.sending,false);assert.equal(runtime.preview,null);
+
+  reset();state.chatMode='computer';jobs.length=0;
+  const harness={id:'inline-1',kind:'computer',inline:true,scope_id:'web:default',status:'running'};
+  response=stream([{type:'job',data:harness},{type:'job',data:{...harness,id:'foreign',scope_id:'web:other'}},
+    {type:'job',data:{...harness,status:'completed'}},{type:'result',data:{reply:'已完成',jobs:[{...harness,status:'completed'}]}}]);
+  await ui.sendChat();assert.equal(calls[0][1].body.mode,'chat','legacy cached mode is ignored');
+  assert.deepEqual(jobs.map(job=>job.status),['running','completed','completed']);assert.ok(jobs.every(job=>job.id==='inline-1'),'foreign scope task events are ignored');
 
   reset();response=stream([{type:'delta',text:'unfinished'}]);
   await ui.sendChat();

@@ -1,16 +1,16 @@
 "use strict";
 const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),path=require('node:path');
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const node={innerHTML:''},calls=[];let confirm=null,polls=0;
+const node={innerHTML:''},calls=[];let confirm=null,polls=0,pollCallback=null,reloads=0;
 const release={id:12,tag:'v0.1.2',name:'Release <script>x</script>',notes:'<img src=x onerror=bad()>',published_at:'2026-10-19',relation:'newer',prerelease:false,
   url:'https://github.com/iownmmiku/Shiori/releases/tag/v0.1.2',assets:{installer:{name:'setup.exe',size:123,verified_download_available:true},source:{name:'source.zip',size:20,verified_download_available:true}}};
 let result={current_version:'0.1.1',mode:'installed',default_kind:'installer',install_supported:true,local_install_allowed:true,
   releases:[],download:{status:'idle'},releases_url:'https://github.com/iownmmiku/Shiori/releases',page:1,include_prerelease:false};
 let fail=false;
-const sandbox={window:{},state:{page:'settings',authenticated:true},document:{hidden:false},e:esc,fmt:String,icon:()=>'',notice:text=>esc(text),
+const sandbox={window:{location:{reload:()=>reloads++}},state:{page:'settings',authenticated:true},document:{hidden:false},e:esc,fmt:String,icon:()=>'',notice:text=>esc(text),
   button:(label,action,style,symbol,extra='')=>`<button data-action="${action}" ${extra}>${esc(label)}</button>`,
   select:(name,label,options,value)=>`<select name="${name}" aria-label="${label}">${options.map(([id,text])=>`<option value="${id}" ${id===value?'selected':''}>${esc(text)}</option>`).join('')}</select>`,
-  $:selector=>selector==='#updates-section'?node:null,toast(){},openModal:(title,description,html)=>{node.innerHTML=html;},setTimeout:()=>++polls,clearTimeout(){},
+  $:selector=>selector==='#updates-section'?node:null,toast(){},openModal:(title,description,html)=>{node.innerHTML=html;},setTimeout:callback=>{pollCallback=callback;return ++polls;},clearTimeout(){},
   confirmAction:async(a,b,callback)=>{confirm={a,b,callback};},
   api:async(url,options)=>{calls.push({url,options});if(fail)throw Error('network failed');return structuredClone(result);}};
 vm.createContext(sandbox);vm.runInContext(fs.readFileSync(path.join(__dirname,'../shiori/static/updates.js'),'utf8'),sandbox);
@@ -55,5 +55,24 @@ vm.createContext(sandbox);vm.runInContext(fs.readFileSync(path.join(__dirname,'.
   result={released_bytes:1024};await confirm.callback();
   assert.equal(calls.at(-1).url,'/api/updates/storage/cleanup');
   assert.equal(calls.at(-1).options.body.items[0].fingerprint,'exact-preview');
-  ui.close();console.log('Update UI selection, escaping, direct switch, storage cleanup and explicit install checks passed');
+  result={current_version:'0.2.1-beta',mode:'source',releases:[],download:{id:'c'.repeat(32),status:'recovery_required'},
+    switch_allowed:false,automatic_active:false,install_result:{status:'recovery_required'},
+    recovery:{message:'Interrupted <img src=x onerror=bad()>',can_rollback:true}};
+  let recoveryMarkup=await ui.settingsPanel();
+  assert.match(recoveryMarkup,/&lt;img/);assert.ok(!recoveryMarkup.includes('<img'));
+  assert.ok(!recoveryMarkup.includes('data-action="update-recover"'));
+  assert.match(recoveryMarkup,/data-action="update-recheck"/);
+  await assert.rejects(ui.handleAction('update-recover',{}),/不能自动恢复/);
+  result.switch_allowed=true;await ui.handleAction('update-status',{});
+  assert.match(node.innerHTML,/data-action="update-recover"/);
+  const recoveryBefore=calls.length;await ui.handleAction('update-recover',{});
+  assert.equal(calls.length,recoveryBefore,'recovery waits for explicit confirmation of restoring data');
+  assert.match(confirm.b,/配置、聊天与记忆/);
+  fail=true;await confirm.callback();assert.match(node.innerHTML,/network failed/);assert.equal(reloads,0);
+  fail=false;await confirm.callback();
+  assert.equal(calls.at(-1).url,'/api/updates/recover');assert.equal(calls.at(-1).options.body.download_id,'c'.repeat(32));
+  assert.equal(typeof pollCallback,'function');
+  result={...result,recovery:{},automatic_active:false,install_result:{status:'failed',message:'已恢复旧程序'}};
+  await pollCallback();assert.equal(reloads,1,'a completed rollback also reloads the normal application');
+  ui.close();console.log('Update UI selection, escaping, switch, recovery authentication, rollback refresh and storage checks passed');
 })().catch(error=>{console.error(error);process.exitCode=1;});

@@ -246,6 +246,30 @@ def test_authenticated_api_contract_and_chat_document_alias(tmp_path):
         assert client.get('/api/qq/chats', headers={'Sec-Fetch-Site': 'cross-site'}).status_code == 403
 
 
+def test_local_chat_history_api_pages_before_cursor_without_losing_records(tmp_path):
+    app = create_app(tmp_path / 'local-history', start_workers=False)
+    with TestClient(app) as client:
+        client.headers['Authorization'] = 'Bearer ' + app.state.settings.token
+        records = [app.state.store.add_message('web:default', 'owner', 'user', f'line {index}')
+                   for index in range(175)]
+        latest = client.get('/api/messages', params={'scope_id': 'web:default'}).json()
+        assert [row['id'] for row in latest] == [row['id'] for row in records[-80:]]
+        seen, cursor = [], None
+        while True:
+            params = {'scope_id': 'web:default', 'limit': 80}
+            if cursor:
+                params['before'] = cursor
+            response = client.get('/api/messages', params=params)
+            assert response.status_code == 200, response.text
+            page = response.json()
+            if not page:
+                break
+            seen = [row['id'] for row in page] + seen
+            cursor = page[0]['id']
+        assert seen == [row['id'] for row in records]
+        assert len(set(seen)) == len(seen)
+
+
 def test_long_qq_history_cursor_seeks_do_not_scan_unrelated_history(workspace):
     store = workspace.store
     scope_id = 'qq:group:long-history'

@@ -20,6 +20,9 @@ from .qq_diagnostics import QQDiagnostics, private_scope
 from .timezones import config_zone, ingress_times
 
 
+IMAGE_RESOLVE_TIMEOUT = 10.0
+
+
 def _ids(value):
     if isinstance(value, str):
         value = re.split(r"[,，;\s]+", value)
@@ -60,6 +63,7 @@ class OneBotBridge:
         self._diagnostics = QQDiagnostics(store, 'onebot')
         self._failure_feedback_at = {}
         self._flow = ConversationFlow(store, settings, chat, self._emit, self._allowed, self._diagnostics.mark)
+        chat._onebot_image_resolver = self.resolve_images
         if getattr(chat, 'character_schedule', None):
             from .schedule_delivery import ScheduleDelivery
             self._flow.schedule_delivery = ScheduleDelivery(self._flow, lambda: self.status().get('connected', False), prefix='qq:')
@@ -256,6 +260,60 @@ class OneBotBridge:
     def _allowed(self, scope_id, user_id=None):
         return self._rejection(scope_id, user_id) is None
 
+    async def resolve_images(self, scope_id, images, *, before_send=None):
+        """Resolve connector-owned files after collection, under one deadline."""
+        socket, instance = self._socket, self._self_id
+        def current():
+            if (socket is None or self._socket is not socket or self._self_id != instance
+                    or not self._allowed(scope_id) or not scope_value(self.store.get_scope(scope_id), 'enabled', True)
+                    or before_send is not None and not before_send()):
+                raise ValueError('QQ 图片来源、连接或权限已变化，请重新发送图片。')
+        if not isinstance(images, list) or not 1 <= len(images) <= 3:
+            raise ValueError('每次最多解析 3 张 QQ 图片')
+        current()
+        async def resolve(image):
+            if not image.startswith('onebot-image:'):
+                return image
+            match = re.fullmatch(r'onebot-image:(\d{1,20}):([a-zA-Z0-9][a-zA-Z0-9_.-]{5,255})', image)
+            if not match or match[1] != instance:
+                raise ValueError('QQ 图片不属于当前连接的机器人')
+            current()
+            echo = uuid.uuid4().hex
+            future = asyncio.get_running_loop().create_future()
+            self._pending[echo] = (socket, future)
+            try:
+                action = {'action': 'get_image', 'params': {'file': match[2]}, 'echo': echo}
+                if hasattr(socket, 'send_json'):
+                    await socket.send_json(action)
+                else:
+                    await socket.send(json.dumps(action))
+                result = await future
+                current()
+                data = result.get('data') if isinstance(result, dict) else None
+                url = data.get('url') if isinstance(data, dict) else None
+                if (not isinstance(result, dict) or result.get('status') != 'ok' or result.get('retcode', 0) != 0
+                        or not isinstance(url, str) or not url.startswith('https://') or len(url) > 3000):
+                    raise ValueError('QQ 连接器未返回有效图片地址，请重新发送原图。')
+                return url
+            finally:
+                self._pending.pop(echo, None)
+                if not future.done():
+                    future.cancel()
+        tasks = []
+        try:
+            async with asyncio.timeout(IMAGE_RESOLVE_TIMEOUT):
+                tasks = [asyncio.create_task(resolve(image)) for image in images]
+                result = await asyncio.gather(*tasks)
+                current()
+                return result
+        except (OSError, TimeoutError, RuntimeError) as exc:
+            raise ValueError('QQ 图片解析超时或连接中断，请重新发送原图。') from exc
+        finally:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+
     @staticmethod
     def _message(payload):
         raw = payload.get('message') or payload.get('raw_message', '')
@@ -368,26 +426,10 @@ class OneBotBridge:
                 return
         text, images, mentions, reply_id = self._message(payload)
         if any(image.startswith('onebot-image:') for image in images):
-            resolved=[]
-            for image in images:
-                if not image.startswith('onebot-image:'):resolved.append(image);continue
-                socket=self._socket
-                if socket is None:continue
-                echo=uuid.uuid4().hex;future=asyncio.get_running_loop().create_future();self._pending[echo]=(socket,future)
-                try:
-                    action={'action':'get_image','params':{'file':image[len('onebot-image:'):]},'echo':echo}
-                    if hasattr(socket,'send_json'):await socket.send_json(action)
-                    else:await socket.send(json.dumps(action))
-                    result=await asyncio.wait_for(future,10)
-                    value=(result or {}).get('data') or {}
-                    url=value.get('url') if isinstance(value,dict) else None
-                    if isinstance(url,str) and url.startswith('https://') and len(url)<=3000:resolved.append(url)
-                except (OSError,TimeoutError,RuntimeError):pass
-                finally:self._pending.pop(echo,None)
-            if len(resolved)!=len(images):
-                await self.send(scope_id,'这张QQ图片暂时无法读取，请重新发送原图后重试。')
-                return
-            images=resolved
+            # Persist the original attachment and collect the whole turn first.
+            # A slow connector lookup must not let later text overtake its image.
+            images = [f'onebot-image:{self._self_id}:{image[len("onebot-image:"):]}'
+                      if image.startswith('onebot-image:') else image for image in images]
         if not text and not images:
             self._diagnostics.mark('empty_message', scope_id=scope_id, user_id=user_id)
             return
@@ -428,6 +470,15 @@ class OneBotBridge:
                 self._diagnostics.mark('reply_failed', scope_id=scope_id, user_id=user_id, stage='failed')
                 await self._failure_feedback(scope_id, metadata)
             return
+        # Compatibility with minimal legacy chat adapters that have no observed
+        # message/debounce pipeline. The normal ChatService resolves later.
+        if any(image.startswith('onebot-image:') for image in images):
+            try:
+                images = await self.resolve_images(scope_id, images)
+                metadata['images'] = images
+            except ValueError:
+                await self.send(scope_id, '这张QQ图片暂时无法读取，请重新发送原图后重试。')
+                return
         identity = resolved_identity(self.settings.get(), scope)
         reply = message_type == 'private' or (mentioned and identity['trigger_at'])
         if not reply:

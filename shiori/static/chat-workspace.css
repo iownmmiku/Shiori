@@ -1,4 +1,25 @@
 /* The local Chat workspace uses the existing Rhine paper, ink and teal tokens. */
+.chat-history-controls{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:8px;margin-bottom:16px;color:var(--muted);font-size:11px}
+.chat-history-controls small{font-size:10px}
+.chat-capability-note{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.chat-capability-note>span{min-width:0;overflow-wrap:anywhere;flex:1}
+.chat-capability-note>.btn{flex:none;font-size:11px;padding:4px 8px}
+#live-job-detail>.chat-inline-progress+.chat-inline-progress{margin-top:10px}
+.chat-tool-step{display:flex;align-items:flex-start;gap:12px;margin:5px 0;padding:7px 11px;border:1px solid var(--line);font-size:12px;min-width:0;color:var(--ink-2)}
+.chat-tool-details{min-width:0;flex:1}
+.chat-tool-details>summary{display:flex;align-items:center;gap:9px;cursor:pointer;min-height:26px;list-style:none}
+.chat-tool-details>summary::before{content:"›";font-size:16px;color:var(--muted);width:9px;flex:none}
+.chat-tool-details[open]>summary::before{content:"⌄"}
+.chat-tool-details>summary::-webkit-details-marker{display:none}
+.chat-tool-name{font-weight:600;min-width:0;overflow-wrap:anywhere}
+.chat-tool-body{padding-top:9px;max-height:260px;overflow:auto;overflow-wrap:anywhere}
+.chat-tool-body .job-step{font-size:11px}.chat-tool-body pre{max-height:140px}
+.chat-tool-actions{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:7px;max-width:50%;min-width:0}
+.chat-tool-actions>.btn{margin:0;padding:4px 7px;font-size:11px;min-height:26px}
+.chat-tool-file{display:inline-flex;align-items:center;gap:4px;max-width:100%;min-width:0;font-size:11px;line-height:26px;color:var(--teal)}
+.chat-tool-file>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chat-tool-step svg{width:14px;height:14px;flex:none}
+.chat-tool-step+.message{margin-top:15px}
 :root body.chat-workbench .app-shell{grid-template-columns:minmax(0,1fr)}
 :root body.chat-workbench>.app-shell>#sidebar,:root body.chat-workbench #sidebar-scrim,:root body.chat-workbench .page-footer,:root body.chat-workbench #menu-toggle,:root body.chat-workbench .scope-picker,:root body.qq-monitor-page .scope-picker{display:none}
 :root body.chat-workbench .main-shell{margin-left:0;min-width:0;width:100%}

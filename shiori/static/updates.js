@@ -16,6 +16,7 @@ window.ShioriUpdates = (() => {
   }
   function markup() {
     if (!status) return `<h2>版本与更新</h2><p>${e(error || "正在读取本地版本信息…")}</p>${button("重新读取","update-status","","refresh")}`;
+    if (status.recovery?.message) return `<div class="section-title"><h2>恢复中断的更新</h2></div><p>${e(status.recovery.message)}</p><p class="help-caption">聊天暂时停止，避免在不完整的程序上继续写入数据。更新目录和备份会保留。</p>${error ? `<p role="alert">${e(error)}</p>` : ''}<div class="section-actions">${button("重新核验","update-recheck","ghost","refresh",busy ? "disabled" : "")}${status.recovery.can_rollback && status.switch_allowed ? button("恢复更新前的版本并重启","update-recover","","refresh",busy ? "disabled" : "") : ''}</div>`;
     const release=selection(), download=status.download || {}, downloading=download.status==="downloading";
     const asset=release?.assets?.[selectedKind], disabled=busy || downloading || status.automatic_active ? " disabled" : "";
     const relation={newer:"较新版本",current:"当前版本",older:"历史版本"};
@@ -42,7 +43,7 @@ window.ShioriUpdates = (() => {
     stop();
     const section=$("#updates-section"),dialog=$("#modal");
     if (!section || !state.authenticated || state.stopped || dialog?.contains?.(section) && !dialog.open || status?.download?.status!=="downloading" && !status?.automatic_active)return;
-    timer=setTimeout(async()=>{try{if(!document.hidden){status=await api("/api/updates");error="";paint();if(switchRequested && status.install_result?.status==="completed"){switchRequested=false;window.location?.reload?.();}}}catch(exc){error=switchRequested ? "程序正在重启，正在等待重新连接…" : exc.message;paint();}finally{schedule();}},1000);
+    timer=setTimeout(async()=>{try{if(!document.hidden){status=await api("/api/updates");error="";paint();if(switchRequested && ["completed","failed"].includes(status.install_result?.status)){switchRequested=false;window.location?.reload?.();}}}catch(exc){error=switchRequested ? "程序正在重启，正在等待重新连接…" : exc.message;paint();}finally{schedule();}},1000);
   }
   async function settingsPanel() {
     try {status=await api("/api/updates");error="";}catch(exc){error=exc.message;}
@@ -55,6 +56,23 @@ window.ShioriUpdates = (() => {
       $("#modal").classList.add("modal-wide");schedule();return true;
     }
     if (busy) return true;
+    if(action==='update-recover'){
+      if(!status?.recovery?.can_rollback || !status.switch_allowed)throw new Error('当前入口不能自动恢复更新。');
+      const downloadId=status.download?.id;
+      await confirmAction('恢复更新前的程序和数据？','将恢复这次更新开始前保存的配置、聊天与记忆，并自动重启。更新期间的数据可能被恢复副本覆盖；备份会继续保留。',async()=>{
+        busy=true;error='';paint();
+        try{await api('/api/updates/recover',{method:'POST',body:{download_id:downloadId}});switchRequested=true;status.recovery=null;status.automatic_active=true;paint();schedule();}
+        catch(exc){error=exc.message;}
+        finally{busy=false;paint();}
+      },'恢复并重启');return true;
+    }
+    if(action==='update-recheck'){
+      busy=true;error='';paint();
+      try{status=await api('/api/updates/recheck',{method:'POST',body:{}});if(!status.recovery?.message&&!status.automatic_active){window.location?.reload?.();return true;}}
+      catch(exc){error=exc.message;}
+      finally{busy=false;paint();schedule();}
+      return true;
+    }
     if(action==='update-storage'){
       busy=true;
       try{

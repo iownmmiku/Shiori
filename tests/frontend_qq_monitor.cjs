@@ -183,6 +183,16 @@ async function run(){
   setup();chats=[];initial=await ui.render();mount(initial);assert.match(initial,/尚无 QQ 会话/);assert.doesNotMatch(initial,/data-action="qq-monitor-settings"/);assert.equal(calls.length,1);
   assert.equal(await ui.handleAction("chat-send",{dataset:{}}),false);
   assert.ok(calls.every(call=>(call.options.method||"GET")==="GET"));
+  // Current messages poll independently; a frequent tick does not recalculate
+  // every conversation's count. A slow manual list refresh cannot block them.
+  setup();mount(await ui.render());const lists=calls.filter(call=>call.url.startsWith('/api/qq/chats?')).length;
+  await timer()();assert.equal(calls.filter(call=>call.url.startsWith('/api/qq/chats?')).length,lists);
+  let releaseList;override=url=>url.startsWith('/api/qq/chats?')?new Promise(resolve=>{releaseList=resolve;}):url.includes('after=m3')?{items:[msg('arrived-during-list')],has_more:false}:undefined;
+  await action('refresh');assert.match(html(),/arrived-during-list/,'current messages are painted before the sidebar returns');
+  releaseList({items:chats,has_more:false});await tick();ui.close();
+  setup();mount(await ui.render());override=url=>url.startsWith('/api/qq/chats?')?new Promise(resolve=>{releaseList=resolve;}):undefined;
+  await action('refresh');releaseList({items:[],has_more:false});await tick();
+  assert.doesNotMatch(html(),/m3|m2/,'a removed selection cannot leave its messages under another header');ui.close();
   console.log("QQ monitor: filtering, paging, read-only delivery, request races, visibility, and lifecycle regressions passed");
 }
 run().catch(error=>{console.error(error);process.exitCode=1;});

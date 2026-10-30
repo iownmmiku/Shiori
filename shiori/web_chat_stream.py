@@ -10,7 +10,7 @@ import anyio
 from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 
-from .chat_preview import preview_events
+from .chat_preview import preview_events, activity_events
 from .provider import ProviderError
 
 
@@ -21,6 +21,7 @@ def chat_stream(request, run, *, lease, lifecycle, authenticated):
     async def events():
         wake = asyncio.Event()
         pending = []
+        jobs = {}
         length = 0
         disabled = False
 
@@ -45,6 +46,15 @@ def chat_stream(request, run, *, lease, lifecycle, authenticated):
         def encode(event):
             return 'data: ' + json.dumps(event, ensure_ascii=False) + '\n\n'
 
+        def activity(kind, data):
+            if kind == 'job' and isinstance(data, dict) and isinstance(data.get('id'), str):
+                # Keep only the latest snapshot per job. Model resets must not
+                # erase already executed tools or pending approval controls.
+                jobs[data['id']] = {'type': 'job', 'data': data}
+                while len(jobs) > 64:
+                    jobs.pop(next(iter(jobs)))
+                wake.set()
+
         task, disconnected = None, None
         async def watch_disconnect():
             # Request.is_disconnected() uses an already-cancelled probe. With
@@ -60,7 +70,7 @@ def chat_stream(request, run, *, lease, lifecycle, authenticated):
             # deliberately live inside the body iterator until the producer
             # has actually stopped, including cancellation and lease cleanup.
             async with lifecycle():
-                with lease(), preview_events(preview):
+                with lease(), preview_events(preview), activity_events(activity):
                     if not authenticated():
                         yield encode({'type': 'error', 'code': 'authentication_required', 'message': '登录已失效，请重新登录。'})
                         return
@@ -95,6 +105,8 @@ def chat_stream(request, run, *, lease, lifecycle, authenticated):
                                 yield encode({'type': 'error', 'code': 'authentication_required', 'message': '登录已失效，请重新登录。'})
                                 return
                             batch, pending[:] = list(pending), []
+                            batch.extend(jobs.values())
+                            jobs.clear()
                             for event in batch:
                                 yield encode(event)
                             if task.done():

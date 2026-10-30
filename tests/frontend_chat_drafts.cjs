@@ -96,8 +96,8 @@ async function main(){
 
   {const f=fixture();await f.say("尚未发往后端",[image("one")],[A]);f.draft("继续编辑",[image("two")],[B]);
     f.config.renderError=true;f.config.bootstrapError=true;await f.ui.flushCollected();
-    assert.equal(f.sends().length,0);assert.equal(f.state.draft,"尚未发往后端\n继续编辑");
-    assert.deepEqual(plain(f.runtime.attachments),[A,B]);assert.equal(f.state.sending,false);}
+    assert.equal(f.sends().length,1,"rendering is no longer a prerequisite for sending");assert.equal(f.state.draft,"继续编辑");
+    assert.deepEqual(plain(f.runtime.attachments),[B]);assert.equal(f.state.sending,false);}
 
   {const f=fixture();await f.say("原会话的请求",[image("one")],[A]);f.draft("原会话的草稿",[image("two")],[B]);
     f.config.reply=async()=>{f.state.scope="web:other";f.draft("另一个会话的草稿",[image("other")],[C]);throw new Error("transport interrupted");};

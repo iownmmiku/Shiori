@@ -6,7 +6,9 @@ separately and never included in the program replacement set.
 """
 from __future__ import annotations
 import argparse
+from contextlib import contextmanager
 import hashlib
+import http.client
 import json
 import os
 from pathlib import Path, PurePosixPath, PureWindowsPath
@@ -23,6 +25,109 @@ RECEIPT = '.shiori-update.json'
 LEGACY_RECEIPT = '.mikubot-update.json'
 INSTALL_MARKERS = ('.mikubot-install.json', '.shiori-install.json')
 TRANSIENT = {'server.json', '.instance-owner.json', '.process.lock'}
+
+
+@contextmanager
+def worker_guard(work, *, wait_seconds=0):
+    """An OS lease survives stale files, but is released on crash or reboot."""
+    path = regular(Path(work) / 'worker.lock')
+    with path.open('a+b') as lock:
+        if path.stat().st_size == 0:
+            lock.write(b'0'); lock.flush()
+        lock.seek(0)
+        deadline = time.monotonic() + wait_seconds
+        while True:
+            try:
+                if os.name == 'nt':
+                    import msvcrt
+                    msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    raise ValueError('更新助手仍在运行，请等待完成') from None
+                time.sleep(.05)
+        try:
+            yield
+        finally:
+            lock.seek(0)
+            if os.name == 'nt':
+                msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
+
+def worker_running(work):
+    try:
+        with worker_guard(work):
+            return False
+    except (OSError, ValueError):
+        return True
+
+
+def read_record(path, maximum=16 * 1024 * 1024):
+    path = regular(Path(path))
+    if path.stat().st_size > maximum:
+        raise ValueError('更新恢复记录过大')
+    value = json.loads(path.read_text('utf-8-sig'))
+    if not isinstance(value, dict):
+        raise ValueError('更新恢复记录无效')
+    return value
+
+
+def recovery_journal(work, target, data):
+    """Validate every rollback path before stopping the running application."""
+    backup = regular(work / 'program-backup')
+    journal = read_record(backup / 'journal.json')
+    hashes = journal.get('backup_hashes')
+    if journal.get('schema') != 2 or not isinstance(hashes, dict):
+        raise ValueError('旧备份缺少完整性清单，请保留备份并手动恢复')
+    for key in ('changed', 'created'):
+        names = journal.get(key)
+        if not isinstance(names, list) or not all(isinstance(name, str) for name in names) or len(names) > 50010 or len(set(names)) != len(names):
+            raise ValueError('更新恢复清单无效')
+        for name in names:
+            destination(target, name, data)
+            if key == 'changed':
+                saved_file = destination(backup, name)
+                if not saved_file.is_file() or digest(saved_file) != hashes.get(name):
+                    raise ValueError('旧程序备份不完整，请保留更新目录并手动恢复')
+    if set(journal['changed']) & set(journal['created']):
+        raise ValueError('更新恢复清单冲突')
+    saved = regular(work / 'data-backup')
+    if not saved.is_dir():
+        raise ValueError('缺少更新前的数据备份，不能自动回滚')
+    data_size(saved)  # Also rejects nested links before any write.
+    manifest = read_record(work / 'data-backup-manifest.json')
+    files = manifest.get('files')
+    if manifest.get('schema') != 1 or not isinstance(files, dict) or len(files) > 100000:
+        raise ValueError('数据备份缺少完整性清单，不能自动回滚')
+    actual = {path.relative_to(saved).as_posix(): path for path in saved.rglob('*') if path.is_file()}
+    if set(actual) != set(files) or any(digest(regular(path)) != files[name] for name, path in actual.items()):
+        raise ValueError('数据备份校验失败，不能自动回滚')
+    return journal
+
+
+def restore_data(data, saved):
+    for directory, dirs, names in os.walk(data, followlinks=False):
+        parent = Path(directory)
+        dirs[:] = [name for name in dirs if parent != data or name != 'updates']
+        for name in dirs:
+            regular(parent / name)
+        for name in names:
+            path = regular(parent / name)
+            if parent == data and name in TRANSIENT:
+                continue
+            if not (saved / path.relative_to(data)).exists():
+                path.unlink()
+    for path in saved.rglob('*'):
+        regular(path)
+        if path.is_file():
+            target = regular(data / path.relative_to(saved))
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(path, target)
 
 def digest(path):
     with Path(path).open('rb') as stream: return hashlib.file_digest(stream, 'sha256').hexdigest()
@@ -53,8 +158,29 @@ def destination(root, name, data=None):
 def atomic_json(path, value):
     regular(path)
     temp = regular(path.with_suffix(path.suffix + '.tmp'))
-    temp.write_text(json.dumps(value, ensure_ascii=False, indent=2), 'utf-8')
+    with temp.open('w', encoding='utf-8') as stream:
+        json.dump(value, stream, ensure_ascii=False, indent=2)
+        stream.flush(); os.fsync(stream.fileno())
     os.replace(temp, path)
+    sync_directory(path.parent)
+
+
+def sync_directory(path):
+    if os.name != 'nt':
+        descriptor = os.open(path, os.O_RDONLY)
+        try: os.fsync(descriptor)
+        finally: os.close(descriptor)
+
+
+def durable_copy(source, target):
+    checksum = hashlib.sha256()
+    with Path(source).open('rb') as incoming, Path(target).open('wb') as output:
+        while chunk := incoming.read(1024 * 1024):
+            output.write(chunk); checksum.update(chunk)
+        output.flush(); os.fsync(output.fileno())
+    shutil.copystat(source, target)
+    sync_directory(Path(target).parent)
+    return checksum.hexdigest()
 
 def stage_archive(archive, stage, kind, version):
     prefixes = tuple(f'{brand}/' if kind == 'portable' else f'{brand}-{version}-source/' for brand in ('shiori', 'mikubot'))
@@ -91,6 +217,7 @@ def stage_archive(archive, stage, kind, version):
 def backup_data(data, backup):
     backup.mkdir(parents=True, exist_ok=False)
     if os.name != 'nt': backup.chmod(0o700)
+    files = {}
     for directory, dirs, names in os.walk(data, followlinks=False):
         parent = Path(directory)
         dirs[:] = [name for name in dirs if parent != data or name != 'updates']
@@ -100,7 +227,8 @@ def backup_data(data, backup):
             path = regular(parent/name)
             if path.parent == data and name in TRANSIENT: continue
             target = backup/path.relative_to(data);target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(path, target)
+            files[path.relative_to(data).as_posix()] = durable_copy(path, target)
+    return files
 
 def data_size(data):
     total=0
@@ -116,7 +244,7 @@ def data_size(data):
 
 def replace_program(stage, target, files, backup, data):
     backup.mkdir(parents=True, exist_ok=False)
-    journal = {'changed':[], 'created':[], 'files':files}
+    journal = {'schema':2, 'changed':[], 'created':[], 'files':files, 'backup_hashes':{}}
     # Keep the journal durable before each file mutation, including first use.
     atomic_json(backup/'journal.json', journal)
     previous = {}
@@ -130,7 +258,8 @@ def replace_program(stage, target, files, backup, data):
             path = destination(target, name, data)
             if path.exists():
                 if not path.is_file(): raise ValueError('程序文件与目录冲突')
-                saved = backup/name;saved.parent.mkdir(parents=True, exist_ok=True);shutil.copy2(path,saved)
+                saved = backup/name;saved.parent.mkdir(parents=True, exist_ok=True)
+                journal['backup_hashes'][name] = durable_copy(path,saved)
                 journal['changed'].append(name)
             else: journal['created'].append(name)
             atomic_json(backup/'journal.json', journal)
@@ -168,6 +297,31 @@ def wait_parent(pid, seconds=120):
             time.sleep(.25)
         raise ValueError('原程序尚未退出，未替换文件')
 
+def request_shutdown(data, port):
+    token = (data / 'admin.token').read_text().strip()
+    request = urllib.request.Request(f'http://127.0.0.1:{port}/api/shutdown', data=b'',
+        headers={'Authorization': 'Bearer ' + token})
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    try:
+        try:
+            response = opener.open(request, timeout=3)
+        except urllib.error.HTTPError as exc:
+            response = exc
+        with response:
+            # Closing a successful response without consuming its body can reset
+            # the peer connection and strand Windows Proactor server cleanup.
+            raw = response.read(16385)
+            status = response.status
+    except http.client.HTTPException as exc:
+        raise OSError('新版本退出响应不完整，未覆盖运行中的程序') from exc
+    try:
+        value = json.loads(raw) if len(raw) <= 16384 and status == 200 else None
+    except (ValueError, UnicodeError):
+        value = None
+    if not isinstance(value, dict) or value.get('ok') is not True:
+        raise OSError('新版本未确认退出请求，未覆盖运行中的程序')
+
+
 def health(data, port, version, seconds=60):
     identity=hashlib.sha256((data/'admin.token').read_text().strip().encode()).hexdigest()[:16]
     deadline=time.monotonic()+seconds
@@ -181,6 +335,12 @@ def health(data, port, version, seconds=60):
     return False
 
 def run(config):
+    work = regular(Path(config).resolve().parent)
+    with worker_guard(work, wait_seconds=3):
+        return _run(config)
+
+
+def _run(config):
     cfg=json.loads(regular(Path(config)).read_text('utf-8'))
     target,data=regular(Path(cfg['target']).resolve()),regular(Path(cfg['data']).resolve())
     work=regular(Path(config).resolve().parent)
@@ -192,10 +352,31 @@ def run(config):
     journal=None;started=None;data_saved=False;stopped=False;success=False
     launch=list(cfg['launch']);dropin=None;dropin_old=None;dropin_changed=False
     def status(state,message):
-        record={'download_id':cfg['download_id'],'status':state,'message':message,'at':__import__('datetime').datetime.now(__import__('datetime').timezone.utc).isoformat()}
+        record={'download_id':cfg['download_id'],'status':state,'message':message,'lease_version':1,'worker_pid':os.getpid(),'at':__import__('datetime').datetime.now(__import__('datetime').timezone.utc).isoformat()}
         atomic_json(result,record)
         atomic_json(regular(work/'outcome.json'),record)
     try:
+        if cfg.get('recover') is True:
+            journal = recovery_journal(work, target, data)
+            status('recovering', '正在等待退出，随后恢复更新前的程序和数据')
+            if service: subprocess.run(['systemctl', 'stop', service], check=True, timeout=130)
+            wait_parent(cfg['parent_pid']); stopped = True
+            rollback_program(target, backup, journal, data)
+            restore_data(data, work / 'data-backup')
+            saved_service = work / 'service-backup.json'
+            if service and saved_service.exists():
+                record = read_record(saved_service)
+                dropin = regular(Path('/etc/systemd/system') / (service + '.d') / '92-shiori-update-runtime.conf')
+                if record.get('existed'):
+                    dropin.write_text(record['content'], 'utf-8')
+                else:
+                    dropin.unlink(missing_ok=True)
+                subprocess.run(['systemctl', 'daemon-reload'], check=True, timeout=30)
+            # The old application must not inherit an unfinished update gate.
+            status('failed', '上次更新已中断；已恢复更新前的程序和数据，可以重新尝试更新')
+            if service: subprocess.run(['systemctl', 'start', service], check=True, timeout=90)
+            else: subprocess.Popen(cfg['launch'], cwd=target, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
+            return True
         status('preparing','正在校验更新文件并准备替换')
         archive=regular(Path(cfg['archive']))
         if archive.parent!=work or digest(archive)!=cfg['sha256']:raise ValueError('更新文件校验失败')
@@ -216,7 +397,9 @@ def run(config):
         if service:subprocess.run(['systemctl','stop',service],check=True,timeout=130)
         wait_parent(cfg['parent_pid']);stopped=True
         status('backing_up','正在备份配置、密码、聊天与记忆')
-        backup_data(data,work/'data-backup');data_saved=True
+        data_files = backup_data(data,work/'data-backup')
+        atomic_json(work/'data-backup-manifest.json', {'schema':1,'files':data_files})
+        data_saved=True
         requirements=cfg.get('requirements','requirements-server.txt')
         if requirements not in ('requirements-server.txt','requirements-desktop.txt'):raise ValueError('依赖清单无效')
         dependency_files=['requirements-server.txt']+(['requirements-desktop.txt'] if requirements=='requirements-desktop.txt' else [])
@@ -233,6 +416,7 @@ def run(config):
             if service:
                 dropin=regular(Path('/etc/systemd/system')/(service+'.d')/'92-shiori-update-runtime.conf')
                 dropin_old=dropin.read_bytes() if dropin.exists() else None
+                atomic_json(work/'service-backup.json', {'existed':dropin_old is not None,'content':dropin_old.decode('utf-8') if dropin_old is not None else ''})
         status('replacing','正在替换程序文件，个人数据保持原目录')
         journal=replace_program(stage,target,files,backup,data)
         atomic_json(target/RECEIPT,{'schema':1,'version':cfg['version'],'sha256':cfg['sha256'],'files':files,'data_schema':1})
@@ -251,6 +435,9 @@ def run(config):
         if not health(data,cfg['port'],cfg['version']):raise ValueError('新版本启动检查未通过')
         success=True;status('completed','版本切换完成，程序已自动重启；数据和旧程序备份已保留')
     except Exception as exc:
+        if cfg.get('recover') is True:
+            status('recovery_required', '自动恢复未完成，请保留更新目录和备份后检查日志；未继续启动聊天')
+            return False
         if not stopped and not service:
             try:wait_parent(cfg['parent_pid'],seconds=10);stopped=True
             except ValueError:pass
@@ -259,9 +446,7 @@ def run(config):
             if service:subprocess.run(['systemctl','stop',service],timeout=130,check=True)
             elif started is not None and started.poll() is None:
                 try:
-                    token=(data/'admin.token').read_text().strip()
-                    req=urllib.request.Request(f'http://127.0.0.1:{cfg["port"]}/api/shutdown',data=b'',headers={'Authorization':'Bearer '+token})
-                    urllib.request.build_opener(urllib.request.ProxyHandler({})).open(req,timeout=3).close()
+                    request_shutdown(data, cfg['port'])
                     started.wait(timeout=30)
                 except (OSError,subprocess.TimeoutExpired):
                     status('unknown','新版本未能安全退出，未尝试覆盖运行中的文件；请保留备份并检查日志');return
@@ -273,16 +458,7 @@ def run(config):
             if data_saved:
                 # Restore only files captured before startup. No user requests
                 # are admitted by the update gate during the health window.
-                saved=work/'data-backup'
-                for directory,dirs,names in os.walk(data,followlinks=False):
-                    parent=Path(directory)
-                    dirs[:]=[n for n in dirs if parent!=data or n!='updates']
-                    for name in names:
-                        path=regular(parent/name)
-                        if parent==data and name in TRANSIENT:continue
-                        if not (saved/path.relative_to(data)).exists():path.unlink()
-                for path in saved.rglob('*'):
-                    if path.is_file():shutil.copy2(path,regular(data/path.relative_to(work/'data-backup')))
+                restore_data(data,work/'data-backup')
             restored=True
         if stopped:
             if service:subprocess.run(['systemctl','start',service],timeout=90,check=True)

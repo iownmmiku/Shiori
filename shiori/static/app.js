@@ -242,7 +242,13 @@ async function bootstrap(showWizard = false,authEntry = false) {
   window.ShioriSidebar?.prepare?.(sidebarPageNames);
   if (window.ShioriSidebar && !window.ShioriSidebar.isPageVisible(state.page)) { state.page = "chat"; localStorage.setItem("shiori-page","chat"); }
   selectPageScope(state.page);
-  state.authenticated = true; renderNavigation(); await renderPage();
+  state.authenticated = true; renderNavigation();
+  if (boot.update_recovery) {
+    $("#content").innerHTML = await window.ShioriUpdates.settingsPanel();
+    window.ShioriUpdates.afterRender();
+    return true;
+  }
+  await renderPage();
   if (generation===(state.authGeneration||0)&&state.authenticated&&showWizard && boot.setup_required && !sessionStorage.getItem("shiori-wizard-skipped")) showWizardModal();
   return true;
 }
@@ -266,6 +272,7 @@ async function navigate(page) {
 }
 async function renderPage() {
   if(state.authenticated===false)return;
+  window.ShioriFormDrafts?.capture();
   const id = ++state.renderId;
   const main = $("#content");
   window.ShioriBackup?.close();
@@ -278,6 +285,7 @@ async function renderPage() {
     const html = await ({overview:window.ShioriExperience.renderOverview,chat:window.ShioriExperience.renderChat,qqChats:window.ShioriQQMonitor?.render,models:window.ShioriPages.renderModels,logs:window.ShioriPages.renderLogs,statistics:window.ShioriStatistics?.render,plugins:window.ShioriPlugins?.render,memory:renderMemory,culture:renderCulture,knowledge:renderKnowledge,personaKnowledge:renderPersonaKnowledge,characterSchedule:window.ShioriCharacterSchedule?.render,tasks:renderTasks,tools:renderTools,persona:window.ShioriExperience.renderPersonas,groups:renderGroups,diagnostics:renderDiagnostics,settings:window.ShioriExperience.renderSettings,jobs:window.ShioriExperience.renderJobs,help:window.ShioriExperience.renderHelp}[state.page])();
     if (id !== state.renderId) return;
     main.innerHTML = `<div class="animate-in">${html}</div>`;
+    window.ShioriFormDrafts?.restore();
     if (state.page === "chat") { const feed = $("#chat-feed"); feed.scrollTop = feed.scrollHeight; renderImagePreviews(); }
     if (state.page === "settings" || state.page === "persona" && state.botTab === "qq") updateAdapterFields();
     window.ShioriExperience.afterRender();
@@ -332,6 +340,7 @@ function showAuth() {
 }
 function leaveAuthenticated() {
   state.authenticated=false;state.authGeneration=(state.authGeneration||0)+1;state.renderId++;
+  window.ShioriFormDrafts?.clear();
   window.ShioriBackup?.close();
   window.ShioriQQMonitor?.close();
   window.ShioriPages?.close();
@@ -575,6 +584,7 @@ document.addEventListener("submit",async event => {
   const form = event.target.closest("form[data-form]"); if (!form) return; event.preventDefault();
   const kind = form.dataset.form;
   if (kind === "chat") { await window.ShioriExperience.sendChat(form); return; }
+  const draftTicket = window.ShioriFormDrafts?.begin(form); let submitFailed = false;
   const submit = $('[type="submit"]',form); if (submit) submit.disabled = true;
   if ($("#modal-error",form)) $("#modal-error",form).hidden = true;
   try {
@@ -602,8 +612,8 @@ document.addEventListener("submit",async event => {
     else if (kind === "knowledge-search") { const values = getForm(form),searchedScope = state.scope; state.knowledgeQuery = values.q; state.knowledgeUser = values.user_id; const results = await api(`/api/memory/search?${query({scope_id:searchedScope,user_id:values.user_id,q:values.q})}`); state.knowledgeResults = {...results,scope_id:searchedScope}; await renderPage(); }
     else if (["model","wizard","qq","budget","system","memory-settings","routing","context-settings","identity","output","exploration","planner","resource-settings"].includes(kind)) await saveSettings(kind,form);
     else await saveModal(kind,form);
-  } catch (error) { if (form.closest("dialog")) modalError(error.message); else toast(error.message,true); }
-  finally { if (submit) submit.disabled = false; }
+  } catch (error) { submitFailed = true; if (form.closest("dialog")) modalError(error.message); else toast(error.message,true); }
+  finally { window.ShioriFormDrafts?.end(draftTicket,!submitFailed); if (submit) submit.disabled = false; }
 });
 let searchTimer;
 document.addEventListener("input",event => {

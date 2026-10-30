@@ -3,12 +3,13 @@
 // Read-only QQ workspace. All requests here are GETs; transport retries and
 // message composition deliberately belong to their existing dedicated flows.
 window.ShioriQQMonitor = (() => {
-  const PAGE = "qqChats", INTERVAL = 5000, LIMIT = 80, MAX_MESSAGES = 500;
+  const PAGE = "qqChats", INTERVAL = 5000, LIST_INTERVAL = 60000, LIMIT = 80, MAX_MESSAGES = 500;
   const arr = value => Array.isArray(value) ? value : [];
   const isQQ = id => /^(qq|qqofficial):(group|private):[^:]+$/.test(String(id || ""));
   let chats = [], selected = "", messages = [], receipts = [];
   let search = "", kind = "all", auto = true, active = false;
   let sequence = 0, viewSequence = 0, controller = null, timer = null, busy = false;
+  let listController = null, listPromise = null, listSequence = 0, lastListRefresh = 0;
   let hasOlder = false, historyView = false, before = "", lastRefresh = "", listError = "", feedError = "", receiptError = "";
   const here = () => active && state.page === PAGE && state.authenticated !== false;
   const current = () => chats.find(item => item.id === selected);
@@ -23,10 +24,13 @@ window.ShioriQQMonitor = (() => {
   const errorText = error => String(error?.message || "读取失败，请重试。");
   function invalidate() {
     sequence++; controller?.abort(); controller = null; busy = false;
+    if (listController) lastListRefresh = 0;
+    listSequence++; listController?.abort(); listController = null; listPromise = null;
     clearTimeout(timer); timer = null;
   }
   function close() {
     active = false; viewSequence++; invalidate();
+    lastListRefresh = 0;
     if (state.messages === messages) state.messages = [];
     messages = []; receipts = []; before = ""; hasOlder = historyView = false;
   }
@@ -58,7 +62,7 @@ window.ShioriQQMonitor = (() => {
   }
   function statusMarkup() {
     const text = document.hidden ? "页面隐藏，刷新已暂停" : busy ? "正在读取记录…" :
-      listError || feedError ? "刷新失败，可手动重试" : auto ? "自动刷新中 · 每 5 秒" : "自动刷新已暂停";
+      listError || feedError ? "刷新失败，可手动重试" : auto ? "消息每 5 秒刷新 · 会话列表每分钟更新" : "自动刷新已暂停";
     return `<span class="qq-refresh-dot ${auto && !document.hidden && !listError && !feedError ? "live" : ""}" aria-hidden="true"></span><span>${e(text)}${lastRefresh ? `<small>上次读取 ${e(stamp(lastRefresh))}</small>` : ""}</span>`;
   }
   function listMarkup() {
@@ -138,7 +142,33 @@ window.ShioriQQMonitor = (() => {
     }
     return result;
   }
-  async function refresh({initial = false, older = false} = {}) {
+  function refreshChats(force = false) {
+    if (listPromise) return listPromise;
+    if (!force && lastListRefresh && Date.now() - lastListRefresh < LIST_INTERVAL) return Promise.resolve();
+    const ticket = ++listSequence, abort = new AbortController(); listController = abort;
+    const live = () => ticket === listSequence && here() && !document.hidden;
+    lastListRefresh = Date.now();
+    const request = (async () => {
+      let changedSelection = false;
+      try {
+        let result = await api("/api/qq/chats?limit=500", {signal:abort.signal});
+        const items = [...arr(result.items)];
+        while (result.has_more && arr(result.items).length) {
+          if (!live()) return;
+          result = await api(`/api/qq/chats?${query({limit:500,offset:items.length})}`, {signal:abort.signal});
+          items.push(...arr(result.items));
+        }
+        if (!live()) return;
+        chats = items.filter(item => isQQ(item.id)); listError = "";
+        if (!chats.some(item => item.id === selected)) {
+          const previous = selected; choose(chats[0]?.id || ""); changedSelection = previous !== selected;
+        }
+      } catch (error) { if (live()) listError = errorText(error); }
+      finally { if (live()) {listController = null; listPromise = null; paint({feed:changedSelection});} }
+    })();
+    listPromise = request; return request;
+  }
+  async function refresh({initial = false, older = false, forceList = false} = {}) {
     if (!here() || document.hidden || busy) return;
     clearTimeout(timer); timer = null; busy = true;
     const ticket = ++sequence, abort = new AbortController(); controller = abort;
@@ -146,18 +176,11 @@ window.ShioriQQMonitor = (() => {
     paint({feed:false});
     try {
       if (!older) {
-        try {
-          let result = await api("/api/qq/chats?limit=500", {signal:abort.signal});
-          const items = [...arr(result.items)];
-          while (result.has_more && arr(result.items).length) {
-            if (!live()) return;
-            result = await api(`/api/qq/chats?${query({limit:500,offset:items.length})}`, {signal:abort.signal});
-            items.push(...arr(result.items));
-          }
-          if (!live()) return;
-          chats = items.filter(item => isQQ(item.id)); listError = "";
-          if (!chats.some(item => item.id === selected)) choose(chats[0]?.id || "");
-        } catch (error) { if (!live()) return; listError = errorText(error); }
+        const loadingList = refreshChats(forceList || initial);
+        // Once a conversation is known, a large/slow sidebar must not delay
+        // its new messages and receipts. The list has its own lifecycle guard.
+        if (!selected || !chats.length) await loadingList;
+        if (!live()) return;
       }
       const scopeId = selected;
       if (!scopeId) { if (live()) lastRefresh = listError ? lastRefresh : new Date().toISOString(); return; }
@@ -244,7 +267,7 @@ window.ShioriQQMonitor = (() => {
         tab.classList.toggle("active",tab.dataset.kind === kind); tab.setAttribute("aria-pressed",String(tab.dataset.kind === kind));
       }
       paint({feed:false});
-    } else if (action === "qq-monitor-refresh") await refresh();
+    } else if (action === "qq-monitor-refresh") await refresh({forceList:true});
     else if (action === "qq-monitor-older" && hasOlder && before) await refresh({older:true});
     else if (action === "qq-monitor-latest") await refresh({initial:true});
     else if (action === "qq-monitor-logs") { syncShell(); await navigate("logs"); }

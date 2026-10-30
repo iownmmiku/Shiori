@@ -40,7 +40,7 @@ async function main(){
   reset();overrides={debounce_seconds:1};await say('单独秒数');await advance(1000);assert.equal(sent().length,1);
 
   reset();await say('不要再说');await say('停止');await advance(10000);assert.equal(sent().length,0,'stop cancels buffered content without a model request');
-  reset();state.chatMode='computer';await say('运行测试');assert.equal(sent().length,1,'explicit computer mode is submitted immediately');
+  reset();state.chatMode='computer';await say('运行测试');assert.equal(sent().length,0,'legacy mode no longer bypasses debounce');await advance(3000);assert.equal(sent().length,1);assert.equal(sent()[0][1].body.mode,'chat');
   reset();await say('等待中注销');ui.close();await advance(10000);assert.equal(sent().length,0);
 
   reset();for(let i=0;i<8;i++)await say('消息'+i);assert.equal(sent().length,1);assert.equal(sent()[0][1].body.messages.length,8);assert.equal(state.draft,'','automatic full-batch send must not restore its final consumed message as an unsent draft');
