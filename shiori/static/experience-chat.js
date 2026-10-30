@@ -2,9 +2,39 @@
 
 window.ShioriExperienceChat={create(runtime,helpers){
   const {inactive,jobDetail}=helpers;
-    let collected=null, collectTimer=null, activeDraft=null;
+    let collected=null, collectTimer=null, activeDraft=null,activeReader=null,lifecycle=0;
     const savedDrafts=new Map();
+    let renderRevision=0;
+    const workspace=window.ShioriChatProjects?.create({activateScope,saveDraft});
     const uniqueAttachments=items=>[...new Map(items.map(item=>[item.id,item])).values()];
+    function saveDraft(){
+      if(state.page==="chat")state.draft=$("#chat-text")?.value ?? state.draft ?? "";
+    }
+    function parkDraft(){
+      saveDraft();
+      // Switching parks a collected batch instead of leaving a timer that can
+      // send it to a conversation the user is no longer viewing.
+      if(collected){
+        clearTimeout(collectTimer);collectTimer=null;
+        const batch=collected;collected=null;state.debouncePending=false;
+        restoreDraft(batch.scope,{text:batch.messages.map(item=>item.text).filter(Boolean).join("\n"),images:batch.images,attachments:batch.attachments});
+      }
+      if(String(state.scope).startsWith("web:") && !(state.page!=="chat"&&savedDrafts.has(state.scope)))savedDrafts.set(state.scope,{text:state.draft||"",images:[...state.images],attachments:runtime.attachmentScope===state.scope?[...runtime.attachments]:[]});
+      clearComposer();
+    }
+    function activateScope(scopeId){
+      if(!String(scopeId).startsWith("web:"))return false;
+      saveDraft();
+      if(state.scope===scopeId&&!savedDrafts.has(scopeId))return true;
+      if(state.scope!==scopeId)parkDraft();
+      const draft=savedDrafts.get(scopeId)||{text:"",images:[],attachments:[]};savedDrafts.delete(scopeId);
+      state.scope=scopeId;state.draft=draft.text;state.images=[...draft.images];runtime.attachments=[...draft.attachments];runtime.attachmentScope=scopeId;
+      runtime.attachmentRevision=(runtime.attachmentRevision||0)+1;
+      // navigate() reads the mounted textarea before replacing the page.
+      const input=$("#chat-text");if(input)input.value=state.draft;
+      localStorage.setItem("shiori-scope",scopeId);
+      return true;
+    }
     function composerDraft(scopeId=state.scope) {
       if(state.scope!==scopeId)return {text:"",images:[],attachments:[]};
       return {text:$("#chat-text")?.value ?? state.draft ?? "",images:[...state.images],
@@ -19,7 +49,7 @@ window.ShioriExperienceChat={create(runtime,helpers){
       const input=$("#chat-text");if(input)input.value="";
     }
     function restoreDraft(scopeId,draft) {
-      if(state.scope!==scopeId) {
+      if(state.scope!==scopeId || state.page!=="chat") {
         savedDrafts.set(scopeId,joinDrafts(savedDrafts.get(scopeId) || {text:"",images:[],attachments:[]},draft));
         return;
       }
@@ -51,6 +81,7 @@ window.ShioriExperienceChat={create(runtime,helpers){
     }
     function pendingPreview() {
       if (!state.sending) return collectedPreview();
+      if(activeDraft?.scope!==state.scope)return '<p class="chat-other-pending" role="status">另一对话正在回复。你可以先编辑草稿，回复完成后即可发送。</p>';
       const text = runtime.preview?.scope === state.scope ? runtime.preview.text : "";
       return `<div class="pending-message" role="status"><span class="spinner small"></span><span id="chat-preview-status">${text ? "正在生成，完成后以最终回复为准…" : "正在处理你的消息…"}</span></div><div id="chat-preview" class="chat-preview" style="white-space:pre-wrap;overflow-wrap:anywhere" aria-live="off">${e(text || "")}</div>`;
     }
@@ -63,13 +94,14 @@ window.ShioriExperienceChat={create(runtime,helpers){
       if (label) label.textContent = text ? "正在生成，完成后以最终回复为准…" : "正在处理你的消息…";
       if (nearEnd) feed.scrollTop = feed.scrollHeight;
     }
-    async function readChatResult(response, scopeId) {
+    async function readChatResult(response, scopeId, generation=lifecycle) {
       // The same endpoint remains compatible with ordinary JSON clients and
       // older servers. Never replay an accepted request to negotiate streaming.
       if (!response?.headers?.get) return response;
       if (!response.headers.get("content-type")?.includes("text/event-stream")) return response.json();
       const reader = response.body?.getReader();
       if (!reader) throw new Error("浏览器未提供增量响应，请重新加载页面后重试。");
+      activeReader=reader;
       const decoder = new TextDecoder("utf-8",{fatal:true});
       let buffer = "", received = 0, preview = "", result, complete = false;
       function consume(block) {
@@ -85,13 +117,17 @@ window.ShioriExperienceChat={create(runtime,helpers){
           updatePreview(scopeId,String(result?.reply || ""));
         } else if (event.type === "error") {
           updatePreview(scopeId,"");
-          if (event.code === "authentication_required") state.authenticated = false;
+          if (event.code === "authentication_required") {
+            state.authenticated=false;toast(typeof event.message==="string"?event.message:"登录已失效",true);close();
+            if(typeof showAuth==="function")showAuth();else window.ShioriAuth?.requireLogin?.();
+          }
           throw new Error(typeof event.message === "string" ? event.message : "本次回复未能完成，请查看运行日志。");
         }
       }
       try {
         while (!complete) {
           const {value,done} = await reader.read();
+          if(generation!==lifecycle){const error=new Error("登录状态已变化。");error.name="AbortError";throw error;}
           if (done) {
             buffer += decoder.decode();
             if (buffer.trim()) consume(buffer);
@@ -111,29 +147,34 @@ window.ShioriExperienceChat={create(runtime,helpers){
         if (!complete) throw new Error("回复传输中断，未将预览当作完整回复。请查看聊天记录后再决定是否重试。");
         return result;
       } finally {
+        if(activeReader===reader)activeReader=null;
         await reader.cancel().catch(() => {});
         reader.releaseLock();
       }
     }
     async function renderChat() {
-      const [messages,jobs,runs,modelControl] = await Promise.all([api(`/api/messages?${query({scope_id:state.scope})}`),api(`/api/jobs?${query({scope_id:state.scope})}`),api(`/api/tool-runs?${query({scope_id:state.scope,status:"pending"})}`),window.ShioriPages ? window.ShioriPages.chatModelControl() : ""]);
+      const scopeId=state.scope,revision=++renderRevision;
+      const [messages,jobs,runs,modelControl] = await Promise.all([api(`/api/messages?${query({scope_id:scopeId})}`),api(`/api/jobs?${query({scope_id:scopeId})}`),api(`/api/tool-runs?${query({scope_id:scopeId,status:"pending"})}`),window.ShioriPages ? window.ShioriPages.chatModelControl() : "",workspace?.load()]);
+      if(revision!==renderRevision||state.scope!==scopeId||state.page!=="chat")return "";
       state.messages = rows(messages); state.liveJobs = rows(jobs); state.toolRuns = rows(runs);
       const local = state.scope.startsWith("web:"), job = state.liveJobs.find(item => !inactive(item));
+      const current=workspace?.conversation(scopeId),project=workspace?.project(current?.project_id),sendingHere=state.sending&&activeDraft?.scope===scopeId;
       if (runtime.attachmentScope !== state.scope) {
         await releaseAttachments(runtime.attachments, runtime.attachmentScope);
+        if(revision!==renderRevision||state.scope!==scopeId||state.page!=="chat")return "";
         runtime.attachments = []; runtime.attachmentScope = state.scope;
       }
-      if(!state.sending && savedDrafts.has(state.scope)) {
+      if(!sendingHere && savedDrafts.has(state.scope)) {
         const saved=savedDrafts.get(state.scope);savedDrafts.delete(state.scope);restoreDraft(state.scope,saved);
       }
       const pending = state.toolRuns.filter(item => item.status === "pending" && !item.read_only);
-      return heading("CHAT","聊天","本地聊天默认每条回应。电脑任务需要管理员身份与独立开关。",button("后台任务","go-jobs","","tasks")) + (state.boot?.setup_required ? notice("尚未连接语言模型。你可以先使用记事、待办、计算和基础检索。","warning","quick-model","连接模型") : "") + `<div class="chat-workspace">${sessionSidebar()}<section class="chat-layout"><header class="chat-top"><div class="chat-identity"><div class="chat-avatar">ミ</div><div><h3>${e(personaName(scope().persona_id))}</h3><p>${e(scope().name)} · ${local ? "管理台管理员 Shiori" : "QQ 历史记录"}</p></div></div><div class="inline-stack">${modelControl}${button("人格","go-persona","ghost small","persona")}${button("清空","clear-messages","ghost small","trash")}</div></header>${!local ? '<div class="chat-scope-note scope-warning">QQ 记录在此只读。点击“新对话”即可在本地聊天，不会向 QQ 发信。</div>' : ""}<div class="chat-feed" id="chat-feed">${state.messages.length ? state.messages.map(renderMessage).join("") : `<div class="empty-state"><div class="chat-welcome-glyph">♪</div><h3>今天想聊什么？</h3><p>说说近况，放入一份资料，或交给我一件事情。</p>${local ? '<div class="chat-suggestions"><button data-action="chat-suggestion" data-text="你好，介绍一下你自己吧">认识初音未来</button><button data-action="chat-suggestion" data-text="记住：我喜欢喝抹茶">记住我的偏好</button><button data-action="chat-suggestion" data-text="添加待办：周末整理文档">添加待办</button></div>' : ""}</div>`}${pendingPreview()}<div id="live-job-detail">${job ? jobDetail(job,true) : ""}</div></div>${pending.length ? `<section class="jobs-mini" aria-label="等待审批的工具请求"><strong>有 ${pending.length} 项工具请求等待确认</strong>${pending.map(toolRunCard).join("")}</section>` : ""}<form class="chat-composer" data-form="chat"><div class="image-previews" id="image-previews"></div><div id="attachment-chips" class="attachment-chips">${attachmentChips()}</div><textarea id="chat-text" name="text" placeholder="${local ? (state.chatMode === "computer" ? "例如：整理这份文档，或运行项目并帮我找出错误…" : "发消息，或把想完成的事交给我…") : "点击“新对话”开始本地聊天"}" aria-label="发送消息" rows="2" ${!local || state.sending ? "disabled" : ""}>${e(state.draft)}</textarea><div class="composer-bottom"><div class="composer-tools"><button class="icon-button" type="button" data-action="attach-image" title="添加图片" aria-label="添加图片" ${!local || state.sending ? "disabled" : ""}>${icon("image")}</button><button class="icon-button" type="button" data-action="attachment-options" title="上传资料" aria-label="上传资料" ${!local || state.sending ? "disabled" : ""}>${icon("file")}</button><label class="mode-picker">模式<select id="chat-mode" aria-label="聊天模式" ${!local || state.sending || state.debouncePending ? "disabled" : ""}><option value="chat" ${state.chatMode !== "computer" ? "selected" : ""}>普通聊天</option><option value="computer" ${state.chatMode === "computer" ? "selected" : ""}>电脑任务</option></select></label><span class="composer-hint">Enter 发送 · Shift + Enter 换行</span></div>${state.sending ? button("停止等待","cancel-chat","small","stop") : `<button type="submit" class="btn primary" ${!local ? "disabled" : ""}>发送 ${icon("send")}</button>`}</div></form></section></div><p class="help-caption">上传资料先选择用途。开启电脑任务后，管理员明确提出的任务会自动执行，可随时在任务卡片停止；普通 QQ 用户不能发起。</p>`;
+      return `<div class="chat-workspace-page"><header class="chat-workspace-bar"><div class="chat-workspace-bar-title"><button type="button" class="icon-button chat-mobile-toggle" data-action="chat-toggle-sidebar" aria-label="打开项目与对话">${icon("chat")}</button><span class="chat-workspace-kicker">LOCAL / CHAT</span><span class="chat-workspace-status"><i></i>个人工作台</span></div><div class="inline-stack">${button("后台任务","go-jobs","ghost small","tasks")}${button("返回机器人管理","chat-back-management","small","arrow")}</div></header>${state.boot?.setup_required ? notice("连接语言模型，开始你的第一段对话。","warning","quick-model","连接模型") : ""}<div class="chat-workspace chat-workspace-standalone">${sessionSidebar()}<section class="chat-layout"><header class="chat-top"><div class="chat-identity"><div class="chat-avatar">S</div><div><p class="chat-project-breadcrumb">${e(project?.name||"个人对话")}${current?.archived?" / 已归档":""}</p><h3>${e(current?.name||scope().name||"新对话")}</h3><p>${e(personaName(scope().persona_id))}</p></div></div><div class="inline-stack chat-top-actions">${modelControl}${button("人格","go-persona","ghost small","persona")}${current?button("管理对话","chat-conversation-menu","ghost small","edit",`data-id="${e(scopeId)}"`):""}${button("清空","clear-messages","ghost small","trash")}</div></header><div class="chat-feed" id="chat-feed">${state.messages.length ? state.messages.map(renderMessage).join("") : `<div class="empty-state chat-workspace-welcome"><div class="chat-welcome-glyph">S</div><span class="chat-welcome-label">A SPACE FOR YOUR IDEAS</span><h3>今天，我们从哪里开始？</h3><p>聊一个想法，放入一份资料，或一起完成一件事。</p><div class="chat-suggestions"><button type="button" data-action="chat-suggestion" data-text="你好，介绍一下你自己吧">开始聊聊 ${icon("arrow")}</button><button type="button" data-action="chat-suggestion" data-text="我想整理一下思路，你能帮我吗？">整理思路 ${icon("arrow")}</button><button type="button" data-action="chat-suggestion" data-text="添加待办：周末整理文档">记下待办 ${icon("arrow")}</button></div></div>`}${pendingPreview()}<div id="live-job-detail">${job ? jobDetail(job,true) : ""}</div></div>${pending.length ? `<section class="jobs-mini" aria-label="等待审批的工具请求"><strong>有 ${pending.length} 项工具请求等待确认</strong>${pending.map(toolRunCard).join("")}</section>` : ""}<form class="chat-composer" data-form="chat"><div class="image-previews" id="image-previews"></div><div id="attachment-chips" class="attachment-chips">${attachmentChips()}</div><textarea id="chat-text" name="text" placeholder="${state.chatMode === "computer" ? "描述任务，例如：整理这份文档，或运行项目并找出错误…" : "发消息，或把想完成的事交给我…"}" aria-label="发送消息" rows="2" ${!local || sendingHere ? "disabled" : ""}>${e(state.draft)}</textarea><div class="composer-bottom"><div class="composer-tools"><button class="icon-button" type="button" data-action="attach-image" title="添加图片" aria-label="添加图片" ${!local || state.sending ? "disabled" : ""}>${icon("image")}</button><button class="icon-button" type="button" data-action="attachment-options" title="上传资料" aria-label="上传资料" ${!local || state.sending ? "disabled" : ""}>${icon("file")}</button><label class="mode-picker">模式<select id="chat-mode" aria-label="聊天模式" ${!local || state.sending || state.debouncePending ? "disabled" : ""}><option value="chat" ${state.chatMode !== "computer" ? "selected" : ""}>普通聊天</option><option value="computer" ${state.chatMode === "computer" ? "selected" : ""}>电脑任务</option></select></label><span class="composer-hint">Enter 发送 · Shift + Enter 换行</span></div>${sendingHere ? button("停止等待","cancel-chat","small","stop") : `<button type="submit" class="btn primary" ${!local || state.sending ? "disabled" : ""}>发送 ${icon("send")}</button>`}</div><p class="chat-composer-note">${state.chatMode==="computer"?"电脑任务在已配置的工作目录中执行，可在任务卡片随时停止。":"项目用于分类，不改变会话记忆与资料设置。"}</p></form></section></div></div>`;
     }
 
     function sessionSidebar() {
-      const web = state.scopes.filter(item => item.id.startsWith("web:")), qq = state.scopes.filter(item => !item.id.startsWith("web:"));
-      const row = item => `<button class="conversation-item ${item.id === state.scope ? "active" : ""}" data-action="scope-chat" data-id="${e(item.id)}" title="${e(item.name)}">${icon(item.id.startsWith("web:") ? "chat" : "groups")}<span>${e(item.name || "新对话")}</span></button>`;
-      return `<aside class="conversations" aria-label="聊天会话">${button("新对话","new-chat","small","plus")}<p class="conversation-label">本地对话</p>${web.map(row).join("")}${qq.length ? `<p class="conversation-label">QQ 记录 · 只读</p>${qq.map(row).join("")}` : ""}</aside>`;
+      if(workspace)return workspace.renderSidebar();
+      const web = (state.scopes||[]).filter(item => item.id.startsWith("web:"));
+      return `<aside class="conversations" aria-label="聊天会话">${button("新对话","new-chat","small","plus")}${web.map(item=>`<button type="button" class="conversation-item ${item.id===state.scope?"active":""}" data-action="scope-chat" data-id="${e(item.id)}">${icon("chat")}<span>${e(item.name||"新对话")}</span></button>`).join("")}</aside>`;
     }
 
     async function releaseAttachments(items=runtime.attachments, scopeId=runtime.attachmentScope || state.scope) {
@@ -147,6 +188,29 @@ window.ShioriExperienceChat={create(runtime,helpers){
       if(ids.length) {
         runtime.attachmentRevision=(runtime.attachmentRevision || 0)+1;
         return api("/api/chat/attachments/release",{method:"POST",body:{scope_id:scopeId,ids}});
+      }
+    }
+
+    async function removeAttachment(index) {
+      const generation=lifecycle;
+      if(state.sending)throw new Error("请先等待当前回复结束。");
+      const selected=runtime.attachments,scopeId=runtime.attachmentScope||state.scope,item=selected[index];
+      if(!item)return;
+      const id=item.id,heldElsewhere=[
+        ...(collected?.scope===scopeId?collected.attachments:[]),
+        ...(activeDraft?.scope===scopeId?activeDraft.unsent.attachments:[])
+      ].some(ref=>ref.id===id);
+      // Keep the selection until release succeeds. The user may leave and even
+      // return while the request is pending; array indices no longer identify
+      // the original draft once activateScope has installed another composer.
+      await releaseAttachments([item],scopeId);
+      if(generation!==lifecycle)return;
+      const withoutRemoved=items=>items.filter(ref=>ref.id!==id);
+      if(runtime.attachmentScope===scopeId&&(runtime.attachments===selected||!heldElsewhere))runtime.attachments=withoutRemoved(runtime.attachments);
+      const saved=savedDrafts.get(scopeId);
+      if(saved&&!heldElsewhere)saved.attachments=withoutRemoved(saved.attachments);
+      if(state.scope===scopeId&&state.page==="chat"){
+        const chips=$("#attachment-chips");if(chips)chips.innerHTML=attachmentChips();
       }
     }
 
@@ -206,35 +270,50 @@ window.ShioriExperienceChat={create(runtime,helpers){
       await dispatchChat(payload,submitted);
     }
     async function dispatchChat(payload,submitted,unsent={text:"",images:[],attachments:[]}) {
-      const scopeId=payload.scope_id;
+      const scopeId=payload.scope_id,generation=lifecycle;
       runtime.attachmentRevision=(runtime.attachmentRevision || 0)+1;
       activeDraft={scope:scopeId,unsent};
       updatePreview(scopeId,""); state.sending = true; state.controller = new AbortController(); const controller = state.controller;
       let completed=false;
       try {
         await renderPage();
+        if(generation!==lifecycle)return;
         const response = await api("/api/chat",{method:"POST",body:payload,signal:controller.signal,raw:true});
-        const result = await readChatResult(response,scopeId);
+        if(generation!==lifecycle){await response?.body?.cancel?.().catch(()=>{});return;}
+        const result = await readChatResult(response,scopeId,generation);
+        if(generation!==lifecycle)return;
         completed=true;
         const pending=state.scope===scopeId ? composerDraft(scopeId).attachments : [];
         const held=new Set([...unsent.attachments,...pending].map(item=>item.id));
         try { await releaseAttachments(payload.attachments.filter(id=>!held.has(id)).map(id=>({id})),scopeId); }
-        catch { toast("回复已完成；参考资料暂未清理，可在资料管理中释放。",true); }
+        catch { if(generation===lifecycle)toast("回复已完成；参考资料暂未清理，可在资料管理中释放。",true); }
+        if(generation!==lifecycle)return;
         if (result.job) toast("电脑任务已创建，执行进度与结果会显示在当前聊天，可随时停止。");
         else if (result.pending_actions?.length) toast(`有 ${result.pending_actions.length} 项工具请求等待你确认。`);
-      } catch (error) { controller.abort(); updatePreview(scopeId,""); toast(error.name === "AbortError" ? "已停止等待。后台任务请在任务页查看并停止。" : error.message,error.name !== "AbortError"); }
+      } catch (error) { controller.abort(); if(generation===lifecycle){updatePreview(scopeId,""); toast(error.name === "AbortError" ? "已停止等待。后台任务请在任务页查看并停止。" : error.message,error.name !== "AbortError");} }
       finally {
+        if(generation!==lifecycle)return;
         runtime.preview=null;state.sending=false;state.controller=null;
+        saveDraft();
         // Refresh is independent from the accepted result: its failure must not
         // discard drafts or cause the completed request to be submitted again.
         try {await bootstrap();}
-        catch {toast("聊天状态刷新失败；草稿已保留，请刷新查看最新记录。",true);}
+        catch {if(generation===lifecycle)toast("聊天状态刷新失败；草稿已保留，请刷新查看最新记录。",true);}
         finally {
-          restoreDraft(scopeId,completed ? unsent : joinDrafts(submitted,unsent));
-          activeDraft=null;syncComposer(scopeId);
+          if(generation===lifecycle){restoreDraft(scopeId,completed ? unsent : joinDrafts(submitted,unsent));
+          activeDraft=null;syncComposer(scopeId);}
         }
       }
     }
-  return {renderChat,sessionSidebar,attachmentChips,sendChat,releaseAttachments,flushCollected,cancelCollected,
-    close:()=>{clearTimeout(collectTimer);collectTimer=null;collected=null;state.debouncePending=false;}};
+    function close(){
+      lifecycle++;renderRevision++;clearTimeout(collectTimer);collectTimer=null;collected=null;activeDraft=null;
+      savedDrafts.clear();state.debouncePending=false;state.controller?.abort();state.controller=null;state.sending=false;
+      if(activeReader){Promise.resolve(activeReader.cancel()).catch(()=>{});activeReader=null;}
+      runtime.preview=null;runtime.attachmentRevision=(runtime.attachmentRevision||0)+1;clearComposer();runtime.attachmentScope="";
+    }
+  return {renderChat,sessionSidebar,attachmentChips,sendChat,releaseAttachments,removeAttachment,flushCollected,cancelCollected,saveDraft,parkDraft,activateScope,
+    handleAction:(action,target)=>workspace?.handleAction(action,target)||false,
+    handleSubmit:(kind,form)=>workspace?.handleSubmit(kind,form)||false,
+    handleInput:target=>workspace?.handleInput(target)||false,
+    close};
 }};

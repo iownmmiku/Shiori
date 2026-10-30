@@ -43,7 +43,8 @@ const paths = {
   diagnostics:'<path d="M3 12h4l2-5 3 10 2-5h7"/>',
 };
 const icon = name => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name] || paths.spark}</svg>`;
-const pageNames = {overview:"运行概览",chat:"聊天",models:"模型供应商",memory:"记忆档案",culture:"群语言与表达",knowledge:"知识与检索",personaKnowledge:"人格知识",tasks:"任务与提醒",tools:"MCP",persona:"机器人配置",groups:"群与会话",logs:"运行日志",statistics:"数据统计",plugins:"插件",diagnostics:"自检与诊断",settings:"系统设置",jobs:"后台任务",help:"使用指南"};
+paths.qqChats = paths.groups;
+const pageNames = {overview:"运行概览",chat:"Chat 工作台",qqChats:"QQ 聊天管理",models:"模型供应商",memory:"记忆档案",culture:"群语言与表达",knowledge:"知识与检索",personaKnowledge:"人格知识",characterSchedule:"角色日程",tasks:"任务与提醒",tools:"MCP",persona:"机器人配置",groups:"群与会话",logs:"运行日志",statistics:"数据统计",plugins:"插件",diagnostics:"自检与诊断",settings:"系统设置",jobs:"后台任务",help:"使用指南"};
 // Keep old model links working without restoring a second configuration page.
 const sidebarPageNames = Object.fromEntries(Object.entries(pageNames).filter(([page]) => page !== "models"));
 // Retain browser preferences from previous product names on this origin.
@@ -57,7 +58,27 @@ for (const [storage, names] of [[localStorage, ["page", "scope"]], [sessionStora
   }
 }
 const state = {page:localStorage.getItem("shiori-page") || "chat",scope:localStorage.getItem("shiori-scope") || "web:default",boot:null,settings:{},scopes:[],personas:[],records:[],messages:[],filters:{},images:[],draft:"",sending:false,controller:null,renderId:0,modalRecord:null,modalKind:null,authenticated:false};
+if (window.location.pathname.replace(/\/$/, "") === "/chat") state.page = "chat";
 if (!pageNames[state.page]) state.page = "overview";
+const isQQScope = id => /^(?:qq|qqofficial):(?:group|private):/.test(String(id || ""));
+function rememberChatScope() {
+  const key = String(state.scope).startsWith("web:") ? "local" : isQQScope(state.scope) ? "qq" : "";
+  if (key) localStorage.setItem(`shiori-${key}-scope`,state.scope);
+}
+function selectPageScope(page) {
+  if (page === "chat") {
+    const remembered = localStorage.getItem("shiori-local-scope");
+    const id = String(state.scope).startsWith("web:") ? state.scope :
+      state.scopes.find(item => item.id === remembered && item.id.startsWith("web:"))?.id ||
+      state.scopes.find(item => item.id.startsWith("web:"))?.id || "web:default";
+    window.ShioriExperience.activateChatScope(id);
+  } else if (page === "qqChats" && !isQQScope(state.scope)) {
+    const remembered = localStorage.getItem("shiori-qq-scope");
+    state.scope = state.scopes.find(item => item.id === remembered && isQQScope(item.id))?.id ||
+      state.scopes.find(item => isQQScope(item.id))?.id || "";
+  }
+  localStorage.setItem("shiori-scope",state.scope);
+}
 const labels = {fact:"事实",preference:"偏好",event:"共同经历",note:"笔记",active:"有效",archived:"已归档",superseded:"已替代",deleted:"已删除",pending:"待处理",approved:"已确认",rejected:"已拒绝",disabled:"已停用",running:"执行中",completed:"已完成",cancelled:"已取消",failed:"失败",private:"仅本人",group:"会话共享",todo:"待办",reminder:"提醒",none:"不重复",daily:"每天",weekly:"每周",balanced:"适时回应",quiet:"仅被提及",active_activity:"积极接话",delivered:"已送达",lexical:"关键词检索",hybrid:"混合检索",semantic:"语义检索",basic:"基础检索"};
 const label = key => labels[key] || key || "—";
 const fmt = (value, full = false) => { if (!value) return "未设置"; const date = new Date(value); return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString("zh-CN",full ? {year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"} : {month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"}); };
@@ -75,12 +96,16 @@ function configuredModel(route = "chat") {
 const query = params => new URLSearchParams(Object.entries(params).filter(([, value]) => value !== undefined && value !== "" && value !== null)).toString();
 
 async function api(path, options = {}) {
+  const generation=state.authGeneration||0;
+  const checkGeneration=()=>{if(generation!==(state.authGeneration||0)){const error=new Error("登录状态已变化，已忽略旧请求。");error.name="AbortError";throw error;}};
   const {method = "GET",body,signal,raw = false} = options;
   const headers = {};
   if (body && !(body instanceof FormData)) headers["Content-Type"] = "application/json";
   const response = await fetch(path,{method,headers,credentials:"same-origin",signal,body:body instanceof FormData ? body : body === undefined ? undefined : JSON.stringify(body)});
+  checkGeneration();
   if (!response.ok) {
     let result; try { result = await response.json(); } catch { result = {}; }
+    checkGeneration();
     let detail = result.detail || result.error || `请求失败（${response.status}）`;
     if (typeof detail !== "string") detail = JSON.stringify(detail);
     if (response.status === 401) { state.authenticated = false; showAuth(); }
@@ -90,7 +115,7 @@ async function api(path, options = {}) {
   }
   if (raw) return response;
   if (response.status === 204) return {};
-  return response.json();
+  const result=await response.json();checkGeneration();return result;
 }
 
 
@@ -117,6 +142,10 @@ function renderNavigation() {
     ? layout.render({ pageNames: sidebarPageNames, current: state.page, icon, esc: e })
     : `<div class="primary-navigation">${Object.keys(sidebarPageNames).filter(key => key !== "help").map(key => `<button type="button" class="nav-item ${key === state.page ? "active" : ""}" data-page="${e(key)}">${icon(key)}<span>${e(sidebarPageNames[key])}</span></button>`).join("")}</div>`;
   document.body.classList.toggle("chat-page",state.page === "chat");
+  document.body.classList.toggle("chat-workbench",state.page === "chat");
+  document.body.classList.toggle("qq-monitor-page",state.page === "qqChats");
+  const pagePath = state.page === "chat" ? "/chat" : "/";
+  if (window.location.pathname !== pagePath) window.history.replaceState(null,"",pagePath + window.location.search);
   $("#page-breadcrumb").textContent = pageNames[state.page];
   $("#scope-icon").innerHTML = icon("groups");
   $("#refresh-button").innerHTML = icon("refresh");
@@ -125,9 +154,10 @@ function renderNavigation() {
   $("#sidebar-status-dot").className = `status-dot ${state.settings.paused ? "warning" : modelReady ? "online" : ""}`;
   $("#sidebar-status-text").textContent = state.settings.paused ? "已暂停自动回复" : modelReady ? "本地服务已就绪" : "等待配置模型";
   $("#sidebar-status-sub").textContent = modelReady ? (configuredModel().model || "你的数据，留在你的电脑") : "连接模型即可开始聊天";
-  $("#version-label").textContent = state.boot?.version || "0.1";
-  $("#workspace-version").textContent = state.boot?.version || "0.2.0";
-  if ($("#header-version")) $("#header-version").textContent = "v" + (state.boot?.version || "0.2.0");
+  const versionLabel = (state.boot?.version || "0.2.1-beta").replace(/-beta$/, " beta");
+  $("#version-label").textContent = versionLabel;
+  $("#workspace-version").textContent = versionLabel;
+  if ($("#header-version")) $("#header-version").textContent = "v" + versionLabel;
   const portWarning = $("#port-warning"), listener = state.boot?.listener;
   if (portWarning) {
     portWarning.hidden = !listener?.port_changed;
@@ -185,7 +215,7 @@ function sidebarContext() {
 function leaveHiddenPage() {
   window.ShioriSidebar?.prepare?.(sidebarPageNames);
   if (state.page !== "chat" && window.ShioriSidebar && !window.ShioriSidebar.isPageVisible(state.page)) {
-    state.page = "chat"; localStorage.setItem("shiori-page","chat");
+    state.page = "chat"; selectPageScope("chat"); localStorage.setItem("shiori-page","chat");
     renderNavigation();
     toast("该页面已隐藏，已回到聊天；可在「管理侧边栏」中恢复。");
     renderPage();
@@ -199,35 +229,53 @@ function openSidebarManage() {
             window.ShioriSidebar.manageBody({ pageNames:sidebarPageNames, icon, esc: e }),"sidebar-manage",null,"完成");
 }
 
-async function bootstrap(showWizard = false) {
+async function bootstrap(showWizard = false,authEntry = false) {
+  if(state.authenticated===false&&!authEntry)return false;
+  const generation=state.authGeneration||0;
   const boot = await api("/api/bootstrap");
+  if(generation!==(state.authGeneration||0))return false;
   state.boot = boot; state.settings = boot.settings || {}; state.scopes = boot.scopes || []; state.personas = boot.personas || [];
   if (!state.scopes.find(item => item.id === state.scope)) state.scope = state.scopes[0]?.id || "web:default";
   if(state.page === "models"){state.page="persona";state.botTab="models";localStorage.setItem("shiori-page","persona");}
   // The remembered page may have been hidden since the last visit; never strand
   // the user on a page with no sidebar entry.
   window.ShioriSidebar?.prepare?.(sidebarPageNames);
-  if (window.ShioriSidebar && !window.ShioriSidebar.isPageVisible(state.page)) { state.page = "chat"; localStorage.setItem("shiori-page","chat"); }  state.authenticated = true; renderNavigation(); await renderPage();
-  if (showWizard && boot.setup_required && !sessionStorage.getItem("shiori-wizard-skipped")) showWizardModal();
+  if (window.ShioriSidebar && !window.ShioriSidebar.isPageVisible(state.page)) { state.page = "chat"; localStorage.setItem("shiori-page","chat"); }
+  selectPageScope(state.page);
+  state.authenticated = true; renderNavigation(); await renderPage();
+  if (generation===(state.authGeneration||0)&&state.authenticated&&showWizard && boot.setup_required && !sessionStorage.getItem("shiori-wizard-skipped")) showWizardModal();
+  return true;
 }
 async function navigate(page) {
+  if(state.authenticated===false)return;
   if (!pageNames[page]) return;
   if(page === "models"){page="persona";state.botTab="models";}
   // A hidden page has no sidebar entry; keep navigation truthful by refusing it
   // and telling the user how to bring it back.
   window.ShioriSidebar?.prepare?.(sidebarPageNames);
   if (window.ShioriSidebar && !window.ShioriSidebar.isPageVisible(page)) { toast("该页面已在侧边栏隐藏，可在「管理侧边栏 → 管理页面」中恢复。",true); return; }
-  if (state.page === "chat") state.draft = $("#chat-text")?.value || state.draft;
+  if (state.page === "chat" && String(state.scope).startsWith("web:")) {
+    if (page === "chat") window.ShioriExperience.saveChatDraft();
+    else window.ShioriExperience.parkChatDraft();
+  }
+  rememberChatScope();
+  selectPageScope(page);
   state.page = page; state.filters = {}; localStorage.setItem("shiori-page",page);
   $("#sidebar").classList.remove("open"); $("#sidebar-scrim").classList.remove("open");
   renderNavigation(); await renderPage(); window.scrollTo(0,0);
 }
 async function renderPage() {
+  if(state.authenticated===false)return;
   const id = ++state.renderId;
   const main = $("#content");
+  window.ShioriBackup?.close();
+  window.ShioriQQMonitor?.close();
   main.innerHTML = '<div class="loading-page"><span class="spinner"></span><p>正在读取本地数据…</p></div>';
   try {
-    const html = await ({overview:window.ShioriExperience.renderOverview,chat:window.ShioriExperience.renderChat,models:window.ShioriPages.renderModels,logs:window.ShioriPages.renderLogs,statistics:window.ShioriStatistics?.render,plugins:window.ShioriPlugins?.render,memory:renderMemory,culture:renderCulture,knowledge:renderKnowledge,personaKnowledge:renderPersonaKnowledge,tasks:renderTasks,tools:renderTools,persona:window.ShioriExperience.renderPersonas,groups:renderGroups,diagnostics:renderDiagnostics,settings:window.ShioriExperience.renderSettings,jobs:window.ShioriExperience.renderJobs,help:window.ShioriExperience.renderHelp}[state.page])();
+    const page = state.page;
+    await window.ShioriAssets?.ensure(page);
+    if (id !== state.renderId || page !== state.page) return;
+    const html = await ({overview:window.ShioriExperience.renderOverview,chat:window.ShioriExperience.renderChat,qqChats:window.ShioriQQMonitor?.render,models:window.ShioriPages.renderModels,logs:window.ShioriPages.renderLogs,statistics:window.ShioriStatistics?.render,plugins:window.ShioriPlugins?.render,memory:renderMemory,culture:renderCulture,knowledge:renderKnowledge,personaKnowledge:renderPersonaKnowledge,characterSchedule:window.ShioriCharacterSchedule?.render,tasks:renderTasks,tools:renderTools,persona:window.ShioriExperience.renderPersonas,groups:renderGroups,diagnostics:renderDiagnostics,settings:window.ShioriExperience.renderSettings,jobs:window.ShioriExperience.renderJobs,help:window.ShioriExperience.renderHelp}[state.page])();
     if (id !== state.renderId) return;
     main.innerHTML = `<div class="animate-in">${html}</div>`;
     if (state.page === "chat") { const feed = $("#chat-feed"); feed.scrollTop = feed.scrollHeight; renderImagePreviews(); }
@@ -235,6 +283,8 @@ async function renderPage() {
     window.ShioriExperience.afterRender();
     window.ShioriPages.afterRender();
     window.ShioriStatistics?.afterRender();
+    window.ShioriCharacterSchedule?.afterRender();
+    window.ShioriQQMonitor?.afterRender();
     window.ShioriUpdates?.afterRender();
     window.ShioriFeatures.afterRender?.();
   } catch (error) { if (id === state.renderId) main.innerHTML = `${heading("LOCAL WORKSPACE",pageNames[state.page],"数据暂时没有加载成功。请确认本地服务仍在运行。") }<div class="inline-error">${e(error.message)}</div><div class="section-actions">${button("重新加载","refresh","primary","refresh")}</div>`; }
@@ -271,16 +321,29 @@ function iconInline(name) { return `<span class="inline-icon" style="display:inl
 
 
 function scopeModalBase(item = null) {
-  openModal(item ? "调整会话设置" : "添加一个会话空间","默认隔离记忆与词典；加入同名共享空间后，仅共享明确允许的群可见记忆。QQ 会话仍需白名单。",`<div class="form-grid">${!item ? `<input type="hidden" name="kind" value="web"><details class="details field full"><summary>高级：手动填写 QQ 会话 ID</summary>${field("id","会话 ID（可选）","","text","本地对话无需填写。QQ 会话通常从实际收到的消息自动创建。","data-full placeholder=\"qq:group:123456789\"")}</details>` : ""}${field("name","会话名称",item?.name || "","text","","required data-full maxlength=\"100\"")}${select("persona_id","使用人格",state.personas.map(p => [p.id,p.name]),item?.persona_id || "default")}${select("activity","回应方式",[["quiet","仅被提及"],["balanced","适时回应"],["active","积极接话"]],item?.activity || "balanced")}${field("quiet_start","安静时段开始",item?.quiet_start || "","time")}${field("quiet_end","安静时段结束",item?.quiet_end || "","time")}</div>${toggle("enabled","启用这个会话","关闭后停止自动回复。",item?.enabled ?? true)}${toggle("auto_memory","自动记住重要信息","从对话中提取事实、偏好与经历。",item?.auto_memory ?? true)}${toggle("dictionary_understand","理解群词典","在合适语境召回已确认词义。",item?.dictionary_understand ?? true)}${toggle("dictionary_use","主动使用群词","只使用同时允许主动使用的已确认词条。",item?.dictionary_use ?? false)}${toggle("allow_tools","允许使用工具","包括记事、提醒、计算和已启用的检索工具。",item?.allow_tools ?? true)}`,"scope",item);
+  openModal(item ? "调整会话设置" : "添加一个会话空间",window.ShioriFeatures.scopePolicyDescription(item),`<div class="form-grid">${!item ? `<input type="hidden" name="kind" value="web"><details class="details field full"><summary>高级：手动填写 QQ 会话 ID</summary>${field("id","会话 ID（可选）","","text","本地对话无需填写。QQ 会话通常从实际收到的消息自动创建。","data-full placeholder=\"qq:group:123456789\"")}</details>` : ""}${field("name","会话名称",item?.name || "","text","","required data-full maxlength=\"100\"")}${select("persona_id","使用人格",state.personas.map(p => [p.id,p.name]),item?.persona_id || "default")}${select("activity","回应方式",[["quiet","仅被提及"],["balanced","适时回应"],["active","积极接话"]],item?.activity || "balanced")}${field("quiet_start","安静时段开始",item?.quiet_start || "","time")}${field("quiet_end","安静时段结束",item?.quiet_end || "","time")}</div>${toggle("enabled","启用这个会话","关闭后停止自动回复。",item?.enabled ?? true)}${toggle("auto_memory","自动记住重要信息","从对话中提取事实、偏好与经历。",item?.auto_memory ?? true)}${toggle("dictionary_understand","理解群词典","在合适语境召回已确认词义。",item?.dictionary_understand ?? true)}${toggle("dictionary_use","主动使用群词","只使用同时允许主动使用的已确认词条。",item?.dictionary_use ?? false)}${toggle("allow_tools","允许使用工具","包括记事、提醒、计算和已启用的检索工具。",item?.allow_tools ?? true)}`,"scope",item);
 }
 function showWizardModal() {
   window.ShioriQuickStart.open(1);
 }
 function showAuth() {
+  leaveAuthenticated();
+  window.ShioriAuth?.requireLogin();
+}
+function leaveAuthenticated() {
+  state.authenticated=false;state.authGeneration=(state.authGeneration||0)+1;state.renderId++;
+  window.ShioriBackup?.close();
+  window.ShioriQQMonitor?.close();
   window.ShioriPages?.close();
   window.ShioriExperience?.close();
-  window.ShioriAuth.requireLogin();
+  window.ShioriUpdates?.close();
+  window.ShioriStatistics?.afterRender();
+  window.ShioriCharacterSchedule?.afterRender();
+  state.controller?.abort();state.controller=null;state.sending=false;state.debouncePending=false;state.draft="";state.images=[];
+  state.messages=[];state.records=[];state.liveJobs=[];state.toolRuns=[];
+  const main=$("#content");if(main)main.innerHTML="";
 }
+window.ShioriAppLifecycle={leaveAuthenticated};
 
 
 // 0.2: reviewable memories, scoped knowledge, culture learning and group turn-taking.
@@ -303,19 +366,32 @@ async function showProfile(offset = 0) {
   const content = sections.map(([key,title]) => `<h3 style="margin:16px 0 10px">${title}</h3><div class="source-list">${rows(profile[key]).length ? rows(profile[key]).map(item => `<div class="source-item"><p>${e(item.content || item)}</p><small>v${e(item.version || 1)} · ${(item.source_ids || []).length} 条来源</small></div>`).join("") : '<p class="help-caption">还没有对应的有效记忆。</p>'}</div>`).join("");
   openModal("从记忆里，认识你",`${scopeName(state.scope)} · ${userId} · 仅根据当前可见的有效记忆整理`,content + `<p class="help-caption">事实和偏好按50条候选分页，失效或无权查看的记录不显示；共同经历最多12条。</p><div class="section-actions">${offset > 0 ? button("上一页","profile-page","","",`data-id="${Math.max(0,offset-50)}"`) : ""}${profile.has_more ? button("下一页","profile-page","","",`data-id="${profile.next_offset}"`) : ""}</div>`);
 }
-async function showJargonEvidence(item) {
-  const rawEvidence = item.evidence || {}, evidence = Array.isArray(rawEvidence) ? {message_ids:rawEvidence.map(value => value.message_id).filter(Boolean),observations:rawEvidence.map(value => `${value.user_id || "群成员"}：${value.quote || value.content || "（未保存原文）"}`)} : rawEvidence;
-  const ids = evidence.message_ids || item.source_ids || [], messages = rows(await api(`/api/messages?${query({scope_id:item.scope_id,limit:200})}`));
-  const observations = evidence.examples || evidence.observations;
-  openModal("它为什么学到了这个词",`${item.term} · ${label(item.status)}`,`<p class="record-text">${e(item.meaning)}</p><dl class="detail-table"><dt>学习来源</dt><dd>${e(item.created_by || "手动教词")}</dd><dt>置信度</dt><dd>${Number.isFinite(Number(evidence.confidence)) ? `${Math.round(Number(evidence.confidence) * 100)}%` : "未记录"}</dd><dt>观察次数</dt><dd>${e(Array.isArray(observations) ? observations.length : observations || ids.length || "未记录")}</dd></dl>${Array.isArray(observations) && observations.length ? `<h3 style="margin-bottom:10px">观察线索</h3><div class="source-list">${observations.map(value => `<div class="source-item"><p>${e(typeof value === "string" ? value : value.text || value.content || value.quote || JSON.stringify(value))}</p></div>`).join("")}</div>` : ""}<h3 style="margin:18px 0 10px">来源消息</h3><div class="source-list">${ids.length ? ids.map(id => { const source = messages.find(message => message.id === id); return `<div class="source-item"><small>${e(source ? `${source.user_id} · ${fmt(source.created_at)}` : id)}</small><p>${e(source?.content || "来源已不在最近记录中，或已被删除。")}</p></div>`; }).join("") : '<p class="help-caption">手动词条没有关联的聊天证据。</p>'}</div>`);
+async function showJargonEvidence(item, offset = 0) {
+  const request = {}; state.evidenceRequest = request;
+  const scope = state.scope, renderId = state.renderId;
+  openModal("它为什么学到了这个词",`${item.term} · ${label(item.status)}`,"<p>正在读取原始来源…</p>","",item);
+  const current = () => state.evidenceRequest === request && state.modalRecord === item && $("#modal")?.open && state.scope === scope && state.renderId === renderId;
+  let page;
+  try { page = await api(`/api/jargon/${encodeURIComponent(item.id)}/evidence?${query({offset,limit:50})}`); }
+  catch(error) { if(current())modalError(error.message); return; }
+  if(!current())return;
+  const raw = item.evidence || {}, confidence = Array.isArray(raw) ? null : raw.confidence;
+  const sources = rows(page.items).map(entry => {
+    const source = entry.status === "available" ? entry.message : null;
+    const text = source ? source.content : entry.status === "unavailable" ? "来源不属于此词条的会话，未显示。" : "来源消息已删除或不存在。";
+    return `<div class="source-item"><small>${e(source ? `${source.user_id} · ${fmt(source.created_at)}` : entry.id)}</small><p>${e(text)}</p></div>`;
+  }).join("");
+  const paging = `<div class="section-actions">${offset > 0 ? button("上一页来源","jargon-evidence-page","ghost small","",`data-offset="${Math.max(0,offset-50)}"`) : ""}${page.has_more ? button("下一页来源","jargon-evidence-page","ghost small","",`data-offset="${page.next_offset}"`) : ""}</div>`;
+  openModal("它为什么学到了这个词",`${item.term} · ${label(item.status)}`,`<p class="record-text">${e(item.meaning)}</p><dl class="detail-table"><dt>学习来源</dt><dd>${e(item.created_by || "手动教词")}</dd><dt>置信度</dt><dd>${confidence != null && Number.isFinite(Number(confidence)) ? `${Math.round(Number(confidence) * 100)}%` : "未记录"}</dd><dt>关联消息</dt><dd>${e(page.total)} 条</dd></dl><h3>来源消息</h3><p class="help-caption">按原始来源编号读取，不受最近 200 条聊天限制。删除的来源不会用旧摘录补回。</p><div class="source-list">${sources || '<p class="help-caption">此词条没有关联的聊天证据。</p>'}</div>${paging}`,"",item);
 }
 
 async function saveModal(kind,form) {
   const data = getForm(form), item = state.modalRecord;
+  const memoryContext=kind==="memory"?window.ShioriMemoryEvents?.captureSave():null;
   if (kind === "provider") { await saveProvider(form); return; }
   if (kind === "mcp-server") { await saveMcpServer(form); return; }
   let endpoint, payload;
-  if (kind === "memory") { endpoint = "/api/memories"; payload = {...data,importance:Number(data.importance),valid_to:data.valid_to ? new Date(data.valid_to).toISOString() : null}; }
+  if (kind === "memory") { endpoint = "/api/memories"; payload = window.ShioriMemoryEvents?window.ShioriMemoryEvents.payload(data,item):{...data,importance:Number(data.importance),valid_to:data.valid_to ? new Date(data.valid_to).toISOString() : null}; }
   else if (kind === "jargon") { endpoint = "/api/jargon"; payload = data; }
   else if (kind === "task") { endpoint = "/api/tasks"; if (data.kind === "reminder" && !data.due_at) throw new Error("请为提醒选择时间。"); if (data.repeat !== "none" && !data.due_at) throw new Error("重复任务需要设置提醒时间。"); payload = {...data,due_at:data.due_at || null}; }
   else if (kind === "persona") { endpoint = "/api/personas"; payload = {...data,interests:splitNames(data.interests),excluded_topics:splitNames(data.excluded_topics),exploration:{}}; for (const key of ["interval_hours","daily_searches","valid_days"]) { payload.exploration[key] = data["explore_"+key] === "" ? null : Number(data["explore_"+key]); delete payload["explore_"+key]; } }
@@ -325,11 +401,12 @@ async function saveModal(kind,form) {
   if (kind === "scope") {
     if(data.debounce_enabled !== undefined)payload.debounce_enabled=data.debounce_enabled === "" ? null : data.debounce_enabled === "true";
     for(const key of ["debounce_seconds","debounce_max_wait_seconds"])if(data[key] !== undefined)payload[key]=data[key] === "" ? null : Number(data[key]);
-    const inherited = ['debounce_enabled','debounce_seconds','debounce_max_wait_seconds','persona_id','model_id','activity','trigger_at','trigger_reply','trigger_name','plan_enabled','proactive_reply','always_reply','allow_tools','allow_mcp','use_persona_knowledge'];
-    if (item?.profile_id != null) for (const key of inherited) if (payload[key] === item[key]) delete payload[key];
+    payload = window.ShioriFeatures.scopePatch(payload,data,item,form);
     if (!item && payload.persona_id === 'default') delete payload.persona_id;
   }
-  await api(endpoint + (item ? `/${encodeURIComponent(item.id)}` : ""),{method:item ? "PUT" : "POST",body:payload});
+  try{await api(endpoint + (item ? `/${encodeURIComponent(item.id)}` : ""),{method:item ? "PUT" : "POST",body:payload});}
+  catch(error){if(memoryContext&&!window.ShioriMemoryEvents.saveCurrent(memoryContext)){if(memoryContext.auth===(state.authGeneration||0)&&state.authenticated!==false)toast(error.message,true);return;}throw error;}
+  if(memoryContext&&!window.ShioriMemoryEvents.saveCurrent(memoryContext))return;
   closeModal(); toast(item ? "修改已保存" : "已添加到这个小世界"); await bootstrap();
 }
 function modelPayload(form) { const data = getForm(form), model = {base_url:data.base_url,model:data.model,vision:data.vision}; if (data.api_key) model.api_key = data.api_key; for (const key of ["temperature","top_p","input_price","output_price","timeout_seconds","first_token_timeout_seconds","total_timeout_seconds","max_tokens"]) if (data[key] !== undefined) model[key] = Number(data[key]); if (data.reasoning_effort !== undefined) model.reasoning_effort = data.reasoning_effort.trim(); if (data.custom_params !== undefined) model.custom_params = typeof parseCustomParams === "function" ? parseCustomParams(data.custom_params) : {}; if (data.stream_mode !== undefined) model.stream_mode = data.stream_mode; if (data.timeout_fallback !== undefined) model.timeout_fallback = !!data.timeout_fallback; return model; }
@@ -400,16 +477,22 @@ document.addEventListener("click",async event => {
   const target = event.target.closest("[data-action]"); if (!target || target.disabled) return;
   const action = target.dataset.action, id = target.dataset.id, item = state.records.find(record => record.id === id);
   try {
+    const memoryAction = window.ShioriMemoryEvents?.handleAction(action,target);
+    if (memoryAction && await memoryAction) return;
+    if (await window.ShioriBackup?.handleAction(action,target)) return;
+    if (await window.ShioriCharacterSchedule?.handleAction(action,target)) return;
     if (await window.ShioriLearning?.handleAction(action,target)) return;
     if (await window.ShioriWebSearch?.handleAction(action,target)) return;
     if (await window.ShioriBotModels?.handleAction(action,target)) return;
     if (await window.ShioriEmbedding?.handleAction(action,target)) return;
     if (await window.ShioriPages.handleAction(action,target)) return;
+    if (await window.ShioriQQMonitor?.handleAction(action,target)) return;
     if (await window.ShioriExperience.handleAction(action,target)) return;
     if (await window.ShioriQuickStart.handleAction(action,target)) return;
     if (await window.ShioriFeatures.handleAction(action,target)) return;
     if (window.ShioriSidebar?.handleAction?.(action,target,sidebarContext())) return;
-    if (action === "close-modal") { closeModal(); return; }
+    if (action === "close-modal") { window.ShioriBackup?.close(); closeModal(); return; }
+    if (action === "jargon-evidence-page") { if(state.modalRecord) await showJargonEvidence(state.modalRecord,Number(target.dataset.offset)||0); return; }
     if (action === "refresh") { await bootstrap(); toast("数据已刷新"); }
     else if (action.startsWith("go-")) await navigate(action.slice(3));
     else if (action === "setup") showWizardModal();
@@ -468,13 +551,13 @@ document.addEventListener("click",async event => {
     else if (action === "new-scope") scopeModal();
     else if (action === "edit-scope") scopeModal(state.scopes.find(s => s.id === id));
     else if (action === "toggle-scope") { const group = state.scopes.find(s => s.id === id); await api(`/api/scopes/${encodeURIComponent(id)}`,{method:"PUT",body:{enabled:!group.enabled}}); toast(group.enabled ? "会话已暂停" : "会话已启用"); await bootstrap(); }
-    else if (action === "scope-chat") { if(state.sending || state.debouncePending)throw new Error("请先完成或取消当前回复与消息收集。");state.scope = id; localStorage.setItem("shiori-scope",id); await navigate("chat"); }
+    else if (action === "scope-chat") { if (state.page === "chat") window.ShioriExperience.parkChatDraft();rememberChatScope();state.scope = id; localStorage.setItem("shiori-scope",id); await navigate(isQQScope(id) ? "qqChats" : "chat"); }
     else if (action === "attach-image") $("#image-input").click();
     else if (action === "remove-image") { state.images.splice(Number(target.dataset.index),1); renderImagePreviews(); }
     else if (action === "view-image") { openModal("对话图片","",`<img class="image-lightbox" src="${e(target.src)}" alt="对话原图">`); $("#modal").classList.add("modal-wide"); }
     else if (action === "chat-suggestion") { if ($("#chat-text")) { $("#chat-text").value = target.dataset.text; $("#chat-text").focus(); state.draft = target.dataset.text; } }
     else if (action === "cancel-chat") state.controller?.abort();
-    else if (action === "clear-messages") await confirmAction("清空当前聊天记录？","已提取的记忆、词典和任务会保留。聊天来源可能因此无法展示。",async () => { await api(`/api/messages?${query({scope_id:state.scope})}`,{method:"DELETE"}); },"清空记录");
+    else if (action === "clear-messages") await confirmAction("清空当前聊天记录？","同时清除本会话的日记聊天素材、含聊天来源的日记及待回留言。纯日程日记、已提取的记忆、词典和任务会保留；聊天来源可能因此无法展示。",async () => { await api(`/api/messages?${query({scope_id:state.scope})}`,{method:"DELETE"}); },"清空记录");
     else if (action === "message-sources") { const message = state.messages.find(m => m.id === id); if (message) await showSources(message); }
     else if (action === "test-model") await testModel(target);
     else if (action === "model-preset") { const form = target.closest("form"), provider = target.dataset.provider; $('[name="base_url"]',form).value = provider === "openai" ? "https://api.openai.com/v1" : provider === "deepseek" ? "https://api.deepseek.com/v1" : ""; $('[name="model"]',form).value = provider === "deepseek" ? "deepseek-chat" : ""; }
@@ -495,6 +578,8 @@ document.addEventListener("submit",async event => {
   const submit = $('[type="submit"]',form); if (submit) submit.disabled = true;
   if ($("#modal-error",form)) $("#modal-error",form).hidden = true;
   try {
+    if (await window.ShioriMemoryEvents?.handleSubmit(kind,form)) return;
+    if (await window.ShioriCharacterSchedule?.handleSubmit(kind,form)) return;
     if (await window.ShioriLearning?.handleSubmit(kind,form)) return;
     if (await window.ShioriWebSearch?.handleSubmit(kind,form)) return;
     if (await window.ShioriBotModels?.handleSubmit(kind,form)) return;
@@ -522,6 +607,8 @@ document.addEventListener("submit",async event => {
 });
 let searchTimer;
 document.addEventListener("input",event => {
+  window.ShioriCharacterSchedule?.handleInput(event.target);
+  window.ShioriQQMonitor?.handleInput(event.target);
   if (typeof syncRangePair === "function") syncRangePair(event.target);
   window.ShioriPages.handleInput(event.target);
   window.ShioriEmbedding?.handleInput(event.target);
@@ -530,6 +617,9 @@ document.addEventListener("input",event => {
   if (event.target.id === "chat-text") { state.draft = event.target.value; event.target.style.height = "auto"; event.target.style.height = Math.min(event.target.scrollHeight,180) + "px"; }
 });
 document.addEventListener("change",async event => {
+  try { const handled=window.ShioriMemoryEvents?.handleChange(event.target); if (handled && await handled) return; } catch (error) { toast(error.message,true); return; }
+  try { if (await window.ShioriQQMonitor?.handleChange(event.target)) return; } catch (error) { toast(error.message,true); return; }
+  try { if (await window.ShioriCharacterSchedule?.handleChange(event.target)) return; } catch (error) { toast(error.message,true); return; }
   if(event.target.id === "time-zone-preset" && event.target.value){const form=event.target.closest("form");$('[name="timezone"]',form).value=event.target.value;return;}
   if (window.ShioriSidebar?.handleChange?.(event.target,sidebarContext())) return;
   try { if (await window.ShioriWebSearch?.handleChange(event.target)) return; } catch (error) { toast(error.message,true); return; }
@@ -540,7 +630,8 @@ document.addEventListener("change",async event => {
   if (event.target.name === "adapter" && !window.ShioriQuickStart.adapterChanged(event.target)) updateAdapterFields();
   if (event.target.id === "knowledge-persona") { state.knowledgePersona = event.target.value; await renderPage(); }
   if (event.target.id === "image-input") {
-    try { for (const file of [...event.target.files]) { if (state.images.length >= 3) throw new Error("一次最多附加 3 张图片。"); if (file.size > 5 * 1024 * 1024) throw new Error(`${file.name} 超过 5 MB，请压缩后再发送。`); if (!/^image\/(png|jpeg|webp|gif)$/.test(file.type)) throw new Error("支持 PNG、JPEG、WebP 与 GIF 图片。"); const data = await new Promise((resolve,reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = reject; reader.readAsDataURL(file); }); state.images.push({name:file.name,data}); } renderImagePreviews(); }
+    const imageScope = state.scope;
+    try { for (const file of [...event.target.files]) { if (state.page !== "chat" || !imageScope.startsWith("web:") || state.scope !== imageScope) throw new Error("会话已切换，请回到原会话重新选择图片。"); if (state.images.length >= 3) throw new Error("一次最多附加 3 张图片。"); if (file.size > 5 * 1024 * 1024) throw new Error(`${file.name} 超过 5 MB，请压缩后再发送。`); if (!/^image\/(png|jpeg|webp|gif)$/.test(file.type)) throw new Error("支持 PNG、JPEG、WebP 与 GIF 图片。"); const data = await new Promise((resolve,reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = reject; reader.readAsDataURL(file); }); if (state.page !== "chat" || state.scope !== imageScope) throw new Error("会话已切换，请回到原会话重新选择图片。"); state.images.push({name:file.name,data}); } renderImagePreviews(); }
     catch (error) { toast(error.message || "图片读取失败",true); } finally { event.target.value = ""; }
   }
   if (event.target.id === "note-input" && event.target.files[0]) {
@@ -577,5 +668,5 @@ $("#modal").addEventListener("cancel",event => {
 $("#modal").addEventListener("close",syncToastLayer);
 
 (async function start() {
-  await window.ShioriAuth.init(async () => { await bootstrap(true); });
+  await window.ShioriAuth.init(async () => { await bootstrap(true,true); });
 })();

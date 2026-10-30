@@ -191,7 +191,10 @@ def run(config):
     if service and not __import__('re').fullmatch(r'(?:shiori|mikubot)(?:@[a-zA-Z0-9_-]+)?\.service',service):raise ValueError('服务名称无效')
     journal=None;started=None;data_saved=False;stopped=False;success=False
     launch=list(cfg['launch']);dropin=None;dropin_old=None;dropin_changed=False
-    def status(state,message):atomic_json(result,{'download_id':cfg['download_id'],'status':state,'message':message,'at':__import__('datetime').datetime.now(__import__('datetime').timezone.utc).isoformat()})
+    def status(state,message):
+        record={'download_id':cfg['download_id'],'status':state,'message':message,'at':__import__('datetime').datetime.now(__import__('datetime').timezone.utc).isoformat()}
+        atomic_json(result,record)
+        atomic_json(regular(work/'outcome.json'),record)
     try:
         status('preparing','正在校验更新文件并准备替换')
         archive=regular(Path(cfg['archive']))

@@ -144,7 +144,8 @@ async def test_planner_is_explicitly_enabled_and_checks_statements_as_well_as_qu
     store, _, provider, chat, bridge = setup
     await bridge.handle_event(event(1, '正在路上'))
     assert not provider.calls
-    store.upsert_scope({'id': 'qq:group:202', 'plan_enabled': True, 'cooldown_seconds': 0})
+    store.upsert_scope({'id': 'qq:group:202', 'plan_enabled': True, 'cooldown_seconds': 0,
+                        'trigger_at': False, 'trigger_name': False})
     await bridge.handle_event(event(2, '今天发现了一段有趣的旋律'))
     await bridge.handle_event(event(3, '明确向你提问', mention=True))
     assert len(provider.calls) == 2 and all(x[1]['purpose'] == 'planner' for x in provider.calls)

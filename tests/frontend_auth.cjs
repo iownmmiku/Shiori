@@ -8,12 +8,15 @@ const error = {hidden:true,textContent:""}, root = {innerHTML:"",hidden:false,qu
 let current = {mode:"setup",setup_required:true,local_setup_allowed:false,authenticated:false}, entered = 0;
 let access = {remote_enabled:false,host:"0.0.0.0",port:8765};
 let responseError = "";
+let transportHook=null;
+const deferred=()=>{let resolve,reject;const promise=new Promise((a,b)=>{resolve=a;reject=b;});return{promise,resolve,reject};};
 const sandbox = {
   window:{},URLSearchParams,location:{hash:"#bootstrap=local-proof",pathname:"/",search:""},
   history:{replaceState(){sandbox.location.hash="";}},
   FormData:class {constructor(form){this.form=form;}[Symbol.iterator](){return Object.entries(this.form.values)[Symbol.iterator]();}},
   document:{getElementById:id=>id === "auth-root" ? root : id === "modal" ? {close(){}} : null,body:{classList:{add:value=>classes.add(value),remove:value=>classes.delete(value)}},addEventListener:(name,fn)=>handlers[name]=fn},
   fetch:async (url,options)=>{calls.push([url,options]);let data={};
+    if(transportHook){const intercepted=transportHook(url,options);if(intercepted)return await intercepted;}
     if(url==="/api/auth/status")data=current;
     if(url==="/api/auth/access")data=access;
     if(responseError)return{ok:false,status:401,json:async()=>({detail:responseError})};
@@ -67,6 +70,34 @@ async function main(){
   current={mode:"password",password_set:true,authenticated:false};await auth.requireLogin();
   responseError="密码不正确";const login=form("login",{password:"wrong-password"});
   await submit(login);assert.match(error.textContent,/密码不正确/);assert.ok(!classes.has("auth-ready"));
+
+  // The isolated auth module remains usable without app.js; when the app hook
+  // exists, every transition to the login screen tears it down immediately.
+  responseError="";let exits=0;sandbox.window.ShioriAppLifecycle={leaveAuthenticated(){exits++;}};
+  current={mode:"password",authenticated:true};await auth.refresh();const oldEntered=entered;
+  let gate=deferred();transportHook=url=>url==="/api/auth/status"?gate.promise:null;
+  const oldStatus=auth.refresh();auth.screen();assert.equal(exits,1);assert.ok(!classes.has("auth-ready"));
+  gate.resolve({ok:true,status:200,json:async()=>({mode:"password",authenticated:true})});await oldStatus;
+  assert.equal(entered,oldEntered,"an old authenticated status cannot enter after the login screen invalidated it");assert.equal(auth.getStatus().authenticated,false);
+
+  transportHook=null;current={mode:"password",authenticated:true};await auth.refresh();
+  gate=deferred();transportHook=url=>url==="/api/auth/logout"?gate.promise:null;
+  const logout=handlers.click({target:{closest:()=>({dataset:{authAction:"logout"}})},preventDefault(){}});
+  assert.equal(exits,2,"explicit logout tears down the app before waiting for the network");assert.ok(!classes.has("auth-ready"));
+  current={mode:"password",authenticated:false};gate.resolve({ok:true,status:200,json:async()=>({})});await logout;
+  assert.equal(auth.getStatus().authenticated,false);
+
+  transportHook=null;current={mode:"password",authenticated:true};await auth.refresh();
+  gate=deferred();transportHook=url=>url==="/api/auth/status"?gate.promise:null;
+  const beforeRequire=exits,relogin=auth.requireLogin();assert.equal(exits,beforeRequire+1);assert.ok(!classes.has("auth-ready"));
+  gate.resolve({ok:true,status:200,json:async()=>({mode:"password",authenticated:true})});await relogin;
+  assert.equal(auth.getStatus().authenticated,false,"requireLogin never trusts a status snapshot to bypass the login screen");
+
+  gate=deferred();transportHook=url=>url==="/api/auth/login"?gate.promise:null;
+  const staleLogin=submit(form("login",{password:"old-login-password"})),beforeLate=entered;
+  auth.screen();const requestsBefore=calls.length;gate.resolve({ok:true,status:200,json:async()=>({})});await staleLogin;
+  assert.equal(entered,beforeLate);assert.equal(calls.length,requestsBefore,"a login response invalidated by a later logout does not refresh or re-enter");
+  transportHook=null;
   const script=fs.readFileSync(path.join(__dirname,"../shiori/static/auth.js"),"utf8");
   assert.ok(!script.includes("localStorage."));assert.ok(!script.includes("sessionStorage."));
   assert.ok(!script.includes("/api/session"),"legacy token auth must not bypass the password gate");

@@ -8,3 +8,5 @@ qq-botpy==1.2.1
 pillow==12.3.0
 pypdf==6.20.1
 jsonschema==4.26.0
+holidays==0.107
+tzdata==2026.5

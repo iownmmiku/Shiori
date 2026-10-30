@@ -115,6 +115,7 @@ async def test_private_owner_and_group_allowlist_with_durable_dedup(store):
 @pytest.mark.anyio
 async def test_group_mention_active_cooldown_and_image_provenance(store):
     cfg = Config()
+    cfg.data['identity'].update(respond_to_at=False, respond_to_name=False)
     cfg.data['model'].update(vision=True, base_url='https://mock.invalid/v1', model='planner-test')
     class Planner:
         def __init__(self): self.calls = []

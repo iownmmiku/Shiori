@@ -27,6 +27,7 @@ from .settings import resolve_model
 from .db import message_fingerprint, utc_now
 from .timezones import reference_time
 from .timing import measure, timed_lock
+from .memory_events import episode_prompt_text
 
 
 HK = timezone(timedelta(hours=8))
@@ -48,7 +49,7 @@ def _digest(text: str) -> str:
 
 
 def _record_hash(record: dict) -> str:
-    return _digest(json.dumps({key: record.get(key) for key in ("id", "version", "content", "subject", "property", "scope_id", "user_id", "visibility")}, ensure_ascii=False, sort_keys=True))
+    return _digest(json.dumps({key: record.get(key) for key in ("id", "version", "content", "episode", "subject", "property", "scope_id", "user_id", "visibility")}, ensure_ascii=False, sort_keys=True))
 
 
 def tokenize(text: str) -> Counter:
@@ -294,8 +295,10 @@ def _result(doc: _Document, mode: str, preserve_content: bool = False) -> dict:
         reasons.append("匹配当前问题中的人物")
     if doc.time > 0:
         reasons.append("匹配当前问题的时间范围")
+    event_context = episode_prompt_text(doc.record, doc.excerpt) if doc.record.get('kind') == 'event' and doc.record.get('episode') else None
     return {**doc.record, "memory_id": doc.record["id"], "chunk_index": doc.index,
-            "content": doc.record["content"] if preserve_content else doc.excerpt,
+            **({'event_context': event_context} if event_context else {}),
+            "content": doc.record["content"] if preserve_content else event_context or doc.excerpt,
             "excerpt": doc.excerpt, "content_truncated": len(doc.record["content"]) > len(doc.excerpt),
             "original_content_length": len(doc.record["content"]),
             "retrieval": {"mode": mode, "score": round(doc.score, 6), "bm25": round(doc.bm25, 6),
@@ -1241,19 +1244,23 @@ class MemoryEngine:
         seen = {item["id"] for item in seeds}
         queue = [(item["id"], [item["id"]], {item["id"]: item["version"]}, 0) for item in seeds[:4]
                  if item["id"] in current and current[item['id']]['version'] == item['version']]
-        result = []
-        while queue and len(result) < limit:
+        result, scanned = [], 0
+        # Stale/high-degree relationship graphs must not make a chat scan an
+        # unbounded number of records. Direct lexical results remain available.
+        max_edges = 512
+        while queue and len(result) < limit and scanned < max_edges:
             node_id, path, versions, depth = queue.pop(0)
             if depth >= 2:
                 continue
             after_id = None
             page_size = 32
-            while len(result) < limit:
+            while len(result) < limit and scanned < max_edges:
                 config = self._config()
                 edges = self.store.memory_relations_for_node(scope_id, user_id, node_id,
                     after_id=after_id, limit=page_size, scope_allowed=lambda origin: self._permission(origin, config))
                 if not edges:
                     break
+                scanned += len(edges)
                 roots = set(versions) | {edge['id'] for edge in edges}
                 roots.update(key for edge in edges for key in (edge.get('from_id'), edge.get('to_id')) if key)
                 current = self._visible(scope_id, user_id, record_ids=roots)
@@ -1273,11 +1280,13 @@ class MemoryEngine:
                         continue
                     seen.add(endpoint_id)
                     endpoint = current[endpoint_id]
+                    event_context = episode_prompt_text(endpoint, endpoint['content'][:CHUNK_SIZE]) if endpoint.get('kind') == 'event' and endpoint.get('episode') else None
                     new_path = path + [edge["id"], endpoint_id]
                     deps = {**versions, edge["id"]: edge["version"], endpoint_id: endpoint["version"]}
                     result.append({**endpoint, "memory_id": endpoint_id, "chunk_index": 0,
                         **({'_validation_hash': _record_hash(endpoint)} if with_hash else {}),
-                        "content": endpoint["content"][:CHUNK_SIZE], "excerpt": endpoint["content"][:CHUNK_SIZE],
+                        **({'event_context': event_context} if event_context else {}),
+                        "content": event_context or endpoint["content"][:CHUNK_SIZE], "excerpt": endpoint["content"][:CHUNK_SIZE],
                         "content_truncated": len(endpoint["content"]) > CHUNK_SIZE,
                         "original_content_length": len(endpoint["content"]), "related": True,
                         "reason": f"已审核关系：{edge['label']}（{depth + 1} 跳）", "path_ids": new_path,

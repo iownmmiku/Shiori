@@ -42,7 +42,7 @@ def main():
     parser.add_argument('exe', type=Path)
     parser.add_argument('--data-dir', required=True, type=Path)
     parser.add_argument('--port', type=int, default=18773)
-    parser.add_argument('--expect-version', default='0.2.0')
+    parser.add_argument('--expect-version', default='0.2.1-beta')
     args = parser.parse_args()
     data, exe = args.data_dir.resolve(), args.exe.resolve()
     assert not data.exists(), 'Use a fresh disposable data directory'
@@ -128,7 +128,7 @@ def main():
         first.request('/api/bootstrap', expected=401)
         first.request('/api/auth/setup', {'mode':'local_only'})
         assert anonymous.request('/api/auth/status')['mode'] == 'local_only'
-        assert anonymous.request('/api/bootstrap')['name'] == 'shiori'
+        assert anonymous.request('/api/bootstrap')['name'] == 'Shiori'
         first.request('/api/auth/access', {'remote_enabled':True}, method='PUT', expected=400)
         first.request('/api/auth/password', {'current_password':'','new_password':delta})
         anonymous.request('/api/bootstrap', expected=401)

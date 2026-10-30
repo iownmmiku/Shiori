@@ -14,7 +14,7 @@ def anyio_backend():
 @pytest.mark.anyio
 async def test_mixed_mentions_have_one_planner_one_generation_and_all_sources(setup):
     store, _, chat, flow, _, _ = setup
-    store.upsert_scope({'id': 'qq:group:202', 'plan_enabled': True})
+    store.upsert_scope({'id': 'qq:group:202', 'plan_enabled': True, 'trigger_at': False, 'trigger_name': False})
     try:
         await send(flow, '第一位的问题', user='101')
         await send(flow, '第二位的问题', user='404')

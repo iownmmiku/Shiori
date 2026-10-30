@@ -4,6 +4,8 @@ if ($PortableOnly -and $InstallerOnly) { throw 'PortableOnly 与 InstallerOnly �
 $taskRoot = Split-Path -Parent $PSScriptRoot
 Set-Location -LiteralPath $taskRoot
 $taskPython = Join-Path $taskRoot '.venv\Scripts\python.exe'
+& $taskPython scripts/sync_guide.py --check
+if ($LASTEXITCODE -ne 0) { throw '内置使用指南未同步，请先运行 python scripts/sync_guide.py' }
 $taskVersion = (& $taskPython -c 'from shiori import __version__; print(__version__)').Trim()
 $taskArtifactRoot = if ($OutputRoot) { [IO.Path]::GetFullPath((Join-Path $taskRoot $OutputRoot)) } else { Join-Path $taskRoot 'dist' }
 $taskVersionResources = Join-Path $taskRoot ('build\version-v' + $taskVersion)
@@ -33,7 +35,7 @@ if (Test-Path -LiteralPath $taskExistingData) {
 if (-not $InstallerOnly) {
     & $taskPython scripts/write_windows_version.py $taskAppVersionFile --version $taskVersion --kind app
     if ($LASTEXITCODE -ne 0) { throw 'Windows 程序版本资源生成失败' }
-    & $taskPython -m PyInstaller --noconfirm --clean --onedir --windowed --name shiori --icon $taskAppIcon --version-file $taskAppVersionFile --distpath $taskDistributionRoot --add-data 'shiori/static;shiori/static' --add-data 'shiori/resources;shiori/resources' @taskRuntimeData --hidden-import mikubot --hidden-import qunyu --collect-submodules shiori --hidden-import uvicorn.logging --hidden-import uvicorn.loops.auto --hidden-import uvicorn.protocols.http.auto --hidden-import uvicorn.protocols.websockets.auto --hidden-import uvicorn.lifespan.on --hidden-import pystray._win32 --hidden-import webview.platforms.winforms --hidden-import webview.platforms.edgechromium --collect-all webview --collect-all pythonnet --collect-all clr_loader --collect-all botpy --collect-all tzdata launcher.py
+    & $taskPython -m PyInstaller --noconfirm --clean --onedir --windowed --name shiori --icon $taskAppIcon --version-file $taskAppVersionFile --distpath $taskDistributionRoot --add-data 'shiori/static;shiori/static' --add-data 'shiori/resources;shiori/resources' @taskRuntimeData --hidden-import mikubot --hidden-import qunyu --collect-submodules shiori --hidden-import uvicorn.logging --hidden-import uvicorn.loops.auto --hidden-import uvicorn.protocols.http.auto --hidden-import uvicorn.protocols.websockets.auto --hidden-import uvicorn.lifespan.on --hidden-import pystray._win32 --hidden-import webview.platforms.winforms --hidden-import webview.platforms.edgechromium --collect-all webview --collect-all pythonnet --collect-all clr_loader --collect-all botpy --collect-all tzdata --collect-all holidays launcher.py
     if ($LASTEXITCODE -ne 0) { throw 'Windows 打包失败' }
 } elseif (-not (Test-Path -LiteralPath (Join-Path $taskOutput 'shiori.exe'))) {
     throw '请先构建完整程序后再使用 InstallerOnly'

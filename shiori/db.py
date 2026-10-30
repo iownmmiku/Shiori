@@ -22,6 +22,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
 from .timezones import config_zone, ingress_times
+from .memory_events import normalize_episode, episode_content
 
 
 UTC = timezone.utc
@@ -38,7 +39,7 @@ SECRET_FIELDS = {
     "token",
 }
 TABLES = (
-    "scopes", "personas", "messages", "memories", "memory_versions",
+    "scopes", "chat_projects", "personas", "messages", "memories", "memory_versions",
     "jargon", "jargon_versions", "tasks", "usage", "events",
 )
 
@@ -189,6 +190,8 @@ class Store:
         self._memory_search_dirty = set()
         self._memory_revision = 0
         self._memory_search_warning = ''
+        self._memory_search_thread = None
+        self._memory_search_stop = threading.Event()
         self._blocked_source_cache = OrderedDict()
         self._blocked_source_data_version = None
         self._conn = sqlite3.connect(self.path, check_same_thread=False, timeout=30)
@@ -198,6 +201,7 @@ class Store:
         self._conn.execute("PRAGMA busy_timeout=30000")
         self._conn.executescript("""
             CREATE TABLE IF NOT EXISTS scopes (id TEXT PRIMARY KEY, data TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS chat_projects (id TEXT PRIMARY KEY, data TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS personas (id TEXT PRIMARY KEY, data TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS messages (
                 id TEXT PRIMARY KEY, scope_id TEXT NOT NULL, user_id TEXT NOT NULL,
@@ -251,6 +255,22 @@ class Store:
         self._conn.execute("PRAGMA user_version=1")
         self._seed()
         self._init_blocked_source_tracking()
+
+        self._init_memory_search_tracking()
+
+    def _init_memory_search_tracking(self):
+        """Track direct SQL and rollback without adding persistent triggers."""
+        self._conn.execute('CREATE TEMP TABLE IF NOT EXISTS memory_search_revision (revision INTEGER NOT NULL)')
+        self._conn.execute('DELETE FROM temp.memory_search_revision')
+        self._conn.execute('INSERT INTO temp.memory_search_revision VALUES(0)')
+        for operation in ('INSERT', 'UPDATE', 'DELETE'):
+            name = 'memory_search_' + operation.lower()
+            self._conn.execute(f'DROP TRIGGER IF EXISTS temp.{name}')
+            self._conn.execute(f'''CREATE TEMP TRIGGER {name} AFTER {operation} ON main.memories
+                BEGIN UPDATE memory_search_revision SET revision=revision+1; END''')
+        self._conn.commit()
+        self._memory_search_tracking = (0, self._memory_revision,
+                                       self._conn.execute('PRAGMA data_version').fetchone()[0])
 
     def _init_blocked_source_tracking(self) -> None:
         """Transaction-aware, connection-local invalidation; no backup migration.
@@ -417,12 +437,31 @@ class Store:
 
     def upsert_scope(self, data: dict) -> dict:
         incoming = _data(data)
+        inherit_fields = incoming.pop('inherit_fields', [])
         scope_id = _text(incoming.get("id", incoming.get("scope_id", "web:default")), "id")
         with self._lock, self._conn:
             try:
                 previous = self._get("scopes", scope_id)
             except KeyError:
                 previous = {}
+            from .profiles import FIELDS
+            if (not isinstance(inherit_fields, list)
+                    or any(not isinstance(key, str) or key not in FIELDS for key in inherit_fields)):
+                raise ValueError('恢复继承字段无效')
+            if inherit_fields:
+                if previous.get('profile_id') is None or not getattr(self, 'scope_resolver', None):
+                    raise ValueError('请先将会话绑定到机器人配置，再恢复单项继承')
+                nested = incoming.get('settings', {})
+                if any(key in incoming or isinstance(nested, dict) and key in nested for key in inherit_fields):
+                    raise ValueError('不能同时修改并恢复同一字段的继承')
+                if 'profile_overrides' in incoming or 'profile_id' in incoming:
+                    raise ValueError('恢复单项继承时不能同时替换配置绑定或覆盖列表')
+                previous = dict(previous)
+                previous['settings'] = dict(previous.get('settings') or {})
+                for key in inherit_fields:
+                    previous.pop(key, None)
+                    previous['settings'].pop(key, None)
+                previous['profile_overrides'] = [key for key in previous.get('profile_overrides', []) if key not in inherit_fields]
             default_name = "本地试玩"
             if scope_id.startswith("qq:group:"):
                 default_name = f"QQ 群 {scope_id.removeprefix('qq:group:')}"
@@ -601,7 +640,40 @@ class Store:
     def clear_messages(self, scope_id: str) -> dict:
         with self._lock, self._conn:
             cursor = self._conn.execute("DELETE FROM messages WHERE scope_id=?", (scope_id,))
+            self._clear_life_chat(self._conn, scope_id)
             return {"scope_id": scope_id, "deleted": cursor.rowcount}
+
+    @staticmethod
+    def _chat_derived_life_diaries(conn, scope_id=None):
+        """Include legacy continuations whose prompts could contain an older chat diary."""
+        sql = '''SELECT id,persona_id,persona_key,scope_id,
+                        json_type(data,'$.source_fingerprints'),
+                        EXISTS (SELECT 1 FROM json_each(json_extract(data,'$.source_fingerprints'))),
+                        json_extract(data,'$.material_count') FROM life_diaries'''
+        rows = conn.execute(sql + (' WHERE scope_id=?' if scope_id is not None else '') + ' ORDER BY day,id',
+                            (scope_id,) if scope_id is not None else ())
+        derived, legacy_chains = set(), set()
+        for row_id, pid, key, scope, tracked, has_sources, material_count in rows:
+            identity = (pid, key, scope)
+            if tracked is not None:
+                uses_chat = bool(has_sources)
+            else:
+                uses_chat = bool(material_count) or identity in legacy_chains
+            if uses_chat:
+                derived.add(row_id)
+                legacy_chains.add(identity)
+        return derived
+
+    @staticmethod
+    def _clear_life_chat(conn, scope_id=None):
+        tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if 'life_diaries' in tables:
+            ids = Store._chat_derived_life_diaries(conn, scope_id)
+            conn.executemany('DELETE FROM life_diaries WHERE id=?', ((key,) for key in ids))
+        for table in ('life_materials', 'character_schedule_queue'):
+            if table in tables:
+                conn.execute(f'DELETE FROM {table}' + (' WHERE scope_id=?' if scope_id is not None else ''),
+                             (scope_id,) if scope_id is not None else ())
 
     def get_message(self, id: str) -> dict:
         return self._get("messages", id)
@@ -619,17 +691,27 @@ class Store:
         return [json.loads(row[0]) for row in rows]
 
     def _prepare_memory(self, record: dict) -> dict:
+        if record.get("episode") is not None:
+            if record.get("kind") != "event":
+                raise ValueError("只有事件记忆可以包含 episode")
+            record["episode"] = normalize_episode(record["episode"])
+            record["content"] = episode_content(record["episode"])
+        else:
+            record.pop("episode", None)
         for field in ("scope_id", "user_id", "content"):
-            record[field] = _text(record[field], field)
+            record[field] = _text(record.get(field), field)
         record["subject"] = _text(record.get("subject", ""), "subject", required=False)
         if "property" in record:
             record["property"] = _text(record["property"], "property", required=False)
         property_name = _memory_property(record)
         if property_name:
             record["property"] = property_name
-        for field in ("event_at", "occurred_at", "event_time_start"):
-            if record.get(field):
+        for field in ("event_at", "occurred_at", "event_time_start", "event_time_end"):
+            if field in record:
                 record[field] = _iso(record[field], field)
+        event_start = record.get("event_time_start") or record.get("event_at") or record.get("occurred_at")
+        if event_start and record.get("event_time_end") and record["event_time_end"] < event_start:
+            raise ValueError("event_time_end 不能早于事件开始时间")
         _choice(record["kind"], MEMORY_KINDS, "kind")
         _choice(record["status"], MEMORY_STATUSES, "status")
         _choice(record["visibility"], {"private", "group"}, "visibility")
@@ -692,8 +774,11 @@ class Store:
             self.get_scope(record["scope_id"])
             return self._save_memory(record)
 
-    def list_memories(self, scope_id: str | None = None, q: str = "", status: str | None = None) -> list[dict]:
+    def list_memories(self, scope_id: str | None = None, q: str = "", status: str | None = None, *, kind: str | None = None) -> list[dict]:
         clauses, params = self._filters(scope_id, status, MEMORY_STATUSES)
+        if kind is not None:
+            clauses.append("kind=?")
+            params.append(_choice(kind, MEMORY_KINDS, "kind"))
         if status is None:
             clauses.append("status!='deleted'")
         records = self._list("memories", clauses, params, "updated_at DESC,rowid DESC")
@@ -701,6 +786,52 @@ class Store:
 
     def get_memory(self, id: str) -> dict:
         return _memory_view(self._get("memories", id))
+
+    def memory_sources_page(self, id: str, *, limit=20, offset=0) -> dict:
+        """Read current evidence only; citations never grant another scope access."""
+        limit = _limit(limit, 200)
+        if type(offset) is not int or offset < 0:
+            raise ValueError('offset 须为非负整数')
+        with self._lock:
+            record = self.get_memory(id)
+            refs = record.get('source_ids', [])
+            page = refs[offset:offset + limit]
+            keys = [key for key in page if isinstance(key, str) and key]
+            rows = self._conn.execute(
+                "SELECT id,data FROM messages WHERE scope_id=? AND id IN (SELECT value FROM json_each(?))",
+                (record['scope_id'], _json(keys))).fetchall() if keys else []
+            sources = {row['id']: json.loads(row['data']) for row in rows}
+            fingerprints = record.get('source_fingerprints')
+            fingerprints = fingerprints if isinstance(fingerprints, dict) else {}
+            blocked = self.blocked_memory_sources(record['scope_id'])
+            public_group = (record['scope_id'].startswith(('qq:group:', 'qqofficial:group:'))
+                            and record.get('visibility') == 'group')
+            items = []
+            for key in page:
+                source = sources.get(key) if isinstance(key, str) else None
+                reason = ''
+                if not isinstance(key, str) or not key:
+                    reason = 'invalid_source_id'
+                elif key in blocked:
+                    reason = 'source_revoked'
+                elif not source:
+                    reason = 'source_missing_or_outside_scope'
+                elif (source.get('id') != key or source.get('scope_id') != record['scope_id']
+                      or source.get('role') not in {'user', 'assistant'}
+                      or not isinstance(source.get('user_id'), str) or not source['user_id']
+                      or (not public_group and (
+                          (source['role'] == 'user' and source['user_id'] != record['user_id'])
+                          or (source['role'] == 'assistant' and source['user_id'] not in {'assistant', record['user_id']})))):
+                    reason = 'source_identity_mismatch'
+                elif not isinstance(fingerprints.get(key), str) or not fingerprints[key]:
+                    reason = 'source_fingerprint_unavailable'
+                elif fingerprints[key] != message_fingerprint(source):
+                    reason = 'source_changed'
+                items.append({'id': key, 'available': not reason, 'message': None if reason else source,
+                              'reason': reason or None})
+        next_offset = offset + len(items)
+        return {'items': items, 'total': len(refs), 'offset': offset, 'limit': limit,
+                'next_offset': next_offset, 'has_more': next_offset < len(refs)}
 
     def user_memory_records(self, scope_id: str, user_id: str, *, limit=1000, offset=0) -> list[dict]:
         """Bound maintenance reads in SQL before decoding memory bodies."""
@@ -800,13 +931,16 @@ class Store:
         return {'active': counts.get('active', 0), 'pending': counts.get('pending', 0), 'digests': digests,
                 'expression_pending': jargon[0] or 0, 'jargon_pending': jargon[1] or 0}
 
-    def memory_page(self, scope_id=None, q='', status=None, *, limit=50, offset=0):
+    def memory_page(self, scope_id=None, q='', status=None, *, kind=None, limit=50, offset=0):
         limit = _limit(limit, 200)
         if type(offset) is not int or offset < 0:
             raise ValueError('offset 须为非负整数')
         q = _text(q, 'q', required=False)
         if len(q) > 1000: raise ValueError('搜索文字不超过1000字')
         clauses, params = self._filters(scope_id, status, MEMORY_STATUSES)
+        if kind is not None:
+            clauses.append('kind=?')
+            params.append(_choice(kind, MEMORY_KINDS, 'kind'))
         if status is None: clauses.append("status!='deleted'")
         with self._lock:
             if q:
@@ -839,13 +973,15 @@ class Store:
                 return self.delete_memory(id)
             record = {**old, **patch, "id": old["id"], "version": old["version"] + 1,
                       "created_at": old["created_at"], "updated_at": utc_now()}
+            if 'content' in patch and 'episode' not in patch:
+                record.pop('episode', None)
             record["blocked_source_ids"] = list(dict.fromkeys(old.get("blocked_source_ids", [])
                 + _strings(patch.get("blocked_source_ids", []), "blocked_source_ids")))
-            if "content" in patch and patch["content"] != old["content"]:
+            self._prepare_memory(record)
+            if record['content'] != old['content'] or record.get('episode') != old.get('episode'):
                 record["blocked_source_ids"] = list(dict.fromkeys(
                     record["blocked_source_ids"] + old.get("source_ids", [])
                 ))
-            self._prepare_memory(record)
             self.get_scope(record["scope_id"])
             return self._save_memory(record)
 
@@ -1094,23 +1230,103 @@ class Store:
         return Boundary(scope_id, user_id, origins,
                         scope_id.startswith(('qq:group:', 'qqofficial:group:')), utc_now())
 
+    def _memory_search_stamp(self):
+        return (self._conn.execute('SELECT revision FROM temp.memory_search_revision').fetchone()[0],
+                self._memory_revision, self._conn.execute('PRAGMA data_version').fetchone()[0])
+
+    @staticmethod
+    def _memory_search_external(previous, current):
+        return current[0] - previous[0] != current[1] - previous[1] or current[2] != previous[2]
+
+    def _start_memory_search_builder(self):
+        if self._memory_search_thread is not None:
+            return
+        self._memory_search_thread = threading.Thread(target=self._build_memory_search,
+            name='shiori-memory-index', daemon=True)
+        self._memory_search_thread.start()
+
+    def _build_memory_search(self):
+        """Yield the Store lock after every small, cancellable derived batch."""
+        try:
+            while not self._memory_search_stop.is_set():
+                with self._lock:
+                    index = self._memory_search
+                    if self._closed or index is None:
+                        return
+                    # A caller may query from inside a transaction that later
+                    # rolls back. Never publish its uncommitted background pass.
+                    if not self._conn.in_transaction:
+                        stamp = self._memory_search_stamp()
+                        full = (self._memory_search_dirty is None or
+                                self._memory_search_external(self._memory_search_tracking, stamp) or
+                                (index.pending_sync is None and not index.initialized))
+                        if full:
+                            index.start_sync()
+                            self._memory_search_dirty = set()
+                        elif index.pending_sync is None:
+                            index.start_sync(self._memory_search_dirty)
+                            self._memory_search_dirty = set()
+                        self._memory_search_tracking = stamp
+                        if index.sync_step(self._conn):
+                            if self._memory_search_dirty:
+                                index.start_sync(self._memory_search_dirty)
+                                self._memory_search_dirty = set()
+                            else:
+                                index.initialized = True
+                                self._memory_search_warning = ''
+                                return
+                # Also yield between batches on a hot CPU, allowing foreground
+                # reads, writes, shutdown and cancellation to take the lock.
+                self._memory_search_stop.wait(0.005)
+        except (sqlite3.DatabaseError, OSError, ValueError):
+            logging.getLogger(__name__).exception('后台记忆索引构建失败，已保持主库 SQL 召回。')
+            with self._lock:
+                if self._memory_search is not None:
+                    self._memory_search.close()
+                    self._memory_search = None
+                self._memory_search_dirty = None
+                self._memory_search_warning = '后台记忆索引构建失败，已降级为主库SQL检索。'
+        finally:
+            with self._lock:
+                self._memory_search_thread = None
+
     def memory_candidate_ids(self, scope_id: str, user_id: str, query: str, limit: int = 192, *, scope_allowed=None) -> list[str]:
         """Bound lexical candidates in a disposable index, then recheck visible_memories.
 
-        The first call rebuilds the old database in batches. Hot calls decode
-        modified records only. Metadata filtering is not dependency validation.
+        The first call validates persisted source hashes and indexes only changed
+        records. Hot calls decode modified IDs only. Metadata filtering is not
+        dependency validation.
         """
-        from .memory_search import MemorySearchIndex, sql_fallback
+        from .memory_search import MemorySearchIndex, sql_fallback, BUILD_BATCH
         limit = _limit(limit, 512)
         with self._lock:
             boundary = self._memory_candidate_boundary(scope_id, user_id, scope_allowed)
             if not boundary.origins:
                 return []
+            stamp = self._memory_search_stamp()
+            if self._memory_search_external(self._memory_search_tracking, stamp):
+                self._memory_search_dirty = None
+            if self._memory_search_thread is not None:
+                return sql_fallback(self._conn, boundary, query, limit)
             for attempt in range(2):
                 try:
                     if self._memory_search is None:
                         self._memory_search = MemorySearchIndex(self.data_dir / 'memory_search.db')
+                    full = not self._memory_search.initialized or self._memory_search_dirty is None
+                    large = (self._conn.execute('SELECT COUNT(*) FROM (SELECT 1 FROM memories LIMIT ?)',
+                                (BUILD_BATCH + 1,)).fetchone()[0] > BUILD_BATCH if full
+                             else len(self._memory_search_dirty) > BUILD_BATCH)
+                    if full and not large:
+                        # Restoring a tiny/empty snapshot can still leave a
+                        # large disposable index to remove in bounded batches.
+                        large = self._memory_search.connection.execute(
+                            'SELECT COUNT(*) FROM (SELECT 1 FROM source_state LIMIT ?)',
+                            (BUILD_BATCH + 1,)).fetchone()[0] > BUILD_BATCH
+                    if large:
+                        self._start_memory_search_builder()
+                        return sql_fallback(self._conn, boundary, query, limit)
                     self._memory_search.sync(self._conn, self._memory_search_dirty)
+                    self._memory_search_tracking = stamp
                     # A query inside an uncommitted transaction must remain
                     # dirty in case the caller subsequently rolls back.
                     if not self._conn.in_transaction:
@@ -1174,7 +1390,8 @@ class Store:
             search = self._memory_search
             return {'mode': search.mode if search else ('sql_fallback' if self._memory_search_warning else 'uninitialized'),
                     'warning': self._memory_search_warning or (search.warning if search else ''),
-                    'initialized': bool(search and search.initialized), 'revision': self._memory_revision}
+                    'initialized': bool(search and search.initialized), 'revision': self._memory_revision,
+                    'building': self._memory_search_thread is not None}
 
     def message_sources_current(self, scope_id: str, source_ids) -> bool:
         """Check message existence/scope without decoding every historical body."""
@@ -1270,7 +1487,7 @@ class Store:
             if space and s.get('memory_space') == space and s.get('enabled', True)]))
         marks = ','.join('?' for _ in origins)
         kinds_sql = ','.join('?' for _ in kinds)
-        order = ("COALESCE(json_extract(data,'$.event_at'),json_extract(data,'$.occurred_at'),created_at) DESC, id DESC" if events else
+        order = ("COALESCE(json_extract(data,'$.event_at'),json_extract(data,'$.occurred_at'),json_extract(data,'$.event_time_start'),created_at) DESC, id DESC" if events else
             """(json_extract(data,'$.pinned') IS 1) DESC,
             CASE WHEN json_type(data,'$.importance') IN ('integer','real')
               AND json_extract(data,'$.importance') BETWEEN 0 AND 1
@@ -1389,6 +1606,7 @@ class Store:
             if not self._conn.in_transaction:
                 self._conn.execute('BEGIN IMMEDIATE')
             check()
+            source_fingerprints = {}
             for source_id in sources:
                 try:
                     source = self._get("messages", source_id)
@@ -1396,6 +1614,7 @@ class Store:
                     raise ValueError("候选记忆来源消息不存在") from exc
                 if source["scope_id"] != scope_id or source["user_id"] != user_id or source["role"] != "user":
                     raise ValueError("来源不属于当前聊天中的当前用户")
+                source_fingerprints[source_id] = message_fingerprint(source)
             existing = self.list_memories(scope_id)
             blocked = {source_id for item in existing for source_id in item.get("blocked_source_ids", [])}
             # Tombstones are intentionally absent from normal management lists.
@@ -1415,6 +1634,7 @@ class Store:
                 # Model-generated candidates do not inherit arbitrary memory
                 # dependencies, approval flags or ownership from their payload.
                 item.update(scope_id=scope_id, user_id=user_id, source_ids=refs,
+                            source_fingerprints={key: source_fingerprints[key] for key in refs},
                             status="pending", subject=item.get("subject") or user_id,
                             dependencies={}, blocked_source_ids=[], shareable=False)
                 if not scope_id.startswith(("qq:group:", "qqofficial:group:")):
@@ -1804,7 +2024,7 @@ class Store:
             result.setdefault(details["memory_id"], {key: details[key] for key in ("memory_version", "count", "last_used_at")})
         return result
 
-    def backup(self, destination: Path, include_messages: bool = True) -> Path:
+    def backup(self, destination: Path, include_messages: bool = True, *, progress=None, cancelled=None) -> Path:
         destination = Path(destination)
         if destination.is_dir():
             destination = destination / "qunyu.db"
@@ -1813,36 +2033,63 @@ class Store:
         _boolean(include_messages, "include_messages")
         destination.parent.mkdir(parents=True, exist_ok=True)
         temporary = destination.with_name(destination.name + f".{uuid4().hex}.tmp")
+        def check():
+            if cancelled is not None and cancelled():
+                raise InterruptedError('备份已取消')
+        def report(phase, done=0, total=0):
+            check()
+            if progress is not None:
+                progress(phase, done, total)
         try:
-            with self._lock:
-                target = sqlite3.connect(temporary)
-                try:
-                    self._conn.backup(target)
-                    with target:
-                        if not include_messages:
-                            target.execute("DELETE FROM messages")
-                        for table in TABLES:
-                            for rowid, payload in target.execute(f"SELECT rowid,data FROM {table}").fetchall():
+            check()
+            target = sqlite3.connect(temporary)
+            try:
+                # Only the consistent snapshot needs the live connection lock.
+                # Redaction/compaction operate exclusively on its private copy.
+                with self._lock:
+                    self._conn.backup(target, pages=256,
+                        progress=lambda status, remaining, total: report('snapshot', total - remaining, total))
+                target.set_progress_handler(lambda: int(cancelled is not None and cancelled()), 1000)
+                with target:
+                    if not include_messages:
+                        target.execute("DELETE FROM messages")
+                        self._clear_life_chat(target)
+                    total = sum(target.execute(f'SELECT COUNT(*) FROM {table}').fetchone()[0] for table in TABLES)
+                    processed = 0
+                    report('sanitize', processed, total)
+                    for table in TABLES:
+                        cursor = target.execute(f"SELECT rowid,data FROM {table}")
+                        while rows := cursor.fetchmany(128):
+                            check()
+                            for rowid, payload in rows:
                                 cleaned = _json(_redact(json.loads(payload)))
                                 if cleaned != payload:
                                     target.execute(f"UPDATE {table} SET data=? WHERE rowid=?", (cleaned, rowid))
-                    target.execute("PRAGMA journal_mode=DELETE")
-                    target.execute("VACUUM")
-                finally:
-                    target.close()
+                            processed += len(rows)
+                            report('sanitize', processed, total)
+                report('compact', total, total)
+                target.execute("PRAGMA journal_mode=DELETE")
+                target.execute("VACUUM")
+                check()
+            finally:
+                target.close()
             os.replace(temporary, destination)
             return destination
         finally:
             temporary.unlink(missing_ok=True)
 
     def close(self) -> None:
+        self._memory_search_stop.set()
         with self._lock:
+            worker = self._memory_search_thread
             if not self._closed:
                 if self._memory_search is not None:
                     self._memory_search.close()
                     self._memory_search = None
                 self._conn.close()
                 self._closed = True
+        if worker is not None and worker is not threading.current_thread():
+            worker.join()
 
     def restore_from(self, candidate: Path, *, validate_only=False) -> dict:
         """Validate an exact-schema snapshot, then restore into this live object.
@@ -1857,42 +2104,72 @@ class Store:
         try:
             source = sqlite3.connect(candidate.resolve().as_uri() + "?mode=ro", uri=True, timeout=10)
             with self._lock:
-                if source.execute("PRAGMA quick_check").fetchone()[0] != "ok":
-                    raise ValueError("备份数据库完整性校验失败")
-                if source.execute("PRAGMA user_version").fetchone()[0] != self._conn.execute("PRAGMA user_version").fetchone()[0]:
-                    raise ValueError("备份数据库版本不兼容")
-                objects = source.execute("SELECT type,name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name").fetchall()
+                version = self._conn.execute("PRAGMA user_version").fetchone()[0]
                 current = self._conn.execute("SELECT type,name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name").fetchall()
-                if any(row[0] in {"trigger", "view"} for row in objects):
-                    raise ValueError("备份不得含有触发器或视图")
-                signature = lambda rows: [(row[0], row[1], " ".join((row[2] or "").split())) for row in rows]
-                # Only these additive performance indexes may be absent from
-                # older schema-1 backups. Any present index must still match
-                # its exact trusted definition; no arbitrary schema is allowed.
-                history_indexes = {'messages_origin_day', 'messages_extraction_cursor', 'messages_onebot_provenance', 'events_kind_time'}
-                missing = history_indexes - {row[1] for row in objects if row[0] == 'index'}
-                expected = [row for row in current if not (row[0] == 'index' and row[1] in missing)]
-                if signature(objects) != signature(expected):
-                    raise ValueError("备份数据库结构不兼容")
-                tables = {row[1] for row in objects if row[0] == "table"}
-                if tables != set(TABLES):
-                    raise ValueError("备份包含未允许的表")
-                for table in TABLES:
-                    columns = [row[1] for row in source.execute(f"PRAGMA table_info({table})")]
-                    for row in source.execute(f"SELECT * FROM {table}"):
-                        payload = json.loads(row[columns.index("data")])
-                        if not isinstance(payload, dict):
-                            raise ValueError("备份记录格式无效")
-                        for column, value in zip(columns, row):
-                            if column == "created_at" and table.endswith("_versions"):
-                                expected = payload.get("updated_at")
-                            else:
-                                expected = payload.get(column)
-                            if column != "data" and column not in {"memory_id", "jargon_id"} and expected != value:
-                                raise ValueError("备份记录索引与正文不一致")
-                if validate_only:
-                    return {'valid': True}
+            # Candidate validation traverses only the private read-only snapshot;
+            # leave the live Store available while inspecting a large backup.
+            if source.execute("PRAGMA quick_check").fetchone()[0] != "ok":
+                raise ValueError("备份数据库完整性校验失败")
+            if source.execute("PRAGMA user_version").fetchone()[0] != version:
+                raise ValueError("备份数据库版本不兼容")
+            objects = source.execute("SELECT type,name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name").fetchall()
+            if any(row[0] in {"trigger", "view"} for row in objects):
+                raise ValueError("备份不得含有触发器或视图")
+            signature = lambda rows: [(row[0], row[1], " ".join((row[2] or "").split())) for row in rows]
+            # Only these additive performance indexes may be absent from
+            # older schema-1 backups. Any present index must still match
+            # its exact trusted definition; no arbitrary schema is allowed.
+            history_indexes = {'messages_origin_day', 'messages_extraction_cursor', 'messages_onebot_provenance', 'events_kind_time'}
+            # Schedule storage is an additive extension. Older backups may
+            # omit it, but every included table/index still has to match
+            # the exact trusted schema created by this application.
+            life_tables = {'life_settings', 'life_personas', 'life_jobs', 'life_calls',
+                           'life_diaries', 'life_materials', 'character_schedule_queue'}
+            life_indexes = {'life_calls_day', 'life_diaries_persona', 'life_materials_day',
+                            'character_schedule_queue_pending'}
+            workspace_tables = {'chat_projects'}
+            optional_names = history_indexes | life_tables | life_indexes | workspace_tables
+            missing = optional_names - {row[1] for row in objects}
+            expected = [row for row in current if row[1] not in missing]
+            if signature(objects) != signature(expected):
+                raise ValueError("备份数据库结构不兼容")
+            tables = {row[1] for row in objects if row[0] == "table"}
+            if tables - life_tables - workspace_tables != set(TABLES) - workspace_tables:
+                raise ValueError("备份包含未允许的表")
+            for table in (name for name in TABLES if name in tables):
+                columns = [row[1] for row in source.execute(f"PRAGMA table_info({table})")]
+                for row in source.execute(f"SELECT * FROM {table}"):
+                    payload = json.loads(row[columns.index("data")])
+                    if not isinstance(payload, dict):
+                        raise ValueError("备份记录格式无效")
+                    for column, value in zip(columns, row):
+                        if column == "created_at" and table.endswith("_versions"):
+                            expected = payload.get("updated_at")
+                        else:
+                            expected = payload.get(column)
+                        if column != "data" and column not in {"memory_id", "jargon_id"} and expected != value:
+                            raise ValueError("备份记录索引与正文不一致")
+            for table in tables & life_tables:
+                columns = [row[1] for row in source.execute(f'PRAGMA table_info({table})')]
+                field = 'payload' if table == 'character_schedule_queue' else 'data' if 'data' in columns else None
+                if field:
+                    for raw in source.execute(f'SELECT {field} FROM {table}'):
+                        payload = json.loads(raw[0])
+                        expected_type = list if field == 'payload' else dict
+                        if not isinstance(payload, expected_type):
+                            raise ValueError('日程备份记录格式无效')
+                        if field == 'payload' and (len(payload) > 8 or any(not isinstance(item, dict) for item in payload)):
+                            raise ValueError('日程待回来源格式无效')
+            if validate_only:
+                return {'valid': True}
+            with self._lock:
+                latest = self._conn.execute("SELECT type,name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name").fetchall()
+                if signature(latest) != signature(current):
+                    raise ValueError("数据库结构已变化，请重新恢复备份")
                 source.backup(self._conn)
+                for row in current:
+                    if row[0] == 'table' and row[1] in missing and row[1] in (life_tables | workspace_tables):
+                        self._conn.execute(row[2])
                 for row in current:
                     if row[0] == 'index' and row[1] in missing:
                         self._conn.execute(row[2])
@@ -1900,6 +2177,7 @@ class Store:
                 self._memory_search_dirty = None
                 self._memory_revision += 1
                 self._init_blocked_source_tracking()
+                self._init_memory_search_tracking()
                 self._seed()
                 return self.stats()
         except (sqlite3.DatabaseError, json.JSONDecodeError, TypeError) as exc:

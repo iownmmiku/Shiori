@@ -35,6 +35,7 @@ class Config:
 
 def setup_social(tmp_path):
     store, config = Store(tmp_path), Config()
+    config.value['identity'].update(respond_to_at=False, respond_to_name=False)
     scope = store.upsert_scope({'id': 'qq:group:202', 'plan_enabled': True, 'cooldown_seconds': 0,
                                 'merge_window_ms': 0, 'auto_memory': False})
     provider = Provider(config, store)

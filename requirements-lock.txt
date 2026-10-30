@@ -13,6 +13,7 @@ colorama==0.4.6
 fastapi==0.143.1
 frozenlist==1.8.0
 h11==0.16.0
+holidays==0.107
 httpcore==1.0.9
 httptools==0.9.0
 httpx==0.28.1
@@ -35,6 +36,7 @@ pyinstaller-hooks-contrib==2026.8
 pypdf==6.20.1
 pystray==0.19.5
 pytest==9.1.1
+python-dateutil==2.9.0.post0
 python-dotenv==1.2.4
 python-multipart==0.0.32
 pywin32-ctypes==0.2.3

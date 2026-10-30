@@ -60,6 +60,9 @@ class OneBotBridge:
         self._diagnostics = QQDiagnostics(store, 'onebot')
         self._failure_feedback_at = {}
         self._flow = ConversationFlow(store, settings, chat, self._emit, self._allowed, self._diagnostics.mark)
+        if getattr(chat, 'character_schedule', None):
+            from .schedule_delivery import ScheduleDelivery
+            self._flow.schedule_delivery = ScheduleDelivery(self._flow, lambda: self.status().get('connected', False), prefix='qq:')
 
     def _config(self):
         return self.settings.get().get('onebot', {})
@@ -82,11 +85,15 @@ class OneBotBridge:
         if self._running:
             return
         self._running = True
+        if getattr(self._flow, 'schedule_delivery', None):
+            await self._flow.schedule_delivery.start()
         if self._enabled() and self._config().get('ws_url'):
             self._forward_task = asyncio.create_task(self._forward_loop())
 
     async def stop(self):
         self._running = False
+        if getattr(self._flow, 'schedule_delivery', None):
+            await self._flow.schedule_delivery.stop()
         if self._forward_task:
             self._forward_task.cancel()
             await asyncio.gather(self._forward_task, return_exceptions=True)

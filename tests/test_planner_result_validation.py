@@ -132,6 +132,7 @@ def test_invalid_json_is_not_repaired_or_partially_extracted(text, code):
 class Config:
     def __init__(self):
         self.value = deepcopy(DEFAULTS)
+        self.value['identity'].update(respond_to_at=False, respond_to_name=False)
         self.value['model'].update(base_url='https://fixture.invalid/v1', model='fixture')
         self.value['onebot'].update(enabled=True, chat_policy='whitelist', allowed_groups=['202'])
         self.value['planner'].update(min_interval_ms=0, group_batch_ms=0)

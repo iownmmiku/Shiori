@@ -11,10 +11,10 @@ const sandbox={window:{},state,FormData,AbortController,URLSearchParams,setTimeo
   api:async(url,opts)=>{calls.push([url,opts]);return responder(url,opts);},toast:()=>{},
   $:selector=>nodes.get(selector)||null,$$:()=>[],bootstrap:async()=>{},renderPage:async()=>{},navigate:async()=>{},
   localStorage:{setItem(){}},document:{getElementById:()=>null},getForm:()=>({}),
-  openModal:(...args)=>{modal=args;},closeModal:()=>{modal=null;},confirmAction:async(a,b,callback)=>{perform=callback;},
+  openModal:(...args)=>{modal=args;nodes.set('#modal .modal-body',{});},closeModal:()=>{modal=null;nodes.delete('#modal .modal-body');},confirmAction:async(a,b,callback)=>{perform=callback;},
   field:()=>'',select:()=>'',toggle:()=>'',textarea:()=>'',renderPersonas:async()=>'',renderSettings:async()=>''};
 vm.createContext(sandbox);
-for(const file of [...require('./ui_modules.cjs').experienceFactories,'experience.js'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../shiori/static',file),'utf8'),sandbox,{filename:file});
+for(const file of ['chat-projects.js',...require('./ui_modules.cjs').experienceFactories,'experience.js'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../shiori/static',file),'utf8'),sandbox,{filename:file});
 const ui=sandbox.window.ShioriExperience,plain=value=>JSON.parse(JSON.stringify(value));
 const refId='a'.repeat(32),defaultResponse=(url,opts)=>url==='/api/chat/attachments'?{id:refId,name:'fixture.txt'}:{};
 async function upload(){const file=new Blob(['fixture']);file.name='fixture.txt';await ui.handleChange({id:'attachment-input',value:'file',files:[file]});}
@@ -48,6 +48,52 @@ async function main(){
   assert.deepEqual(plain(calls.at(-1)[1].body),{scope_id:'web:default',ids:[refId]},'late upload completion releases its captured owner scope');
   state.scope='web:default';
 
+  // A pending upload belongs to the original composer, even when navigation
+  // leaves the scope ID unchanged or returns before the upload completes.
+  for(const leaveAndReturn of [false,true]){
+    let finishUpload;
+    responder=async(url)=>url==='/api/chat/attachments'?new Promise(resolve=>{finishUpload=resolve;}):{};
+    const pendingUpload=upload();assert.equal(typeof finishUpload,'function');
+    ui.parkChatDraft();state.page='overview';state.renderId=(state.renderId||0)+1;
+    sandbox.openModal('unrelated settings');
+    if(leaveAndReturn){state.page='chat';state.renderId++;ui.activateChatScope('web:default');}
+    finishUpload({id:refId});await pendingUpload;
+    assert.equal(modal[0],'unrelated settings','late upload must not close a newly opened dialog');
+    assert.deepEqual(plain(calls.at(-1)[1].body),{scope_id:'web:default',ids:[refId]});
+    state.page='chat';ui.activateChatScope('web:default');
+    assert.ok(!(await ui.renderChat()).includes('<span class="attachment-chip">'),'late upload must not contaminate the parked or new draft');
+  }
+
+  let finishUpload;
+  responder=async(url)=>url==='/api/chat/attachments'?new Promise(resolve=>{finishUpload=resolve;}):{};
+  sandbox.openModal('upload options');const samePageUpload=upload();
+  sandbox.openModal('another dialog');finishUpload({id:refId});await samePageUpload;
+  assert.equal(modal[0],'another dialog','successful upload must not close a replacement dialog');
+  assert.match(nodes.get('#attachment-chips').innerHTML,/fixture.txt/,'completed upload updates its mounted composer');
+  responder=defaultResponse;await ui.handleAction('remove-attachment',{dataset:{index:'0'}});
+
+  responder=async(url)=>url==='/api/chat/attachments'?new Promise(resolve=>{finishUpload=resolve;}):{};
+  const uploadDuringSend=upload();nodes.get('#chat-text').value='send before upload completes';await ui.sendChat();
+  finishUpload({id:refId});await uploadDuringSend;
+  assert.equal(calls.at(-1)[0],'/api/chat/attachments/release','a completed turn invalidates the earlier upload');
+  assert.ok(!(await ui.renderChat()).includes('<span class="attachment-chip">'));
+
+  state.attachmentPurpose='memory';state.page='memory';
+  responder=async(url)=>url==='/api/chat/attachments'?new Promise(resolve=>{finishUpload=resolve;}):{};
+  const memoryUpload=upload(),memoryCall=calls.at(-1);
+  state.scope='web:other';state.page='overview';sandbox.openModal('different page dialog');
+  finishUpload({memory_id:'memory-fixture'});await memoryUpload;
+  assert.equal(memoryCall[1].body.get('scope_id'),'web:default');
+  assert.equal(modal[0],'different page dialog','long-term upload persists to its original scope without hijacking navigation');
+  state.attachmentPurpose='context';state.scope='web:default';state.page='chat';
+
+  responder=async(url)=>url==='/api/chat/attachments'?new Promise(resolve=>{finishUpload=resolve;}):{};
+  const signedOutUpload=upload(),callCount=calls.length;
+  state.authGeneration=(state.authGeneration||0)+1;state.authenticated=true;
+  finishUpload({id:refId});await signedOutUpload;
+  assert.equal(calls.length,callCount,'previous-login upload must not issue a cleanup request in the new login');
+  assert.ok(!(await ui.renderChat()).includes('<span class="attachment-chip">'));
+
   responder=async()=>({items:[{id:refId,name:'<img src=x onerror=evil>',purpose:'legacy_unknown',characters:80001}],total:1,temporary_count:1,temporary_limit:200});
   await ui.handleAction('attachment-manager',{dataset:{}});
   assert.match(modal[2],/&lt;img/);assert.ok(!modal[2].includes('<img'));
@@ -68,17 +114,34 @@ async function main(){
   let completeLookup;
   responder=async(url)=>url.startsWith('/api/chat/attachments/'+refId+'?')?new Promise(resolve=>{completeLookup=resolve;}):{};
   const lateReuse=ui.handleAction('attachment-reuse',{dataset:{id:refId,scope:'web:default'}});
+  assert.equal(typeof completeLookup,'function','the real workspace dispatcher must not yield before reference ownership is captured');
   nodes.get('#chat-text').value='another turn';state.draft='another turn';
   await ui.sendChat();
   completeLookup({id:refId,name:'late.txt'});
   await assert.rejects(lateReuse,/已变化/);
   assert.ok(!(await ui.renderChat()).includes('late.txt'),'a completed send invalidates in-flight reuse receipts');
 
+  completeLookup=null;
   responder=async(url)=>url.startsWith('/api/chat/attachments/'+refId+'?')?new Promise(resolve=>{completeLookup=resolve;}):{};
   const otherScope=ui.handleAction('attachment-reuse',{dataset:{id:refId,scope:'web:default'}});
+  assert.equal(typeof completeLookup,'function','a second reference lookup captures its original scope before an immediate switch');
   state.scope='web:other';completeLookup({id:refId,name:'wrong-scope.txt'});
   await assert.rejects(otherScope,/已变化/);
   assert.ok(!(await ui.renderChat()).includes('wrong-scope.txt'),'a late reuse callback must retain its captured owner scope');
-  console.log('PASS: attachment release, task protection, scope changes, failed release, restart management and explicit revocation UI');
+
+  // The routed removal uses the Chat factory's owner-aware draft update, even
+  // when another scope installs an attachment at the same array index.
+  ui.activateChatScope('web:default');responder=defaultResponse;await upload();
+  let finishRelease;
+  responder=async(url)=>url.endsWith('/release')?new Promise(resolve=>{finishRelease=resolve;}):{};
+  const lateRemoval=ui.handleAction('remove-attachment',{dataset:{index:'0'}});
+  assert.equal(typeof finishRelease,'function');
+  ui.activateChatScope('web:other');responder=async(url)=>url==='/api/chat/attachments'?{id:'b'.repeat(32),name:'other.txt'}:{};
+  await upload();nodes.get('#attachment-chips').innerHTML='other scope stays mounted';
+  finishRelease({deleted:[refId]});await lateRemoval;
+  assert.equal(nodes.get('#attachment-chips').innerHTML,'other scope stays mounted');
+  const otherHTML=await ui.renderChat();assert.ok(otherHTML.includes('<span class="attachment-chip">'),'the other scope retains its selection at index 0');
+  ui.activateChatScope('web:default');assert.ok(!(await ui.renderChat()).includes('<span class="attachment-chip">'),'the removed source is absent when its parked draft returns');
+  console.log('PASS: attachment ownership across uploads, navigation, sends, login changes, task protection, release and explicit revocation UI');
 }
 main().catch(error=>{console.error(error);process.exitCode=1;});

@@ -188,7 +188,8 @@ async def test_unrelated_or_policy_400_does_not_negotiate_or_retry(planner_runti
 
 @pytest.mark.anyio
 async def test_mixed_group_collection_planner_and_delivery_share_a_trace(setup):
-    store, _, _, flow, _, _ = setup
+    store, config, _, flow, _, _ = setup
+    config.config['identity'].update(respond_to_at=False, respond_to_name=False)
     store.upsert_scope({'id': 'qq:group:202', 'plan_enabled': True})
     try:
         await send(flow, '第一人的有效问题', user='101')

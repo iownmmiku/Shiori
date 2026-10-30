@@ -32,6 +32,10 @@ def test_old_rare_memory_survives_thousands_of_newer_records_and_hot_reads_are_b
             updated_at='2010-01-01T00:00:00Z', created_at='2010-01-01T00:00:00Z'))
     bulk(store, template, 3000)
     assert 'ancient-target' in store.memory_candidate_ids('web:default', 'owner', '青铜鸢尾', limit=32)
+    worker = store._memory_search_thread
+    if worker is not None:
+        worker.join(20)
+    assert store.memory_search_status()['initialized']
     calls = []
     store._conn.set_trace_callback(calls.append)
     replace = store._memory_search._replace

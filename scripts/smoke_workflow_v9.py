@@ -224,7 +224,7 @@ def main():
     parser.add_argument('--exe', type=Path, required=True)
     parser.add_argument('--data-dir', type=Path, required=True)
     parser.add_argument('--port', type=int, default=18915)
-    parser.add_argument('--expect-version', default='0.2.0')
+    parser.add_argument('--expect-version', default='0.2.1-beta')
     args = parser.parse_args()
     exe, data = args.exe.resolve(), args.data_dir.resolve()
     if not exe.is_file(): parser.error('--exe must point to the compiled shiori executable')

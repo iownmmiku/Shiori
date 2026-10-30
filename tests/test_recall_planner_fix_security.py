@@ -212,13 +212,15 @@ async def test_last_query_waiter_cancel_drains_request_and_allows_fresh_retry(tm
 
 
 @pytest.mark.anyio
-async def test_shared_recall_timeout_drains_last_query_and_forbids_further_billing(tmp_path):
+async def test_shared_recall_timeout_drains_last_query_and_forbids_further_billing(tmp_path, monkeypatch):
     store, cfg = Store(tmp_path), memory_config()
     target = fact(store, 'web:default', 'owner', '喜欢的饮料是咖啡')
-    cancelled, calls = asyncio.Event(), []
+    entered, cancelled, calls = asyncio.Event(), asyncio.Event(), []
 
-    async def embed(texts, **kwargs):
+    async def embed(texts, *, before_send, **kwargs):
+        assert before_send()
         calls.append(tuple(texts))
+        entered.set()
         try:
             await asyncio.Event().wait()
         except asyncio.CancelledError:
@@ -226,18 +228,45 @@ async def test_shared_recall_timeout_drains_last_query_and_forbids_further_billi
             raise
 
     engine = MemoryEngine(store, cfg, embed, foreground_busy=lambda: True)
-    budget = SemanticBudget(asyncio.get_running_loop().time() + .06)
+    loop = asyncio.get_running_loop()
+    budget = SemanticBudget(loop.time() + 60)
+    deadlines = []
+    original_timeout_at = asyncio.timeout_at
+
+    def controlled_timeout_at(when):
+        assert when == budget.deadline
+        timeout = original_timeout_at(None)
+        deadlines.append(timeout)
+        return timeout
+
+    # The lexical read can outlast a short wall-clock budget before any embed
+    # starts. Arm the real timeout only after the provider request is in flight.
+    monkeypatch.setattr(asyncio, 'timeout_at', controlled_timeout_at)
+    task = None
     try:
-        first = await asyncio.wait_for(engine.inspect('web:default', 'owner', '喜欢的饮料',
-                                                      semantic_deadline=budget), 2)
+        task = asyncio.create_task(engine.inspect('web:default', 'owner', '喜欢的饮料',
+                                                  semantic_deadline=budget))
+        await asyncio.wait_for(entered.wait(), 2)
+        assert len(deadlines) == 1
+        deadlines[0].reschedule(loop.time())
+        first = await asyncio.wait_for(task, 2)
         assert first['items'][0]['id'] == target['id']
         assert first['semantic']['error'] == 'TimeoutError'
         assert budget.exhausted
-        await asyncio.wait_for(cancelled.wait(), 2)
-        next_query = await engine.inspect('web:default', 'owner', '咖啡', semantic_deadline=budget)
+        assert cancelled.is_set()
+        assert not engine._query_flights and not engine._query_jobs
+        # Keep the nominal deadline in the future: the exhausted marker must
+        # prevent another billed call even if the timer fired slightly early.
+        assert loop.time() < budget.deadline
+        next_query = await asyncio.wait_for(engine.inspect('web:default', 'owner', '咖啡',
+                                                           semantic_deadline=budget), 2)
         assert next_query['items']
         assert calls == [('喜欢的饮料',)]
+        assert len(deadlines) == 1
     finally:
+        if task and not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
         await engine.aclose()
         store.close()
 

@@ -87,7 +87,7 @@ def request_timeout(config):
     return httpx.Timeout(seconds, connect=min(12, seconds))
 
 
-BACKGROUND_PURPOSES = {'knowledge', 'memory_extract', 'memory', 'jargon_learning', 'expression_learning', 'context_digest', 'distillation', 'sticker_vision', 'sticker_select', 'embedding_index'}
+BACKGROUND_PURPOSES = {'knowledge', 'memory_extract', 'memory', 'jargon_learning', 'expression_learning', 'context_digest', 'distillation', 'sticker_vision', 'sticker_select', 'embedding_index', 'schedule', 'schedule_diary', 'schedule_adaptive'}
 _queue_wait_ms = ContextVar('model_queue_wait_ms', default=0)
 _request_trace = ContextVar('model_request_trace', default=None)
 

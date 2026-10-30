@@ -13,9 +13,9 @@ window.ShioriSidebar = (() => {
   // The version that introduced the 未分类 defaults. Older layouts adopt them;
   // newer ones keep whatever the user chose.
   const UNGROUPED_VERSION = 2;
-  const PINNED = ["chat", "overview"];
+  const PINNED = ["chat", "qqChats", "overview"];
   // Pinned entries keep the shell's established sidebar wording.
-  const PINNED_LABELS = { chat: "聊天", overview: "运行概览" };
+  const PINNED_LABELS = { chat: "Chat 工作台", qqChats: "QQ 聊天管理", overview: "运行概览" };
   const EXCLUDED = ["help"];
   const MAX_TITLE = 20;
   const MAX_GROUPS = 12;
@@ -25,7 +25,7 @@ window.ShioriSidebar = (() => {
   const DEFAULT_GROUPS = [
     { id: "model", title: "拓展工具", icon: "spark", pages: ["tools", "plugins"] },
     { id: "memory", title: "认知与表达", icon: "memory", pages: ["memory", "knowledge", "culture"] },
-    { id: "automation", title: "自动化", icon: "clock", pages: ["tasks", "jobs"] },
+    { id: "automation", title: "自动化", icon: "clock", pages: ["characterSchedule", "tasks", "jobs"] },
     { id: "system", title: "数据与日志", icon: "settings", pages: ["groups", "logs", "statistics", "diagnostics"] },
   ];
   // Pages that stand on their own by default instead of living in a category.

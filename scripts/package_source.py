@@ -53,9 +53,9 @@ def release_version(root: Path) -> str:
         if isinstance(node, ast.Assign) and any(isinstance(x, ast.Name) and x.id == '__version__' for x in node.targets):
             value = ast.literal_eval(node.value)
             import re
-            if isinstance(value, str) and re.fullmatch(r'\d+\.\d+\.\d+', value):
+            if isinstance(value, str) and re.fullmatch(r'\d+\.\d+\.\d+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?', value):
                 return value
-    raise ValueError('源码版本须为 major.minor.patch 格式')
+    raise ValueError('源码版本须为 major.minor.patch 格式，可附加预发行标识')
 
 
 def source_files(root: Path) -> list[Path]:

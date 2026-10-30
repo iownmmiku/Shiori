@@ -45,7 +45,25 @@ class ContextEngine:
     def _reference_allowed(self, record, scope_id, user_id):
         if self.reference_allowed is not None:
             return self.reference_allowed(record, scope_id, user_id)
-        return not (record.get('metadata') or record).get('knowledge_refs')
+        return (self.digest_sources_clean(record)
+                and not (record.get('metadata') or record).get('knowledge_refs'))
+
+    def digest_sources_clean(self, record):
+        """Old digests may predate operational-receipt filtering.
+
+        Query just the referenced rows' flag, without decoding their bodies or
+        caching an authorization decision. The stored digest remains available
+        for inspection, while normal context rebuilding falls back to raw turns.
+        """
+        if record.get('property') != 'conversation_digest':
+            return True
+        source_ids = record.get('source_ids') or []
+        with self.store._lock:
+            contaminated = self.store._conn.execute(
+                "SELECT 1 FROM messages WHERE id IN (SELECT value FROM json_each(?)) "
+                "AND json_extract(data, '$.metadata.failure_feedback') LIMIT 1",
+                (json.dumps(source_ids),)).fetchone()
+        return contaminated is None
 
     def close(self):
         self._closed = True
@@ -165,6 +183,8 @@ class ContextEngine:
             metadata = record.get("metadata") or {}
             if not isinstance(metadata, dict):
                 return False
+            if metadata.get('failure_feedback'):
+                return False  # Operational receipts remain visible, never role dialogue.
             if not add_versions({}, metadata.get("memory_versions", {}), memories) or not add_versions({}, metadata.get("jargon_versions", {}), jargon):
                 return False
             ancestors = []

@@ -2,6 +2,7 @@
 
 window.ShioriUpdates = (() => {
   let status = null, selectedRelease = "", selectedKind = "", timer = null, busy = false, error = "", switchRequested = false;
+  let storage = null;
   const labels = {installer:"Windows 安装版",portable:"Windows 便携版",source:"源码包"};
   const size = value => `${(Number(value || 0)/1024/1024).toFixed(1)} MB`;
   const safeReleaseUrl = value => /^https:\/\/github\.com\/iownmmiku\/(?:Shiori|mikubot)\/releases(?:\/|$)/.test(value || "") ? value : "https://github.com/iownmmiku/Shiori/releases";
@@ -22,7 +23,7 @@ window.ShioriUpdates = (() => {
     return `<div class="section-title">${icon("refresh")}<div><h2>版本与更新</h2><p>当前版本 ${e(status.current_version)} · ${{installed:"Windows 安装版",portable:"便携部署",source:"源码部署"}[status.mode] || "当前部署"}</p></div></div>
       <p class="help-caption">从 GitHub 的 iownmmiku/Shiori 读取已发布版本。选择版本后，软件后台校验、备份、替换程序并自动重启，保留当前数据。相同版本的修复重建也可以重新切换。</p>
       ${release && status.switch_supported ? `<div class="section-actions">${button("切换到 " + release.tag,"update-switch","primary","refresh",disabled + (!status.switch_allowed || release.relation==="older" ? " disabled" : ""))}</div><p class="help-caption">${!status.switch_allowed ? "远程切换需先由运行电脑授权开启。" : release.relation==="older" ? "此旧版本未声明数据库降级兼容性，请使用匹配备份恢复。" : "无需打开安装器；更新失败会保留备份并尝试恢复旧程序。"}</p>` : ""}
-      <div class="section-actions">${button(busy ? "正在处理…" : "检查 GitHub 版本","update-check","primary","refresh",disabled)}<a class="btn ghost" href="${e(safeReleaseUrl(status.releases_url))}" target="_blank" rel="noopener noreferrer">GitHub 发行页面 ↗</a></div>
+      <div class="section-actions">${button(busy ? "正在处理…" : "检查 GitHub 版本","update-check","primary","refresh",disabled)}${button("管理更新占用","update-storage","ghost","folder",disabled)}<a class="btn ghost" href="${e(safeReleaseUrl(status.releases_url))}" target="_blank" rel="noopener noreferrer">GitHub 发行页面 ↗</a></div>
       <div class="toggle-field"><div class="toggle-copy"><strong>显示测试版</strong><small>包含标记为预发布的版本，默认关闭。</small></div><label class="switch"><input type="checkbox" id="update-prerelease" aria-label="显示测试版" ${status.include_prerelease ? "checked" : ""}${disabled}><span></span></label></div>
       ${status.local_policy_allowed ? `<label class="toggle-field"><span>允许已登录管理员从远程页面切换版本</span><input type="checkbox" id="update-remote-policy" ${status.remote_switch_enabled ? "checked" : ""}></label>` : ""}
       ${status.checked_at ? `<p class="help-caption">上次检查：${e(fmt(status.checked_at))}。${!status.releases.length ? "本页没有符合筛选条件的发行版。" : "选择版本后查看说明和对应文件。"}</p>` : ""}
@@ -54,6 +55,26 @@ window.ShioriUpdates = (() => {
       $("#modal").classList.add("modal-wide");schedule();return true;
     }
     if (busy) return true;
+    if(action==='update-storage'){
+      busy=true;
+      try{
+        storage=await api('/api/updates/storage');
+        openModal('更新文件与恢复备份',`占用 ${size(storage.total_bytes)} · 可清理 ${size(storage.reclaimable_bytes)}`,
+          `<p class="help-caption">只清理明确结束的历史更新文件。当前任务、最近一次成功更新的恢复备份和状态不明确的旧目录会保留；你的当前聊天、记忆和设置不在清理范围内。</p><div class="source-list">${storage.items.map(item=>`<div class="source-item"><strong>${e(item.tag || '历史目录')}</strong><small> · ${size(item.bytes)}（恢复备份 ${size(item.backup_bytes)}）</small><p>${e(item.reason || '可以清理，清理后将无法使用这份历史恢复备份。')}</p>${item.can_delete && storage.cleanup_allowed ? button('清理此目录','update-cleanup','ghost small','',`data-id="${e(item.id)}"`) : ''}</div>`).join('') || '<p>没有历史更新文件。</p>'}</div>${!storage.cleanup_allowed ? '<p>请在运行电脑上清理，或先由本机授权远程更新管理。</p>' : ''}`);
+      }finally{busy=false;}
+      return true;
+    }
+    if(action==='update-cleanup'){
+      const item=storage?.items.find(value=>value.id===target.dataset.id);
+      if(!storage?.cleanup_allowed || !item?.can_delete)throw new Error('此目录不能清理，请重新读取。');
+      await confirmAction('清理这份历史更新？',`${item.tag || item.id}，共 ${size(item.bytes)}。其中旧程序和恢复备份将被删除，当前程序与当前数据保留。`,async()=>{
+        if(busy)return;
+        busy=true;
+        try{const result=await api('/api/updates/storage/cleanup',{method:'POST',body:{items:[{id:item.id,fingerprint:item.fingerprint}]}});storage=null;toast(`已释放 ${size(result.released_bytes)}`);}
+        finally{busy=false;}
+      },'清理历史文件');
+      return true;
+    }
     if(action==='update-switch'){
       const release=selection();
       if(!release || !status.switch_allowed || !status.switch_supported)throw new Error('当前入口未获准自动切换版本。');

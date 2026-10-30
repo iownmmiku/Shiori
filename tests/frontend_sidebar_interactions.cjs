@@ -78,7 +78,11 @@ function boot(saved) {
     return nodes.get(selector);
   }
   const state={page:"chat",scope:"web:default",filters:{},settings:{},boot:{},scopes:[],draft:"",modalKind:null};
-  const sandbox={window:{scrollTo(){},ShioriPages:{handleSubmit:async()=>false},ShioriExperience:{handleSubmit:async()=>false},ShioriFeatures:{handleSubmit:async()=>false}},
+  const location={pathname:"/chat",search:""};
+  const sandbox={window:{location,history:{replaceState(_state,_title,url){const next=new URL(url,"http://localhost");location.pathname=next.pathname;location.search=next.search;}},scrollTo(){},ShioriPages:{handleSubmit:async()=>false},ShioriExperience:{handleSubmit:async()=>false,
+      saveChatDraft(){state.draft=nodes.get("#chat-text")?.value ?? state.draft;},
+      parkChatDraft(){state.draft=nodes.get("#chat-text")?.value ?? state.draft;},
+      activateChatScope(id){state.scope=id;}},ShioriFeatures:{handleSubmit:async()=>false}},
     state,document,console,e:escape,icon:()=>"",configuredModel:()=>({}),$ : q,$$:selector=>document.querySelectorAll(selector),
     localStorage:{getItem:key=>storage.get(key) || null,setItem:(key,value)=>storage.set(key,String(value))},
     sessionStorage:{getItem:()=>null},toast:(...args)=>messages.push(args),renderPage:async()=>{renders++;},
@@ -96,6 +100,7 @@ function boot(saved) {
   vm.createContext(sandbox);
   vm.runInContext(layout,sandbox,{filename:"sidebar-layout.js"});
   vm.runInContext(section("const pageNames =","const state ="),sandbox);
+  vm.runInContext(section("const isQQScope =","const labels ="),sandbox);
   vm.runInContext(section("function renderNavigation()","async function bootstrap("),sandbox);
   vm.runInContext(section("async function bootstrap(","async function renderPage("),sandbox);
   vm.runInContext(section('document.addEventListener("submit",','let searchTimer;'),sandbox);

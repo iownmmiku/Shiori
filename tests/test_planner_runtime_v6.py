@@ -28,6 +28,7 @@ class Settings:
         self.config['model'].update(base_url='https://test.invalid/v1', model='mock')
         self.config['onebot'].update(chat_policy="whitelist", enabled=True, owner_ids=['101'], allowed_groups=['202'])
         self.config['output'].update(interval_ms=0)
+        self.config['identity'].update(respond_to_at=False, respond_to_name=False)
 
     def get(self):
         return deepcopy(self.config)
@@ -68,13 +69,14 @@ def message(store, text='今天重听了电子音乐专辑', scope='qq:group:202
     ('trigger_reply', {'reply_to_bot': True}, '刚才说的电子音乐很有意思'),
     ('trigger_name', {}, '初音未来的电子音乐很有意思'),
 ])
-async def test_disabled_signal_does_not_veto_independent_proactive_reasoning(setup, field, metadata, text):
+async def test_disabled_mandatory_reply_preserves_mention_signals_for_planner(setup, field, metadata, text):
     store, _, planner, social = setup
     scope = store.upsert_scope({'id': 'qq:group:202', field: False, 'proactive_reply': True})
     result = await social.plan(scope, message(store, text, **metadata))
-    assert result['reply'] and not result['explicit']
+    expected_signal = field != 'trigger_reply'
+    assert result['reply'] and result['explicit'] is expected_signal
     payload = json.loads(planner.calls[0][0][-1]['content'])
-    assert payload['signals'][{'trigger_at': 'at_bot', 'trigger_reply': 'reply_to_bot', 'trigger_name': 'named'}[field]] is False
+    assert payload['signals'][{'trigger_at': 'at_bot', 'trigger_reply': 'reply_to_bot', 'trigger_name': 'named'}[field]] is expected_signal
 
 
 @pytest.mark.anyio
@@ -116,7 +118,7 @@ async def test_local_command_does_not_depend_on_broken_planner_but_still_require
     assert (await social.plan(scope, message(store, '初音未来，记住我喜欢音乐')))['reply']
     assert not planner.calls
     scope = store.upsert_scope({'id': scope['id'], 'trigger_name': False, 'proactive_reply': False})
-    assert not (await social.plan(scope, message(store, '初音未来，记住我喜欢音乐')))['reply']
+    assert not (await social.plan(scope, message(store, '记住我喜欢音乐')))['reply']
     assert not planner.calls
 
 
@@ -215,7 +217,7 @@ async def test_direct_qq_failure_has_one_safe_feedback_without_model_fallback(se
     if kind == 'planner':
         planner.error = RuntimeError('https://secret.invalid private-api-key')
     else:
-        store.upsert_scope({'id': 'qq:group:202', 'plan_enabled': False})
+        store.upsert_scope({'id': 'qq:group:202', 'plan_enabled': False, 'trigger_name': True})
         if kind == 'budget':
             chat.error = ProviderError('Token 预算不足 private-api-key')
         elif kind == 'queue':

@@ -7,9 +7,10 @@ import re
 
 
 def render_version_info(version: str, kind: str) -> str:
-    if not re.fullmatch(r'\d+\.\d+\.\d+', version):
-        raise ValueError('Windows release version must be major.minor.patch')
-    parts = tuple(int(part) for part in version.split('.'))
+    match = re.fullmatch(r'(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*))?', version)
+    if not match:
+        raise ValueError('Windows release version must be major.minor.patch with an optional prerelease label')
+    parts = tuple(int(part) for part in match.groups()[:3])
     if any(part > 65535 for part in parts):
         raise ValueError('Windows version components must be at most 65535')
     if kind not in {'app', 'installer'}:
@@ -32,7 +33,7 @@ VSVersionInfo(
     filevers={numeric!r},
     prodvers={numeric!r},
     mask=0x3f,
-    flags=0x0,
+    flags={"0x2" if match[4] else "0x0"},
     OS=0x40004,
     fileType=0x1,
     subtype=0x0,

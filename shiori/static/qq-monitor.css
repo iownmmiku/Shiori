@@ -1,0 +1,64 @@
+/* Read-only QQ workspace, using the shared Rhine palette and message renderer. */
+:root .qq-readonly-badge{display:inline-block;border:1px solid var(--teal-d);color:var(--teal-d);font-size:11px;letter-spacing:1px;padding:7px 12px}
+:root .qq-monitor{display:grid;grid-template-columns:minmax(230px,30%) minmax(0,1fr);min-width:0;height:min(74vh,880px);min-height:480px;border:1px solid var(--line);background:var(--panel)}
+:root .qq-sidebar{display:flex;flex-direction:column;min-width:0;min-height:0;border-right:1px solid var(--line)}
+:root .qq-list-toolbar{padding:16px;border-bottom:1px solid var(--line)}
+:root .qq-search{display:flex;align-items:center;gap:8px;border:1px solid var(--line);background:var(--field);padding:8px 10px;min-width:0}
+:root .qq-search svg{width:15px;height:15px;flex-shrink:0;color:var(--muted)}
+:root .qq-search input{width:100%;min-width:0;border:0;background:transparent;padding:2px;font:inherit;font-size:12px;color:var(--ink);border-radius:0}
+:root .qq-kind-tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:3px;margin-top:12px}
+:root .qq-kind-tabs button{background:transparent;border:1px solid var(--line);border-radius:0;padding:7px 4px;color:var(--ink-2);font:inherit;font-size:12px;cursor:pointer}
+:root .qq-kind-tabs button.active{background:var(--slab);border-color:var(--slab);color:var(--slab-ink)}
+:root .qq-conversations{min-height:0;overflow-y:auto;overflow-x:hidden}
+:root .qq-list-count{margin:0;padding:11px 16px;color:var(--muted);font-size:10px;letter-spacing:.6px;border-bottom:1px solid var(--line-2)}
+:root .qq-conversation{width:100%;display:flex;flex-direction:column;gap:7px;min-width:0;padding:15px 16px;border:0;border-bottom:1px solid var(--line-2);border-left:3px solid transparent;background:transparent;color:var(--ink);text-align:left;border-radius:0;cursor:pointer;font:inherit}
+:root .qq-conversation:hover{background:var(--panel-2)}
+:root .qq-conversation.selected{background:var(--teal-wash);border-left-color:var(--teal-d)}
+:root .qq-conversation-head,:root .qq-conversation-foot{display:flex;align-items:center;justify-content:space-between;gap:9px;width:100%;min-width:0}
+:root .qq-conversation-head strong{font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+:root .qq-kind{font-size:9px;border:1px solid var(--line-3);padding:1px 5px;white-space:nowrap;color:var(--ink-2)}
+:root .qq-conversation-id{font-family:var(--lab),var(--cn);font-size:10px;color:var(--muted);overflow-wrap:anywhere}
+:root .qq-conversation-preview{font-size:11px;line-height:1.6;color:var(--ink-2);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
+:root .qq-conversation-foot{font-size:9px;color:var(--muted);flex-wrap:wrap}
+:root .qq-detail{display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--panel-2)}
+:root .qq-detail-header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:20px;border-bottom:1px solid var(--line)}
+:root .qq-conversation-title{min-width:0;overflow-wrap:anywhere}
+:root .qq-conversation-title .eyebrow{font-size:9px;letter-spacing:1.4px;margin:0 0 7px}
+:root .qq-conversation-title h2{font-size:18px;margin:0 0 7px;line-height:1.4}
+:root .qq-conversation-title p{font-size:10px;color:var(--muted);margin:0;line-height:1.7}
+:root .qq-header-actions,:root .qq-refresh-actions{display:flex;gap:7px;flex-shrink:0;flex-wrap:wrap;align-items:center}
+:root .qq-refresh-bar{display:flex;gap:12px;align-items:center;justify-content:space-between;padding:10px 20px;border-bottom:1px solid var(--line-2);background:var(--panel);min-width:0}
+:root .qq-refresh-status{display:flex;align-items:flex-start;gap:7px;min-width:0;font-size:10px;color:var(--ink-2);line-height:1.6}
+:root .qq-refresh-status small{display:block;font-size:9px;color:var(--muted)}
+:root .qq-refresh-dot{width:5px;height:5px;flex:0 0 5px;margin-top:5px;background:var(--muted)}
+:root .qq-refresh-dot.live{background:var(--teal-d)}
+:root .qq-auto-toggle{display:flex;gap:5px;align-items:center;font-size:11px;white-space:nowrap;cursor:pointer}
+:root .qq-auto-toggle input{accent-color:var(--teal-d);margin:0}
+:root .qq-feed{flex:1;min-height:0;min-width:0;overflow-y:auto;overflow-x:hidden;padding:15px 22px;overscroll-behavior:contain}
+:root .qq-history-control{text-align:center;font-size:10px;color:var(--muted);padding:0 0 20px}
+:root .qq-history-control .btn{margin:0 3px 6px}
+:root .qq-history-control small{display:block;font-size:10px;line-height:1.7;margin-top:5px}
+:root .qq-message-record{min-width:0;display:flow-root;margin-bottom:20px}
+:root .qq-feed .message{max-width:100%;margin-bottom:0;min-width:0}
+:root .qq-feed .message-body{min-width:0;max-width:calc(100% - 35px)}
+:root .qq-feed .message-content,:root .qq-feed .message-label{overflow-wrap:anywhere;word-break:break-word}
+:root .qq-feed .message-content{font-size:13px}
+:root .qq-feed .message-label{flex-wrap:wrap}
+:root .qq-delivery{margin:7px 0 0 35px;font-size:10px;color:var(--muted);display:flex;flex-direction:column;gap:5px;min-width:0}
+:root .qq-delivery details{border-left:2px solid var(--line);padding-left:9px}
+:root .qq-delivery summary{cursor:pointer;line-height:1.7}
+:root .qq-delivery ol{padding-left:23px;margin:8px 0}
+:root .qq-delivery li{padding:5px 0;overflow-wrap:anywhere}
+:root .qq-part-text{display:block;white-space:pre-wrap;color:var(--ink-2);line-height:1.7;margin-top:3px}
+:root .qq-delivery-state{font-size:10px;line-height:1.7}
+:root .qq-delivery-state.confirmed{color:var(--teal-d)}
+:root .qq-delivery-state.failed{color:var(--danger)}
+:root .qq-delivery-state.uncertain{color:var(--amber-ink)}
+:root .qq-readonly-note{display:flex;gap:7px;align-items:center;margin:0;padding:12px 20px;border-top:1px solid var(--line);color:var(--muted);font-size:10px;line-height:1.7}
+:root .qq-readonly-note svg{height:14px;width:14px;flex-shrink:0}
+:root .qq-empty{padding:40px 20px;text-align:center;color:var(--muted);font-size:12px;line-height:1.9;overflow-wrap:anywhere}
+:root .qq-empty strong{font-size:14px;color:var(--ink-2)}
+:root .qq-empty p{margin:7px 0 0}
+:root .qq-inline-error{margin:12px;padding:10px;border-left:2px solid var(--danger);color:var(--danger);background:var(--danger-wash);font-size:11px;line-height:1.7;overflow-wrap:anywhere}
+@media(max-width:1100px){:root .qq-detail-header{flex-wrap:wrap}:root .qq-refresh-bar{align-items:flex-start;flex-wrap:wrap}}
+@media(max-width:760px){:root .qq-monitor{grid-template-columns:minmax(0,1fr);height:auto;min-height:0}:root .qq-sidebar{border-right:0;border-bottom:1px solid var(--line)}:root .qq-list-toolbar{padding:12px}:root .qq-conversations{max-height:230px}:root .qq-conversation{padding:12px}:root .qq-detail{min-height:540px}:root .qq-detail-header{padding:16px}:root .qq-detail-header h2{font-size:16px}:root .qq-refresh-bar{padding:10px 16px}:root .qq-feed{height:440px;flex:auto;padding:15px 12px}:root .qq-readonly-note{padding:10px 12px}:root .qq-header-actions .btn,:root .qq-refresh-actions .btn{font-size:10px;padding:6px 8px}}

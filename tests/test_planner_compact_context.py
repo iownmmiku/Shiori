@@ -18,6 +18,7 @@ def anyio_backend():
 class Config:
     def __init__(self):
         self.value = deepcopy(DEFAULTS)
+        self.value['identity'].update(respond_to_at=False, respond_to_name=False)
         self.value['model'].update(base_url='https://fixture.invalid/v1', model='fixture')
         self.value['onebot'].update(enabled=True, chat_policy='blacklist')
 

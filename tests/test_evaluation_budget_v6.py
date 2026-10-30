@@ -108,6 +108,7 @@ async def test_zero_configured_caps_remain_unlimited_with_nonzero_initial_usage(
 @pytest.mark.anyio
 async def test_planner_budget_veto_is_not_misreported_as_semantic_skip(monkeypatch):
     cfg = config()
+    cfg['identity']['respond_to_name'] = False
     cfg['budget']['daily_tokens'] = 1
     sent = mock_transport(monkeypatch)
     dataset = [{'id': 'planner', 'text': '初音未来，聊聊音乐', 'expected': {'reply': True}}]

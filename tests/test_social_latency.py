@@ -332,6 +332,7 @@ class SlowPlanner:
 @pytest.mark.parametrize('direct', [True, False])
 async def test_planner_deadline_covers_knowledge_and_provider_without_mandatory_fallback(setup, stage, direct):
     store, config, chat, flow, sent, _ = setup
+    config.value['identity'].update(respond_to_at=False, respond_to_name=False)
     model = SlowPlanner()
     chat.social.provider = model
     scope = store.upsert_scope({'id': 'qq:group:202', 'plan_enabled': True})
@@ -370,6 +371,7 @@ async def test_planner_deadline_covers_knowledge_and_provider_without_mandatory_
 @pytest.mark.anyio
 async def test_timeout_feedback_is_suppressed_after_permission_change(setup):
     store, config, chat, flow, sent, _ = setup
+    config.value['identity'].update(respond_to_at=False, respond_to_name=False)
     chat.social.provider = SlowPlanner()
     scope = store.upsert_scope({'id': 'qq:group:202', 'plan_enabled': True})
     message = store.add_message(scope['id'], '303', 'user', '回答我', at_bot=True)
@@ -399,6 +401,7 @@ async def test_planner_hard_deadline_keeps_dispatched_provider_usage_unknown(set
     import httpx
     from shiori.provider import Provider
     store, config, chat, flow, sent, _ = setup
+    config.value['identity'].update(respond_to_at=False, respond_to_name=False)
     config.value['planner']['max_age_ms'] = 250
     config.value['model']['stream_mode'] = 'off'
     dispatched = []

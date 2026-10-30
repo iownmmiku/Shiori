@@ -321,6 +321,7 @@ class PersonaKnowledge:
         self._worker = None
         self._closed = False
         self._generation = 0
+        self._lookup_cache = None
         self._error = ''
         self._running_persona = ''
         if self.path.exists():
@@ -511,6 +512,40 @@ class PersonaKnowledge:
             except BaseException:
                 self._state = previous
                 raise
+            finally:
+                # Any committed mutation (or rollback to a copied state) makes
+                # the old ID/blocked-source index unusable. This does not change
+                # the separate generation used to revoke in-flight exploration.
+                self._lookup_cache = None
+
+    def _lookup(self):
+        """Build bounded indexes once per state revision, while holding _lock."""
+        items, blocked = self._state['items'], self._state['blocked_urls']
+        stamp = (id(self._state), id(items), len(items), id(blocked), len(blocked))
+        if self._lookup_cache is None or self._lookup_cache[0] != stamp:
+            self._lookup_cache = (stamp, {item['id']: item for item in items},
+                                  {(item['persona_id'], item['url']) for item in blocked})
+        return self._lookup_cache[1:]
+
+    def referenced(self, persona_id, record_ids):
+        """Read only requested active references, with live source admission.
+
+        The cached index contains record references, not authorization results.
+        Each call rechecks the persona and current source rules; expiry remains
+        checked against the current clock by the caller.
+        """
+        self.store.get_persona(persona_id)
+        if not isinstance(record_ids, (dict, list, tuple, set)) or len(record_ids) > MAX_ITEMS:
+            raise ValueError('人格知识引用数量无效')
+        with self._lock:
+            if self._error:
+                raise ValueError(self._error)
+            records, blocked = self._lookup()
+            rules = _source_rules(self._state['sources'].get(persona_id, {}))
+            return {key: copy.deepcopy(item) for key in record_ids
+                    if isinstance(key, str) and (item := records.get(key)) is not None
+                    and item['persona_id'] == persona_id and item['status'] == 'active'
+                    and _domain_allowed(item['url'], rules) and (persona_id, item['url']) not in blocked}
 
     def list(self, persona_id, status='active'):
         self.store.get_persona(persona_id)
@@ -518,9 +553,11 @@ class PersonaKnowledge:
             raise ValueError('知识状态无效')
         with self._lock:
             records = self._state['items'] + self._state['blocked_urls']
+            rules = _source_rules(self._state['sources'].get(persona_id, {})) if status == 'active' else None
+            blocked = self._lookup()[1] if status == 'active' else set()
             return copy.deepcopy([item for item in reversed(records)
                                   if item['persona_id'] == persona_id and (not status or item['status'] == status)
-                                  and (status != 'active' or _domain_allowed(item['url'], self.sources(persona_id)) and not self._blocked(persona_id, item['url']))])
+                                  and (status != 'active' or _domain_allowed(item['url'], rules) and (persona_id, item['url']) not in blocked)])
 
     def delete(self, record_id):
         return self._block(record_id, 'deleted', '用户删除')

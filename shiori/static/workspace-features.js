@@ -3,11 +3,40 @@
 // Browser feature module. Shared UI helpers are resolved when a view opens.
 // It runs directly from the portable app; Node and a build step are not needed.
 window.ShioriFeatures = (() => {
+const scopeFields = {persona_id:'人格',model_id:'聊天模型',activity:'回应方式',trigger_at:'@ 直接回复',trigger_reply:'引用回复触发',trigger_name:'名称直接回复',plan_enabled:'Planner',proactive_reply:'主动接话',always_reply:'每条必回复',allow_tools:'普通工具',allow_mcp:'MCP',use_persona_knowledge:'人格知识',private_always_reply:'私聊必回复',auto_memory:'自动记忆',dictionary_learn:'学习群词',dictionary_use:'使用群词',dictionary_understand:'理解群词',expression_learn:'学习表达',expression_use:'使用表达',context_compress:'上下文整理',debounce_enabled:'消息防抖',debounce_seconds:'防抖时间',debounce_max_wait_seconds:'最长收集时间'};
+function captureScopeForm(form) {
+  if(form)form.shioriInitialValues = {...getForm(form)};
+}
+function scopePatch(payload, data, item, form) {
+  const initial = form.shioriInitialValues;
+  if (item && initial) {
+    const changed = key => data[key] !== initial[key];
+    const outputChanged = Object.keys(data).some(key => (key === 'output_override' || key.startsWith('out_')) && changed(key));
+    for (const key of Object.keys(payload)) {
+      const differs = key === 'output' || key === 'settings' || key.startsWith('output_') ? outputChanged : changed(key);
+      if (!differs) delete payload[key];
+    }
+  } else if(item?.profile_id != null) {
+    // Older callers may open their own form without a browser form snapshot.
+    for(const key of Object.keys(scopeFields)) if(payload[key] === item[key])delete payload[key];
+  }
+  const resets = Object.keys(scopeFields).filter(key => data['inherit__'+key] === true);
+  for(const key of Object.keys(payload))if(key.startsWith('inherit__'))delete payload[key];
+  if(resets.length){for(const key of resets)delete payload[key];payload.inherit_fields=resets;}
+  return payload;
+}
+function scopePolicyDescription(item) {
+  const cfg=state.settings || {}, official=item?.id?.startsWith('qqofficial:') || !item && cfg.onebot?.adapter==='official';
+  const policy=(cfg[official?'qq_official':'onebot'] || {}).chat_policy || 'blacklist';
+  const admission=item?.id?.startsWith('web:') ? '本地会话不受 QQ 接收名单控制。' : policy==='whitelist' ? 'QQ 当前使用白名单，仅接收名单内的聊天。' : 'QQ 当前使用黑名单，未屏蔽的聊天可以接收。';
+  return `${admission}记忆${item?.memory_space ? '加入共享空间；仅共享明确允许的群可见记录' : '按会话隔离'}；黑话${cfg.language?.group_isolation ? '按群隔离' : '跨群共享已确认词义'}，不会因共享黑话而共享聊天原文。`;
+}
 function scopeModal(item = null) {
   scopeModalBase(item);
   const body = $("#modal .modal-body"), inherited = [["","继承全局"],["true","本会话开启"],["false","本会话关闭"]];
+  const mentionReplies = [["","继承全局"],["true","直接回复"],["false","由 Planner 判断"]];
   const quiet = ["quiet_start","quiet_end"].map(name => $(`[name="${name}"]`,body)?.closest(".field")).filter(Boolean);
-  body.insertAdjacentHTML("beforeend",`${toggle("always_reply","本会话每条必回复","跳过回复与否的 Planner 判断，仍遵守暂停、接收规则和工具权限。",item?.always_reply ?? false)}${toggle("use_persona_knowledge","使用人格的公开知识","关闭后，这个会话的回答与规划不再引用人格公开资料。",item?.use_persona_knowledge ?? true)}<details class="details advanced-settings"><summary>高级设置 · 触发、记忆、预算与输出</summary><div class="form-grid scope-advanced-grid">${field("bot_name","本会话机器人名称",item?.bot_name || "","text","留空继承全局名称。","maxlength=\"40\"")}${field("bot_aliases","本会话别名",(item?.bot_aliases || []).join("，"),"text","逗号或换行分隔；留空继承全局。")}${select("trigger_at","被 @ 时触发",inherited,item?.trigger_at ?? "")}${select("trigger_reply","被回复时触发",inherited,item?.trigger_reply ?? "")}${select("trigger_name","提及名称时触发",inherited,item?.trigger_name ?? "")}${select("plan_enabled","Planner 语义规划",inherited,item?.plan_enabled ?? "")}${select("proactive_reply","主动接话",inherited,item?.proactive_reply ?? "")}${field("memory_space","共享记忆空间",item?.memory_space || "","text","留空隔离；同名空间只共享显式允许的群可见记忆。","data-full maxlength=\"80\"")}${field("cooldown_seconds","接话冷却（秒）",item?.cooldown_seconds ?? 20,"number","限制连续插话。","min=\"0\" max=\"600\"")}${field("followup_seconds","话题跟进窗口（秒）",item?.followup_seconds ?? 90,"number","识别回复后的后续接话。","min=\"0\" max=\"600\"")}<input type="hidden" name="merge_window_ms" value="${e(item?.merge_window_ms ?? 0)}">${field("daily_tokens","会话每日 Token 上限",item?.daily_tokens ?? 0,"number","0 表示不限，仍受全局预算限制。","min=\"0\" max=\"10000000\"")}${field("planner_min_interval_ms","Planner 最小间隔（毫秒）",item?.planner_min_interval_ms ?? "","number","留空继承；直接触发不受频率限制。","min=\"0\" max=\"60000\"")}${field("planner_daily_calls","Planner 每日调用上限",item?.planner_daily_calls ?? "","number","留空继承；0 表示不设置此项上限。","min=\"0\" max=\"100000\"")}${field("planner_daily_tokens","Planner 每日 Token 上限",item?.planner_daily_tokens ?? "","number","留空继承；0 表示不设置此项上限。","min=\"0\" max=\"10000000\"")}${field("planner_max_age_ms","Planner 消息有效期（毫秒）",item?.planner_max_age_ms ?? "","number","留空继承；过时的主动接话不再规划。","min=\"1000\" max=\"120000\"")}</div>${toggle("dictionary_learn","自动发现群词","发现候选，确认后采用。",item?.dictionary_learn ?? false)}${toggle("context_compress","整理长对话上下文","还需全局启用。",item?.context_compress ?? false)}${toggle("expression_learn","学习表达方式","候选确认前不采用。",item?.expression_learn ?? false)}${toggle("expression_use","采用已确认表达","独立于群词理解与主动用梗。",item?.expression_use ?? false)}${toggle("allow_mcp","允许提出 MCP 请求","还需允许工具总开关，调用须本地逐次批准。",item?.allow_mcp ?? false)}${toggle("output_override","单独设置本会话输出","关闭则继承全局的回复长度、括号处理与分段设置。",hasScopeOutput(item))}${outputFields(inheritedScopeOutput(item),"out_")}</details>`);
+  body.insertAdjacentHTML("beforeend",`${toggle("always_reply","本会话每条必回复","跳过回复与否的 Planner 判断，仍遵守暂停、接收规则和工具权限。",item?.always_reply ?? false)}${toggle("use_persona_knowledge","使用人格的公开知识","关闭后，这个会话的回答与规划不再引用人格公开资料。",item?.use_persona_knowledge ?? true)}<details class="details advanced-settings"><summary>高级设置 · 触发、记忆、预算与输出</summary><div class="form-grid scope-advanced-grid">${field("bot_name","本会话机器人名称",item?.bot_name || "","text","留空继承全局名称。","maxlength=\"40\"")}${field("bot_aliases","本会话别名",(item?.bot_aliases || []).join("，"),"text","逗号或换行分隔；留空继承全局。")}${select("trigger_at","被 @ 时直接回复",mentionReplies,item?.trigger_at ?? "")}${select("trigger_reply","被回复时触发",inherited,item?.trigger_reply ?? "")}${select("trigger_name","提及名称时直接回复",mentionReplies,item?.trigger_name ?? "")}${select("plan_enabled","Planner 语义规划",inherited,item?.plan_enabled ?? "")}${select("proactive_reply","主动接话",inherited,item?.proactive_reply ?? "")}${field("memory_space","共享记忆空间",item?.memory_space || "","text","留空隔离；同名空间只共享显式允许的群可见记忆。","data-full maxlength=\"80\"")}${field("cooldown_seconds","接话冷却（秒）",item?.cooldown_seconds ?? 20,"number","限制连续插话。","min=\"0\" max=\"600\"")}${field("followup_seconds","话题跟进窗口（秒）",item?.followup_seconds ?? 90,"number","识别回复后的后续接话。","min=\"0\" max=\"600\"")}<input type="hidden" name="merge_window_ms" value="${e(item?.merge_window_ms ?? 0)}">${field("daily_tokens","会话每日 Token 上限",item?.daily_tokens ?? 0,"number","0 表示不限，仍受全局预算限制。","min=\"0\" max=\"10000000\"")}${field("planner_min_interval_ms","Planner 最小间隔（毫秒）",item?.planner_min_interval_ms ?? "","number","留空继承；@、回复、点名不受此频率限制。","min=\"0\" max=\"60000\"")}${field("planner_daily_calls","Planner 每日调用上限",item?.planner_daily_calls ?? "","number","留空继承；0 表示不设置此项上限。","min=\"0\" max=\"100000\"")}${field("planner_daily_tokens","Planner 每日 Token 上限",item?.planner_daily_tokens ?? "","number","留空继承；0 表示不设置此项上限。","min=\"0\" max=\"10000000\"")}${field("planner_max_age_ms","Planner 消息有效期（毫秒）",item?.planner_max_age_ms ?? "","number","留空继承；过时的主动接话不再规划。","min=\"1000\" max=\"120000\"")}</div><p class="help-caption">@ 和名称选择“由 Planner 判断”时，提及仍单独触发判断；最终生效的 Planner 关闭时，不因该提及回复。开启消息防抖时，先合并一轮再判断或回复。</p>${toggle("dictionary_learn","自动发现群词","发现候选，确认后采用。",item?.dictionary_learn ?? false)}${toggle("context_compress","整理长对话上下文","还需全局启用。",item?.context_compress ?? false)}${toggle("expression_learn","学习表达方式","候选确认前不采用。",item?.expression_learn ?? false)}${toggle("expression_use","采用已确认表达","独立于群词理解与主动用梗。",item?.expression_use ?? false)}${toggle("allow_mcp","允许提出 MCP 请求","还需允许工具总开关，调用须本地逐次批准。",item?.allow_mcp ?? false)}${toggle("output_override","单独设置本会话输出","关闭则继承全局的回复长度、括号处理与分段设置。",hasScopeOutput(item))}${outputFields(inheritedScopeOutput(item),"out_")}</details>`);
   const advanced = $(".scope-advanced-grid",body);
   body.insertAdjacentHTML("beforeend",debounceFields(item || {}));
   quiet.forEach(node => advanced.append(node));
@@ -16,6 +45,11 @@ function scopeModal(item = null) {
     if(node) advanced.append(node);
   }
   body.insertAdjacentHTML('afterbegin',`<p class="help-caption">当前配置：${e(item?.profile_name || '跟随默认配置')}。统一人格和模型请前往“机器人配置与人格”；下面的高级选项仅用于单独覆盖。</p>`);
+  if(item?.profile_id != null && item.profile_overrides?.length) {
+    const choices=item.profile_overrides.filter(key=>Object.hasOwn(scopeFields,key));
+    body.insertAdjacentHTML('beforeend',`<details class="details"><summary>逐项恢复配置继承</summary><p class="help-caption">勾选后保存，仅恢复选中的项目；其它独立设置保留。恢复后跟随当前绑定的机器人配置。</p>${choices.map(key=>toggle('inherit__'+key,'恢复：'+scopeFields[key],'保存时取消此项会话覆盖。',false)).join('')}</details>`);
+  }
+  captureScopeForm($('#modal form[data-form="scope"]'));
 }
 
 function hasScopeOutput(item) {
@@ -35,7 +69,7 @@ function outputFields(output,prefix="") {
 
 function identitySection() {
   const identity = state.settings.identity || {};
-  return `<section class="panel settings-section" id="identity-section"><div class="section-title"><span>${icon("persona")}</span><div><h2>名称、触发与 Planner</h2><p>产品叫 Shiori；聊天时的称呼与人格可以独立设置。</p></div></div><form data-form="identity"><div class="form-grid">${field("name","机器人名称",identity.name || "初音未来","text","叫这个名字时可以触发机器人。","required maxlength=\"40\"")}${field("aliases","机器人别名",(identity.aliases || []).join("，"),"text","多个别名以逗号或换行分隔，例如 Miku、初音。","maxlength=\"1000\"")}</div>${toggle("respond_to_at","被 @ 时触发","与叫名字、回复消息分别控制；各会话可覆盖。",identity.respond_to_at ?? true)}${toggle("respond_to_reply","被回复时触发","识别对机器人消息的回复。",identity.respond_to_reply ?? true)}${toggle("respond_to_name","提及名称或别名时触发","按完整称呼识别；触发后仍可由 Planner 判断交谈对象。",identity.respond_to_name ?? true)}${toggle("planner_enabled","启用 Planner 语义规划","先判断在对谁说话、是否需要回复，以及准备说什么；只有回复或本轮不回复。",identity.planner_enabled ?? true)}${toggle("proactive_enabled","允许语义主动接话","同时遵守会话回应方式、安静时段与冷却；依据参与价值决定，不做概率抽签。",identity.proactive_enabled ?? true)}<p class="help-caption">每个会话可继承或覆盖这些设置。指定私聊可在会话设置中开启“每条必回复”，跳过回复与否的判断。自动化总暂停、QQ 接收规则仍然有效。</p><div class="section-actions"><button type="submit" class="btn primary">保存名称与触发</button>${button("调整会话覆盖","go-groups","ghost","groups")}</div></form></section>`;
+  return `<section class="panel settings-section" id="identity-section"><div class="section-title"><span>${icon("persona")}</span><div><h2>名称、触发与 Planner</h2><p>产品叫 Shiori；聊天时的称呼与人格可以独立设置。</p></div></div><form data-form="identity"><div class="form-grid">${field("name","机器人名称",identity.name || "初音未来","text","叫这个名字时可以触发机器人。","required maxlength=\"40\"")}${field("aliases","机器人别名",(identity.aliases || []).join("，"),"text","多个别名以逗号或换行分隔，例如 Miku、初音。","maxlength=\"1000\"")}</div>${toggle("respond_to_at","被 @ 时直接回复","开启后直接回复；关闭后，被 @ 仍单独触发 Planner 判断是否回复。各会话可覆盖。",identity.respond_to_at ?? true)}${toggle("respond_to_reply","被回复时触发","识别对机器人消息的回复。",identity.respond_to_reply ?? true)}${toggle("respond_to_name","提及名称时直接回复","名称和别名按完整称呼识别。开启后直接回复；关闭后，提及仍单独触发 Planner 判断是否回复。",identity.respond_to_name ?? true)}${toggle("planner_enabled","启用 Planner 语义规划","对需要判断的消息，判断在对谁说话、是否需要回复，以及准备说什么。",identity.planner_enabled ?? true)}${toggle("proactive_enabled","允许语义主动接话","同时遵守会话回应方式、安静时段与冷却；依据参与价值决定，不做概率抽签。",identity.proactive_enabled ?? true)}<p class="help-caption">每个会话可继承或覆盖这些设置。最终生效的 Planner 关闭时，未开启直接回复的 @ 或名称提及不调用 Planner，也不因该提及回复。开启消息防抖时，先合并一轮再判断或回复。指定私聊可在会话设置中开启“每条必回复”，跳过回复与否的判断。自动化总暂停、QQ 接收规则仍然有效。</p><div class="section-actions"><button type="submit" class="btn primary">保存名称与触发</button>${button("调整会话覆盖","go-groups","ghost","groups")}</div></form></section>`;
 }
 
 function timeAwarenessSection() {
@@ -75,7 +109,7 @@ function outputSection() {
 
 function plannerSection() {
   const planner = state.settings.planner || {};
-  return `<section class="panel settings-section" id="planner-budget-section"><div class="section-title"><span>${icon("shield")}</span><div><h2>Planner 调用保护</h2><p>控制判断本身的频率与用量，避免只判断不聊天。</p></div></div><form data-form="planner"><div class="form-grid">${field("group_batch_ms","群聊集中判断窗口（毫秒）",planner.group_batch_ms ?? 1500,"number","普通消息积累后统一判断；0关闭。@、回复、点名与私聊不等待。","min=\"0\" max=\"10000\"")}${field("group_batch_messages","提前判断的消息数",planner.group_batch_messages ?? 4,"number","达到这个数量提前判断；否则窗口到期判断一次。","min=\"2\" max=\"20\"")}${field("min_interval_ms","最小判断间隔（毫秒）",planner.min_interval_ms ?? 1200,"number","直接触发不受频率限制；仍受日预算约束。","min=\"0\" max=\"60000\"")}${field("daily_calls","每日调用上限",planner.daily_calls ?? 300,"number","0 表示不设置此项上限。","min=\"0\" max=\"100000\"")}${field("daily_tokens","每日 Token 上限",planner.daily_tokens ?? 12000,"number","Planner 的独立上限，同时受全局模型预算控制。","min=\"0\" max=\"10000000\"")}${field("max_age_ms","主动消息有效期（毫秒）",planner.max_age_ms ?? 15000,"number","排队过久的主动接话会跳过。","min=\"1000\" max=\"120000\"")}</div><p class="help-caption">聊天请求优先于排队中的后台学习；已经发出的模型请求会等待实际结果。</p><div class="section-actions"><button class="btn primary" type="submit">保存 Planner 保护</button></div></form></section>`;
+  return `<section class="panel settings-section" id="planner-budget-section"><div class="section-title"><span>${icon("shield")}</span><div><h2>Planner 调用保护</h2><p>控制判断本身的频率与用量，避免只判断不聊天。</p></div></div><form data-form="planner"><div class="form-grid">${field("group_batch_ms","群聊集中判断窗口（毫秒）",planner.group_batch_ms ?? 1500,"number","普通消息积累后统一判断；0关闭。@、回复、点名与私聊不等此窗口；消息防抖开启时仍先收集。","min=\"0\" max=\"10000\"")}${field("group_batch_messages","提前判断的消息数",planner.group_batch_messages ?? 4,"number","达到这个数量提前判断；否则窗口到期判断一次。","min=\"2\" max=\"20\"")}${field("min_interval_ms","最小判断间隔（毫秒）",planner.min_interval_ms ?? 1200,"number","@、回复、点名不受此频率限制；仍受日预算约束。","min=\"0\" max=\"60000\"")}${field("daily_calls","每日调用上限",planner.daily_calls ?? 300,"number","0 表示不设置此项上限。","min=\"0\" max=\"100000\"")}${field("daily_tokens","每日 Token 上限",planner.daily_tokens ?? 12000,"number","Planner 的独立上限，同时受全局模型预算控制。","min=\"0\" max=\"10000000\"")}${field("max_age_ms","主动消息有效期（毫秒）",planner.max_age_ms ?? 15000,"number","排队过久的主动接话会跳过。","min=\"1000\" max=\"120000\"")}</div><p class="help-caption">聊天请求优先于排队中的后台学习；已经发出的模型请求会等待实际结果。</p><div class="section-actions"><button class="btn primary" type="submit">保存 Planner 保护</button></div></form></section>`;
 }
 
 function explorationSection() {
@@ -210,6 +244,17 @@ async function explorePersona(target) {
   finally { if (target.isConnected) { target.disabled = false; target.innerHTML = original; } }
 }
 
+function mentionReplySummary(item) {
+  if(item.always_reply)return '回复策略 · 每条必回复';
+  const identity = state.settings.identity || {};
+  // The scopes API has already applied bot-profile inheritance. Older scopes
+  // may still keep these overrides inside settings.
+  const effective = (key,globalKey) => (item[key] !== undefined ? item[key] : item.settings?.[key]) ?? identity[globalKey] ?? true;
+  const planner = effective("plan_enabled","planner_enabled");
+  const mode = (key,globalKey) => effective(key,globalKey) ? "直接回复" : planner ? "由 Planner 判断" : "Planner 已关闭，不因该提及回复";
+  return `回复策略 · @：${mode("trigger_at","respond_to_at")} · 名称：${mode("trigger_name","respond_to_name")}`;
+}
+
 async function renderGroups() {
   state.scopes = rows(await api("/api/scopes"));
   const config = await api("/api/bot-profiles");
@@ -217,9 +262,9 @@ async function renderGroups() {
   const visible = state.scopes.filter(s => !state.filters.q || (s.name + s.id).toLowerCase().includes(state.filters.q.toLowerCase()));
   return heading("CHATS","收到的聊天，都在这里。","新聊天自动收集并使用默认配置。只有需要不同规则时，再单独设置。",button("修改默认配置","bot-default","primary","settings")) + listToolbar("搜索群名、账号或聊天名称",[]) + `<div class="chat-directory">${visible.map(item => {
     const platform=item.id.startsWith("qqofficial:")?"qq_official":"onebot", kind=item.id.split(":")[1], target=item.id.split(":")[2], settings=state.settings[platform] || {};
-    const blocked=item.enabled===false || ((settings.chat_policy || "whitelist")==="blacklist" ? (settings[kind==="group"?"blocked_groups":"blocked_users"] || []).includes(target) : !item.id.startsWith("web:") && !(settings[kind==="group"?"allowed_groups":"allowed_users"] || []).includes(target));
+    const blocked=item.enabled===false || ((settings.chat_policy || "blacklist")==="blacklist" ? (settings[kind==="group"?"blocked_groups":"blocked_users"] || []).includes(target) : !item.id.startsWith("web:") && !(settings[kind==="group"?"allowed_groups":"allowed_users"] || []).includes(target));
     const inherited=item.profile_id === "" && !(item.profile_overrides || []).length;
-    return `<article class="chat-directory-row"><div class="chat-directory-name"><h3>${e(item.name)}</h3><small>${e(item.id)}</small></div><div>${tag(blocked?"已屏蔽":"接收聊天",blocked?"gray":"")} ${tag(inherited?"跟随默认":item.profile_name || "单独配置","gray")}</div><div class="record-actions">${button("单独配置","edit-scope","small","settings",`data-id="${e(item.id)}"`)}${!inherited?button("恢复默认","scope-inherit","ghost small","",`data-id="${e(item.id)}"`):""}${button("记录","scope-chat","ghost small","",`data-id="${e(item.id)}"`)}${button(blocked?"允许聊天":"屏蔽","scope-admission","ghost small","",`data-id="${e(item.id)}" data-blocked="${blocked}"`)}</div></article>`;
+    return `<article class="chat-directory-row"><div class="chat-directory-name"><h3>${e(item.name)}</h3><small>${e(item.id)}</small>${kind === "group" ? `<p class="help-caption">${e(mentionReplySummary(item))}</p>` : ""}</div><div>${tag(blocked?"已屏蔽":"接收聊天",blocked?"gray":"")} ${tag(inherited?"跟随默认":item.profile_name || "单独配置","gray")}</div><div class="record-actions">${button("单独配置","edit-scope","small","settings",`data-id="${e(item.id)}"`)}${!inherited?button("恢复默认","scope-inherit","ghost small","",`data-id="${e(item.id)}"`):""}${button("记录","scope-chat","ghost small","",`data-id="${e(item.id)}"`)}${button(blocked?"允许聊天":"屏蔽","scope-admission","ghost small","",`data-id="${e(item.id)}" data-blocked="${blocked}"`)}</div></article>`;
   }).join("") || empty("groups","还没收到聊天","接入 QQ 后发一条消息，聊天就会出现在这里。","quick-qq","接入 QQ")}</div>`;
 }
 
@@ -241,7 +286,7 @@ async function memoryToolsPanel() {
 async function presetModal(scopeId) {
   const presets = rows(await api("/api/presets")), current = state.scopes.find(item => item.id === scopeId);
   const choices = presets.filter(item => item.id !== "private_always" || !scopeId.includes(":group:"));
-  openModal("使用会话预设",`为「${current?.name || scopeId}」调整回复策略，其他记忆和工具权限保持原设置。`,`${select("preset_id","选择预设",choices.map(item => [item.id,item.name]),choices[0]?.id)}<div class="source-list preset-descriptions">${choices.map(item => `<div class="source-item"><strong>${e(item.name)}</strong><p>${e(item.description)}</p><small>将更新：${e(Object.keys(item.patch || {}).map(key => ({always_reply:"必回复",plan_enabled:"Planner",proactive_reply:"主动接话",activity:"回应方式",trigger_at:"@触发",trigger_reply:"回复触发",trigger_name:"名称触发",cooldown_seconds:"冷却",followup_seconds:"跟进窗口",use_persona_knowledge:"人格知识"}[key] || key)).join("、"))}</small></div>`).join("")}</div>`,"scope-preset",{scope_id:scopeId},"应用到此会话");
+  openModal("使用会话预设",`为「${current?.name || scopeId}」调整回复策略，其他记忆和工具权限保持原设置。`,`${select("preset_id","选择预设",choices.map(item => [item.id,item.name]),choices[0]?.id)}<div class="source-list preset-descriptions">${choices.map(item => `<div class="source-item"><strong>${e(item.name)}</strong><p>${e(item.description)}</p><small>将更新：${e(Object.keys(item.patch || {}).map(key => ({always_reply:"必回复",plan_enabled:"Planner",proactive_reply:"主动接话",activity:"回应方式",trigger_at:"@直接回复",trigger_reply:"回复触发",trigger_name:"名称直接回复",cooldown_seconds:"冷却",followup_seconds:"跟进窗口",use_persona_knowledge:"人格知识"}[key] || key)).join("、"))}</small></div>`).join("")}</div>`,"scope-preset",{scope_id:scopeId},"应用到此会话");
 }
 
 async function handleAction(action,target) {
@@ -325,5 +370,5 @@ async function handleSubmit(kind,form) {
   return true;
 }
 
-return {scopeModal,identitySection,timeAwarenessSection,debounceSection,debounceFields,outputSection,plannerSection,explorationSection,explorationRunState,explorationDiagnostics,renderPersonaKnowledge,safeKnowledgeURL,explorePersona,renderGroups,memoryToolsPanel,personaExtras,handleAction,handleSubmit,afterRender};
+return {scopeModal,scopePatch,captureScopeForm,scopePolicyDescription,identitySection,timeAwarenessSection,debounceSection,debounceFields,outputSection,plannerSection,explorationSection,explorationRunState,explorationDiagnostics,renderPersonaKnowledge,safeKnowledgeURL,explorePersona,renderGroups,memoryToolsPanel,personaExtras,handleAction,handleSubmit,afterRender};
 })();

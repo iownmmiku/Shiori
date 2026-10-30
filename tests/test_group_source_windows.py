@@ -22,6 +22,7 @@ def anyio_backend():
 class Config:
     def __init__(self):
         self.value = deepcopy(DEFAULTS)
+        self.value['identity'].update(respond_to_at=False, respond_to_name=False)
         self.value['onebot'].update(enabled=True, chat_policy='blacklist')
         self.value['model'].update(base_url='https://fixture.invalid/v1', model='fixture')
         self.value['output'].update(mode='model', interval_ms=0)
@@ -140,7 +141,7 @@ async def test_fixed_planner_history_still_rejects_real_source_or_dependency_cha
 @pytest.mark.parametrize('change', ['traffic', 'delete', 'edit', 'withdraw', 'memory', 'jargon', 'identity', 'revoke', 'reply_edit'])
 async def test_multipart_reply_uses_fixed_sources_but_stops_after_real_mutation(setup, change):
     store, config, _, chat = setup
-    store.upsert_scope({'id': SCOPE, 'plan_enabled': False})
+    store.upsert_scope({'id': SCOPE, 'plan_enabled': False, 'trigger_at': True, 'trigger_name': True})
     memory = store.create_memory({'scope_id': SCOPE, 'user_id': '303', 'kind': 'fact',
         'content': 'The user enjoys music', 'visibility': 'group'})
     jargon = store.create_jargon({'scope_id': SCOPE, 'term': 'fixture phrase', 'meaning': 'A friendly greeting',
@@ -282,7 +283,7 @@ async def test_direct_request_does_not_wait_for_optional_group_planner_lock(setu
 @pytest.mark.anyio
 async def test_merge_window_and_failure_feedback_resolve_old_sources_directly(setup):
     store, config, _, chat = setup
-    store.upsert_scope({'id': SCOPE, 'plan_enabled': False, 'merge_window_ms': 50})
+    store.upsert_scope({'id': SCOPE, 'plan_enabled': False, 'trigger_at': True, 'trigger_name': True, 'merge_window_ms': 50})
     sent = []
 
     async def respond(scope, user, text, images, metadata):

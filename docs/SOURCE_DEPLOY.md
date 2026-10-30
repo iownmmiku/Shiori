@@ -1,8 +1,8 @@
 # Shiori 源码部署指南
 
-本文描述0.1.6正式版源码部署，安装包、便携包与源码在[GitHub Releases](https://github.com/iownmmiku/mikubot/releases/tag/v0.1.6)按实际公开资产下载。端口告警与 `--strict-port` 继续可用；完整隔离、HTTPS、Linux/Docker步骤与验收范围见[部署与安全说明](DEPLOYMENT_AND_SAFETY.md)。
+本文描述当前 Shiori 源码部署。稳定版为 0.2.0，本地 0.2.1-beta 尚未发布；安装包、便携包与源码在[GitHub Releases](https://github.com/iownmmiku/Shiori/releases)按实际公开资产下载。端口告警与 `--strict-port` 继续可用；完整隔离、HTTPS、Linux/Docker步骤与验收范围见[部署与安全说明](DEPLOYMENT_AND_SAFETY.md)。
 
-原0.1.6 beta内部版本也为0.1.6。升级时重新检查并选择正式发行记录；若显示“当前版本”，仍可切换同版本修复包。源码有本地修改时不会自动覆盖，应先保留改动，再在独立目录部署正式源码并沿用原数据目录。旧beta资产仅供手动历史下载，不作自动切换目标。
+0.1.6 及更早版本内置旧仓库地址，需要从 Shiori 发行页手动获取新版；0.2.0 起支持应用内切换。源码有本地修改时不会自动覆盖，应先保留改动，再在独立目录部署目标源码。试用测试版时使用单独的数据副本，勿让两个实例同时写同一目录；历史版本降级不直接覆盖当前数据，详见[版本与更新](UPDATES.md)。
 
 ## Windows：一条命令准备并启动
 
@@ -43,7 +43,7 @@ bash scripts/setup-source.sh --setup-only
 bash start.sh --data-dir "$HOME/shiori-data"
 ```
 
-支持Python3.11–3.13；系统需提供对应的 `venv` 和 `pip`（Debian/Ubuntu按所选解释器安装对应的 `python3-venv` / `python3-pip` 包）。先在终端交互设密，再启动服务。默认监听回环，远程需要HTTPS。Docker构建、首次密码、持久卷、代理与容器内QQ地址见[Linux/Docker部署步骤](DEPLOYMENT_AND_SAFETY.md#docker-服务部署)。已发布0.1.3的Windows/Linux、Python3.11–3.13和Docker检查见[GitHub Actions](https://github.com/iownmmiku/mikubot/actions/runs/39423537788)，不代替真实QQ或长期挂机验收。
+支持Python3.11–3.13；系统需提供对应的 `venv` 和 `pip`（Debian/Ubuntu按所选解释器安装对应的 `python3-venv` / `python3-pip` 包）。先在终端交互设密，再启动服务。默认监听回环，远程需要HTTPS。Docker构建、首次密码、持久卷、代理与容器内QQ地址见[Linux/Docker部署步骤](DEPLOYMENT_AND_SAFETY.md#docker-服务部署)。已发布0.1.3的Windows/Linux、Python3.11–3.13和Docker检查见[GitHub Actions](https://github.com/iownmmiku/Shiori/actions/runs/39423537788)，不代替真实QQ或长期挂机验收。
 
 若使用可编辑安装，在已创建的虚拟环境中运行：
 
@@ -161,4 +161,4 @@ print(result['name'], result['version'])
 
 真实模式显式开启后可能计费，见[回放说明](archive/REPLAY-v0.6.md)。源码发行白名单包括部署文件、核心与兼容包；维护者构建使用`scripts/package_source.py`和`scripts/build.ps1`。
 
-源码可在设置中选择GitHub发行版并下载源码包，但不会自动切换分支或覆盖工作区。更换代码请在新目录准备依赖，保持同一个`--data-dir`；详见[更新指南](UPDATES.md)。
+源码支持在“版本与更新”选择已发布的目标版本，校验后由更新助手替换发行清单中的程序文件并重启；不会自动覆盖本地修改。源码目录需可写，Docker 仍通过镜像更新。测试版需开启“显示测试版”；当前 0.2.1-beta 尚未发布。具体流程与边界见[更新指南](UPDATES.md)。

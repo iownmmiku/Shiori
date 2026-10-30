@@ -72,7 +72,7 @@ async def test_real_chat_and_onebot_combine_repeated_mentions_before_planning(tm
                     'tool_calls': [], 'usage': {}}
 
     store = Store(tmp_path)
-    store.upsert_scope({'id': 'qq:group:202', 'auto_memory': False, 'plan_enabled': True,
+    store.upsert_scope({'id': 'qq:group:202', 'auto_memory': False, 'plan_enabled': True, 'trigger_at': False,
                         'merge_window_ms': 0, 'cooldown_seconds': 0})
     chat = ChatService(store, SimpleNamespace(get=lambda: deepcopy(config)), Model())
     bridge = OneBotBridge(store, chat.settings, chat)

@@ -55,6 +55,9 @@ class OfficialBridge:
         self._diagnostics = QQDiagnostics(store, 'qqofficial')
         self._failure_feedback_at = {}
         self._flow = ConversationFlow(store, settings, chat, self._emit, self._allowed, self._diagnostics.mark)
+        if getattr(chat, 'character_schedule', None):
+            from .schedule_delivery import ScheduleDelivery
+            self._flow.schedule_delivery = ScheduleDelivery(self._flow, lambda: self.status().get('connected', False), prefix='qqofficial:')
 
     def _config(self) -> dict:
         return self.settings.get().get("qq_official", {})
@@ -150,6 +153,8 @@ class OfficialBridge:
                 return
             self._client = client
             self._running = True
+            if getattr(self._flow, 'schedule_delivery', None):
+                await self._flow.schedule_delivery.start()
             self._last_error = ""
             self._runner = asyncio.create_task(self._run(client, dict(cfg)), name="shiori.qq_official")
 
@@ -173,6 +178,8 @@ class OfficialBridge:
 
     async def stop(self) -> None:
         async with self._lifecycle_lock:
+            if getattr(self._flow, 'schedule_delivery', None):
+                await self._flow.schedule_delivery.stop()
             self._running = False
             self._connected = False
             runner, client = self._runner, self._client

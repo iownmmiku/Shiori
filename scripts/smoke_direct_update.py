@@ -70,7 +70,9 @@ def main():
         (data/'operator-note.txt').write_text('personal file outside program','utf-8')
         password=data/'security/webui-password.json'
         password_hash=hashlib.sha256(password.read_bytes()).hexdigest()
-        version=__version__ if not args.rollback else '0.1.999'
+        # Exercise a failing upgrade, not a historical version that the
+        # downgrade guard correctly rejects before the helper can run.
+        version=__version__ if not args.rollback else f'{int(__version__.split(".")[0]) + 1}.0.0'
         key=uuid4().hex;folder=data/'updates'/key;folder.mkdir(parents=True)
         archive=folder/f'shiori-{version}-Windows-x64.zip';shutil.copy2(args.archive.resolve(),archive)
         manager=updates.UpdateManager(data,runtime={'mode':args.mode,'switch_supported':True,'update_kind':'portable',

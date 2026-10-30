@@ -134,7 +134,7 @@ async function fullScriptIntegration(){
     return elements.get(selector);
   };
   const settings={model:{},onebot:{},qq_official:{},memory:{},computer:{},identity:{name:"初音未来"}}, scopes=[{id:"web:default",name:"本地聊天"}];
-  const browser={console,URLSearchParams,AbortController,FormData,setTimeout,clearTimeout,EventSource:class{close(){}addEventListener(){}},
+  const browser={console,URL,URLSearchParams,AbortController,FormData,setTimeout,clearTimeout,EventSource:class{close(){}addEventListener(){}},
     location:{protocol:"http:",host:"127.0.0.1:18765",hash:"",pathname:"/",search:""},history:{replaceState(){}},
     localStorage:{getItem:key=>storage.get(key)||null,setItem:(key,value)=>storage.set(key,value)},sessionStorage:{getItem(){return"1";},setItem(){}},
     document:{body:{classList:{add(){},remove(){},toggle(){}}},querySelector:selector=>selector.includes("form")?null:element(selector),querySelectorAll(){return[];},addEventListener:(name,handler)=>{listeners[name]=handler;},getElementById:element},
@@ -151,7 +151,10 @@ async function fullScriptIntegration(){
     scrollTo(){},navigator:{},
   };
   browser.window=browser;vm.createContext(browser);
-  for(const file of require('./ui_modules.cjs').integrationScripts)vm.runInContext(fs.readFileSync(path.join(__dirname,"../shiori/static",file),"utf8"),browser,{filename:file});
+  for(const file of require('./ui_modules.cjs').integrationScripts){
+    browser.document.currentScript={src:'http://127.0.0.1:18765/static/'+file+'?v=0.2.1-beta'};
+    vm.runInContext(fs.readFileSync(path.join(__dirname,"../shiori/static",file),"utf8"),browser,{filename:file});
+  }
   await new Promise(resolve=>setTimeout(resolve,10));
   assert.match(element("#navigation").innerHTML,/运行概览/);
   assert.match(element("#content").innerHTML,/聊天模式/);

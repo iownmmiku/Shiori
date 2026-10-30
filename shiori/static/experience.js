@@ -12,7 +12,7 @@ window.ShioriExperience = (() => {
   const safeLink = value => /^(https?:\/\/|\/(?!\/))/i.test(String(value || "")) ? String(value) : "";
   const safeId = id => encodeURIComponent(String(id || ""));
   const _pageRuntime={get liveSource(){return liveSource},set liveSource(value){liveSource=value},get watchedJob(){return watchedJob},set watchedJob(value){watchedJob=value},get renderedPage(){return renderedPage},set renderedPage(value){renderedPage=value},get pairTimer(){return pairTimer},set pairTimer(value){pairTimer=value},get attachments(){return attachments},set attachments(value){attachments=value},get attachmentScope(){return attachmentScope},set attachmentScope(value){attachmentScope=value},get distillDraft(){return distillDraft},set distillDraft(value){distillDraft=value},get currentJob(){return currentJob},set currentJob(value){currentJob=value},get pair(){return pair},set pair(value){pair=value}};
-  const {renderChat,sessionSidebar,attachmentChips,sendChat,releaseAttachments,flushCollected,cancelCollected,close:closeChat}=window.ShioriExperienceChat.create(_pageRuntime,{inactive,jobDetail:(...args)=>jobDetail(...args)});
+  const {renderChat,sessionSidebar,attachmentChips,sendChat,releaseAttachments,removeAttachment,flushCollected,cancelCollected,saveDraft:saveChatDraft,parkDraft:parkChatDraft,activateScope:activateChatScope,handleAction:chatAction,handleSubmit:chatSubmit,handleInput:chatInput,close:closeChat}=window.ShioriExperienceChat.create(_pageRuntime,{inactive,jobDetail:(...args)=>jobDetail(...args)});
   const {jobDetail,renderJobs}=window.ShioriExperienceJobs.create(_pageRuntime,{jobNames,inactive,safeId,safeLink});
   const {renderSettings,localConnectorPanel,schedulerPanel,pollPairing}=window.ShioriExperienceConfig.create(_pageRuntime,{safeId});
   const {distillChooser,characterForm,generateForm,profilePanel,profileForm,profileBindForm,corpusForm,showDistillPreview}=window.ShioriExperiencePersona.create(_pageRuntime,{safeLink});
@@ -58,7 +58,7 @@ window.ShioriExperience = (() => {
     if (state.page === "jobs") { const existing = $$('[data-job-id]').find(item => item.dataset.jobId === job.id); if (existing) existing.outerHTML = jobDetail(job); }
     if (inactive(job)) { closeStream(); if (state.page === "chat") refreshMessages().catch(() => {}); }
   }
-  async function refreshMessages() { state.messages = rows(await api(`/api/messages?${query({scope_id:state.scope})}`)); const feed = $("#chat-feed"); if (feed) { const detail = $("#live-job-detail")?.outerHTML || '<div id="live-job-detail"></div>'; feed.innerHTML = state.messages.map(renderMessage).join("") + detail; feed.scrollTop = feed.scrollHeight; } }
+  async function refreshMessages() { const scopeId=state.scope,revision=state.renderId; const messages=rows(await api(`/api/messages?${query({scope_id:scopeId})}`)); if(state.page!=="chat" || state.scope!==scopeId || state.renderId!==revision)return;state.messages=messages;const feed = $("#chat-feed"); if (feed) { const detail = $("#live-job-detail")?.outerHTML || '<div id="live-job-detail"></div>'; feed.innerHTML = state.messages.map(renderMessage).join("") + detail; feed.scrollTop = feed.scrollHeight; } }
 
 
   // Small Markdown reader: raw HTML, remote images and script URLs remain text.
@@ -84,6 +84,8 @@ window.ShioriExperience = (() => {
   }
 
   async function handleAction(action,target) {
+    const chatHandled=chatAction?.(action,target);
+    if (chatHandled && await chatHandled) return true;
     if(action === "flush-chat-debounce"){await flushCollected();return true;}
     if(action === "cancel-chat-debounce"){await cancelCollected();toast("已取消收集，内容已放回输入框。");return true;}
     if(window.ShioriUpdates && await window.ShioriUpdates.handleAction(action,target))return true;
@@ -146,26 +148,31 @@ window.ShioriExperience = (() => {
       await confirmAction("删除这份参考记录？","此操作会撤回资料来源；正在使用它的模型请求或电脑任务将停止后续操作。长期知识正文保持不变。",async()=>{await api(`/api/chat/attachments/${safeId(id)}?${query({scope_id:scopeId})}`,{method:"DELETE"});attachments=attachments.filter(item=>item.id!==id);},"删除并撤回");
     }
     else if (action === "attachment-reuse") {
-      if(state.sending || (target.dataset.scope && target.dataset.scope!==state.scope))throw new Error("请回到资料所属聊天，并等待本轮回复结束。");
+      if(state.page!=="chat" || state.sending || (target.dataset.scope && target.dataset.scope!==state.scope))throw new Error("请回到资料所属聊天，并等待本轮回复结束。");
       if(attachments.length>=5)throw new Error("一次最多引用5个附件。");
-      const scopeId=state.scope,revision=_pageRuntime.attachmentRevision || 0;
+      const scopeId=state.scope,revision=_pageRuntime.attachmentRevision || 0,renderId=state.renderId,authGeneration=state.authGeneration,modalBody=$("#modal .modal-body");
       const item=await api(`/api/chat/attachments/${safeId(id)}?${query({scope_id:scopeId})}`);
-      if(state.sending || scopeId!==state.scope || revision!==(_pageRuntime.attachmentRevision || 0))throw new Error("聊天或参考资料已变化，请重新选择资料，避免使用已释放的附件。");
+      if(state.authenticated===false || authGeneration!==state.authGeneration)return true;
+      if(state.page!=="chat" || state.renderId!==renderId || state.sending || scopeId!==state.scope || revision!==(_pageRuntime.attachmentRevision || 0))throw new Error("聊天或参考资料已变化，请重新选择资料，避免使用已释放的附件。");
       if(attachments.length>=5 && !attachments.some(ref=>ref.id===id))throw new Error("一次最多引用5个附件。");
-      if(!attachments.some(ref=>ref.id===id))attachments.push({id,name:item.name});attachmentScope=state.scope;closeModal();await renderPage();
+      if(!attachments.some(ref=>ref.id===id))attachments.push({id,name:item.name});attachmentScope=scopeId;
+      if(modalBody===$("#modal .modal-body"))closeModal();
+      const chips=$("#attachment-chips");if(chips)chips.innerHTML=attachmentChips();
     }
     else if (action === "attachment-cleanup") {
       const scopeId=target.dataset.scope || state.scope,preview=await api('/api/chat/attachments/cleanup',{method:'POST',body:{scope_id:scopeId,preview:true}});
       await confirmAction("清理已释放或过期的资料？",`${preview.eligible_ids?.length || 0}份可安全回收。在用任务和用途未知的旧版资料会保留。`,async()=>{await api('/api/chat/attachments/cleanup',{method:'POST',body:{scope_id:scopeId,preview:false}});},"安全清理");
     }
     else if (action === "choose-attachment") { state.attachmentPurpose=target.dataset.purpose;$("#attachment-input").click(); }
-    else if (action === "remove-attachment") { if(state.sending)throw new Error("请先等待当前回复结束。");const index=Number(target.dataset.index),item=attachments[index];if(item){await releaseAttachments([item]);attachments.splice(index,1);}$("#attachment-chips").innerHTML=attachmentChips(); }
+    else if (action === "remove-attachment") await removeAttachment(Number(target.dataset.index));
     else if (action === "list-models") await listModels(target);
     else return false;
     return true;
   }
 
   async function handleSubmit(kind,form) {
+    const chatHandled=chatSubmit?.(kind,form);
+    if (chatHandled && await chatHandled) return true;
     const data=getForm(form);
     if(data.selected_account) data.account_id=data.selected_account;
     if(kind === "persona-generate") {await api('/api/persona/distill/start',{method:'POST',body:{mode:'generate',name:data.name || undefined,description:data.description}});closeModal();await navigate('jobs');toast('人格生成任务已创建');}
@@ -242,28 +249,39 @@ window.ShioriExperience = (() => {
     if(target.id === "chat-mode"){state.chatMode=target.value;if(target.value === "computer" && !state.settings.computer?.enabled)toast("电脑任务尚未开启，请在机器人设置中开启并指定工作目录。",true);state.draft=$("#chat-text")?.value || state.draft;await renderPage();return true;}
     if(target.id === "corpus-input" && target.files[0]){const file=target.files[0];target.value="";if(file.size>24*1024*1024)throw new Error("ZIP 文件不能超过 24 MB。请减少语料后重试。");const data=new FormData();data.append("file",file);toast("正在识别 ZIP 中的可读文件与说话者…");const result=await api("/api/persona/distill/corpus",{method:"POST",body:data});distillDraft={...result,mode:"corpus"};showDistillPreview();return true;}
     if(target.id === "attachment-input" && target.files[0]){
-      const file=target.files[0],scopeId=state.scope;target.value="";
+      const file=target.files[0],scopeId=state.scope,page=state.page,renderId=state.renderId,
+        revision=_pageRuntime.attachmentRevision || 0,authGeneration=state.authGeneration,modalBody=$("#modal .modal-body");target.value="";
       if(file.size>8*1024*1024)throw new Error("单份资料不能超过 8 MB。");
       const purpose=state.attachmentPurpose || "context",data=new FormData();
+      if(purpose==="context" && (page!=="chat" || state.sending))throw new Error("请回到本地聊天，并等待当前回复结束后上传参考资料。");
       if(purpose==="context" && attachments.length>=5)throw new Error("一次最多引用5个附件。");
       data.append("file",file);data.append("scope_id",scopeId);data.append("purpose",purpose);
       const result=await api("/api/chat/attachments",{method:"POST",body:data});
+      // A previous login must not attach data or issue follow-up mutations in a
+      // new session. Unselected temporary uploads retain their normal expiry.
+      if(state.authenticated===false || authGeneration!==state.authGeneration)return true;
+      const sameView=()=>state.page===page && state.scope===scopeId && state.renderId===renderId;
       if(purpose === "context"){
         const item=result.attachment || result;if(!item.id)throw new Error("附件未返回有效标识，请重新上传。");
-        if(state.scope!==scopeId){await releaseAttachments([item],scopeId);toast("聊天已切换，未使用的参考资料已释放。");return true;}
+        if(!sameView() || state.sending || revision!==(_pageRuntime.attachmentRevision || 0) || attachments.length>=5){
+          await releaseAttachments([item],scopeId);toast("聊天或参考资料已变化，未使用的参考资料已释放。请回到原聊天重新选择。");return true;
+        }
         attachments.push({...item,name:file.name});attachmentScope=scopeId;
+        const chips=$("#attachment-chips");if(chips)chips.innerHTML=attachmentChips();
       }
-      closeModal();toast(result.message || (purpose === "memory" ? "已保存为当前会话的长期资料。" : "资料已附加，发送下一条消息时参考。"));await bootstrap();return true;
+      if(sameView() && modalBody===$("#modal .modal-body"))closeModal();
+      toast(result.message || (purpose === "memory" ? "已保存为原会话的长期资料。" : "资料已附加，发送下一条消息时参考。"));
+      if(purpose === "memory" && sameView())await bootstrap();return true;
     }
     return false;
   }
 
-  function handleInput(target) { const form=target.closest?.('form[data-form="model"],form[data-form="quick-start"],form[data-form="provider"]');if(form && ["base_url","model","api_key","vision"].includes(target.name)){const result=$("#model-result",form);if(result && result.textContent.trim())result.innerHTML='<p class="help-caption">配置已改变，请保存后重新测试。</p>';}}
+  function handleInput(target) { if(chatInput?.(target))return; const form=target.closest?.('form[data-form="model"],form[data-form="quick-start"],form[data-form="provider"]');if(form && ["base_url","model","api_key","vision"].includes(target.name)){const result=$("#model-result",form);if(result && result.textContent.trim())result.innerHTML='<p class="help-caption">配置已改变，请保存后重新测试。</p>';}}
   function afterRender() { renderedPage=state.page;const job=(state.liveJobs || []).find(item=>!inactive(item) && (state.page !== "chat" || item.scope_id === state.scope));if(["chat","jobs"].includes(state.page))watch(job);else closeStream();if(state.page === "settings"){$$('[data-form="model"] button[type="submit"]').forEach(item=>item.textContent="保存并测试");} }
 
   // Capture aliases before exported methods are installed; recursion is avoided.
   const originalPersonas = () => globalThis.renderPersonas();
-  return {profilePanel,renderOverview,renderChat,sendChat,renderJobs,renderSettings,renderHelp,renderPersonas:async()=>{
+  return {saveChatDraft,parkChatDraft,activateChatScope,profilePanel,renderOverview,renderChat,sendChat,renderJobs,renderSettings,renderHelp,renderPersonas:async()=>{
     const html=await originalPersonas();return html.replace(button("创造人格","new-persona","primary","plus"),button("直接生成","persona-generate","primary","spark")+button("蒸馏人格","start-distill","","spark")+button("手动创建","new-persona","","plus"));
   },baseSettings:()=>globalThis.renderSettings(),afterRender,handleAction,handleSubmit,handleChange,handleInput,markdown,jobDetail,connectionResult,costLabel,close:()=>{closeChat();clearTimeout(pairTimer);closeStream();}};
 })();

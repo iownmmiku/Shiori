@@ -4,6 +4,7 @@
 // uses the server's HttpOnly cookie; no credential is written to browser storage.
 window.ShioriAuth = (() => {
   let status = {}, ready = async () => {}, working = false;
+  let generation=0,refreshRevision=0;
   const escape = value => String(value ?? "").replace(/[&<>"']/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
   const node = () => document.getElementById("auth-root");
   async function request(path, body, method) {
@@ -18,6 +19,11 @@ window.ShioriAuth = (() => {
     return `<details class="auth-recovery"><summary>忘记密码怎么办？</summary>${files}<p>在运行电脑的托盘菜单选择“重置 WebUI 密码”并确认，可直接重新设置。无托盘时运行 <code>python -m shiori --data-dir 实际数据目录 --reset-password</code>。也可手动恢复：</p><ol><li>完全退出 Shiori，包括托盘中的程序。</li><li>只删除专用密码文件 <code>security/webui-password.json</code>。</li><li>重新打开桌面客户端，在运行电脑上设置新密码。</li></ol><p>聊天、记忆和模型配置会保留；旧登录会话失效。不要删除整个数据目录。</p></details>`;
   }
   function screen(error = "") {
+    generation++;refreshRevision++;status={...status,authenticated:false};
+    window.ShioriAppLifecycle?.leaveAuthenticated();
+    renderScreen(error);
+  }
+  function renderScreen(error = "") {
     const target = node(); if (!target) return;
     document.body.classList.remove("auth-ready");
     document.getElementById("modal")?.close();
@@ -47,12 +53,15 @@ window.ShioriAuth = (() => {
     document.body.classList.add("auth-ready"); await ready();
   }
   async function refresh() {
-    status = await request("/api/auth/status");
+    const expected=generation,revision=++refreshRevision,next=await request("/api/auth/status");
+    if(expected!==generation||revision!==refreshRevision)return status;
+    status=next;
     if (status.authenticated) await enter(); else screen();
     return status;
   }
   async function init(callback) {
     ready = callback;
+    const expected=generation;
     try {
       const fragment = new URLSearchParams(location.hash.slice(1)), token = fragment.get("bootstrap") || fragment.get("token");
       if (token) {
@@ -61,15 +70,21 @@ window.ShioriAuth = (() => {
         // it does not bypass an already configured password.
         await request("/api/auth/bootstrap", {token});
       }
+      if(expected!==generation)return;
       await refresh();
-    } catch (error) { screen(error.message); }
+    } catch (error) { if(expected===generation)screen(error.message); }
   }
   async function requireLogin() {
-    try { status = await request("/api/auth/status"); } catch { status.authenticated = false; }
-    screen();
+    screen();const expected=generation;
+    try { const next=await request("/api/auth/status");if(expected!==generation)return;status={...next,authenticated:false}; }
+    catch { if(expected!==generation)return;status.authenticated=false; }
+    renderScreen();
   }
   async function settingsPanel() {
-    const [next,access] = await Promise.all([request("/api/auth/status"),request("/api/auth/access")]); status = next;
+    const expected=generation;
+    const [next,access] = await Promise.all([request("/api/auth/status"),request("/api/auth/access")]);
+    if(expected!==generation)return "";
+    status = next;
     const local = status.mode === "local_only" || status.local_only;
     const actualRemote = status.actual_remote_enabled ?? access.actual_remote_enabled ?? status.remote_enabled;
     const urls = status.urls || access.urls || [];
@@ -77,13 +92,15 @@ window.ShioriAuth = (() => {
     return `<section class="panel settings-section section-anchor" id="webui-security-section"><div class="section-title"><div><h2>登录与远程管理</h2><p>桌面客户端与浏览器共用管理密码。远程登录拥有同样的管理权限。</p></div></div><div class="info-pair"><span>访问方式</span><strong>${local ? "仅本机免密" : "密码保护"}</strong></div><div class="info-pair"><span>当前远程入口</span><strong>${actualRemote ? "已开启" : "已关闭"}</strong></div>${status.restart_required || access.restart_required ? '<p class="auth-restart">网络设置已保存，重启 shiori 后生效。</p>' : ""}${urls.length ? `<p class="help-caption">当前入口：<br>${urls.map(url=>`<code>${escape(url)}</code>`).join("<br>")}</p>` : ""}${status.listen_host || access.actual_host ? `<p class="help-caption">实际监听：<code>${escape(status.listen_host || access.actual_host)}:${escape(access.actual_port || status.actual_port || status.port || "")}</code></p>` : ""}<form data-auth-form="change-password" class="security-password-form">${local ? "" : password("current_password","当前密码")}${password("new_password",local ? "设置管理密码" : "新密码","new-password")}${password("confirm_password","再次输入新密码","new-password")}<button class="btn primary" type="submit">${local ? "设置密码" : "修改密码"}</button><p class="auth-form-error" role="alert" hidden></p></form><p class="help-caption">修改密码后，其他设备的旧会话立即失效。密码不会随应用备份导出。</p>${network}${recovery()}${local ? "" : '<div class="section-actions"><button class="btn" data-auth-action="logout">退出当前登录</button></div>'}</section>`;
   }
   async function submit(form) {
+    const expected=generation;
     const kind = form.dataset.authForm, data = Object.fromEntries(new FormData(form));
     if ((kind === "setup" || kind === "change-password") && (data.password || data.new_password) !== data.confirm_password) throw new Error("两次输入的密码不一致。");
     if (kind === "login") await request("/api/auth/login",{password:data.password});
     else if (kind === "setup") await request("/api/auth/setup",{password:data.password,mode:"password"});
     else if (kind === "local-only") { if (!data.confirmed) throw new Error("请先确认只在本机使用。"); await request("/api/auth/setup",{mode:"local_only"}); }
     else if (kind === "change-password") await request("/api/auth/password",{current_password:data.current_password || "",new_password:data.new_password});
-    else if (kind === "network") { await request("/api/auth/access",{remote_enabled:!!data.remote_enabled,host:data.host,port:Number(data.port),require_https:!data.allow_http_lan,public_url:data.public_url || "",allowed_hosts:data.public_url ? [new URL(data.public_url).hostname] : [],trusted_proxy_ips:(data.trusted_proxy_ips || "").split(/[,，\s]+/).filter(Boolean)},"PUT"); form.reset(); await refresh(); return; }
+    else if (kind === "network") { await request("/api/auth/access",{remote_enabled:!!data.remote_enabled,host:data.host,port:Number(data.port),require_https:!data.allow_http_lan,public_url:data.public_url || "",allowed_hosts:data.public_url ? [new URL(data.public_url).hostname] : [],trusted_proxy_ips:(data.trusted_proxy_ips || "").split(/[,，\s]+/).filter(Boolean)},"PUT"); if(expected!==generation)return;form.reset(); await refresh(); return; }
+    if(expected!==generation)return;
     form.reset(); await refresh();
     if (kind === "change-password" && window.toast) window.toast("密码已更新，其他设备需要重新登录。");
   }
@@ -91,17 +108,20 @@ window.ShioriAuth = (() => {
     const form = event.target.closest("form[data-auth-form]"); if (!form) return;
     event.preventDefault(); event.stopImmediatePropagation(); if (working) return;
     working = true; const submitButton = form.querySelector('[type="submit"]'); if(submitButton)submitButton.disabled=true;
+    const expected=generation;
     try { await submit(form); }
-    catch (error) { const errorNode = form.querySelector(".auth-form-error") || node()?.querySelector(".auth-error"); if (errorNode) { errorNode.hidden=false;errorNode.textContent=error.message; } }
+    catch (error) { if(expected===generation){const errorNode = form.querySelector(".auth-form-error") || node()?.querySelector(".auth-error"); if (errorNode) { errorNode.hidden=false;errorNode.textContent=error.message; }} }
     finally { working = false; if(submitButton)submitButton.disabled=false; }
   });
   document.addEventListener("click",async event => {
     const target = event.target.closest("[data-auth-action]"); if(!target)return;
     event.preventDefault(); if(working)return; working=true;
+    let expected=generation;
     try {
-      if(target.dataset.authAction === "logout") { await request("/api/auth/logout",{}); window.ShioriExperience?.close(); window.ShioriPages?.close(); }
+      if(target.dataset.authAction === "logout") { screen();expected=generation;await request("/api/auth/logout",{}); }
+      if(expected!==generation)return;
       await refresh();
-    } catch(error) { screen(error.message); }
+    } catch(error) { if(expected===generation)screen(error.message); }
     finally { working=false; }
   });
   return {init,requireLogin,settingsPanel,refresh,recovery,screen,getStatus:()=>({...status})};

@@ -16,13 +16,14 @@ from shiori import updates, installer
 from shiori.api import create_app
 
 CONTENT = b'MZ-local-fixture-installer-not-executable'
+STABLE_TAG = 'v' + __version__.partition('-')[0]
 
 
 @pytest.fixture
 def anyio_backend(): return 'asyncio'
 
 
-def release(tag='v'+__version__, *, digest=True, kind='installer', body=CONTENT, identifier=12):
+def release(tag=STABLE_TAG, *, digest=True, kind='installer', body=CONTENT, identifier=12):
     name=f'shiori-{tag[1:]}-{updates.KINDS[kind]}'
     item={'id':identifier*10,'name':name,'state':'uploaded','size':len(body),
           'browser_download_url':updates._asset_url(tag,name)}
@@ -60,6 +61,7 @@ def manager(tmp_path, items=None, *, payload=CONTENT, change=None, download_stat
 def test_semantic_order_and_untrusted_assets():
     assert updates.version_key('v0.1.10')>updates.version_key('0.1.2')
     assert updates.version_key('0.1.2')>updates.version_key('0.1.2-rc.10')>updates.version_key('0.1.2-rc.2')
+    assert updates.version_key('0.2.0') < updates.version_key('0.2.1-beta') < updates.version_key('0.2.1')
     bad=release();bad['assets'][0]['browser_download_url']='https://evil.example/installer.exe'
     assert not updates.normalize_release(bad)['assets']
     bad['draft']=True;assert updates.normalize_release(bad) is None
@@ -68,18 +70,36 @@ def test_semantic_order_and_untrusted_assets():
 
 @pytest.mark.anyio
 async def test_only_explicit_checks_contact_github_and_filter_previews(tmp_path):
-    major, minor, patch = map(int, __version__.split('.'))
+    major, minor, patch = updates.version_key(__version__)[:3]
     preview = f'v{major}.{minor}.{patch + 1}-rc.1'
     item,calls=manager(tmp_path,[release(),release(preview,identifier=13),release('v0.1.0',identifier=10)])
     assert calls==[]
     result=await item.check()
-    assert [x['tag'] for x in result['releases']]==['v'+__version__,'v0.1.0']
+    assert [x['tag'] for x in result['releases']]==[STABLE_TAG,'v0.1.0']
     assert result['releases'][-1]['relation']=='older'
     await item.check();assert len(calls)==1
     result=await item.check(include_prerelease=True)
     assert result['releases'][0]['tag']==preview and len(calls)==2
     for value in [0,True,'1',101]:
         with pytest.raises(ValueError):await item.check(page=value)
+
+
+@pytest.mark.anyio
+async def test_beta_release_requires_opt_in_and_keeps_exact_download_identity(tmp_path, monkeypatch):
+    monkeypatch.setattr(updates, '__version__', '0.2.1-beta')
+    item, calls = manager(tmp_path, [release('v0.2.1-beta'), release('v0.2.1', identifier=13)])
+    result = await item.check()
+    assert [value['tag'] for value in result['releases']] == ['v0.2.1']
+    assert result['releases'][0]['relation'] == 'newer'
+    result = await item.check(include_prerelease=True)
+    beta = next(value for value in result['releases'] if value['prerelease'])
+    assert beta['tag'] == 'v0.2.1-beta' and beta['relation'] == 'current'
+    item.start_download(beta['id'], 'installer')
+    await item._task
+    assert item.download['status'] == 'ready'
+    assert item.download['tag'] == 'v0.2.1-beta'
+    assert item.verified_file(item.download['id']).name == 'shiori-0.2.1-beta-Windows-Setup.exe'
+    assert updates._asset_url(beta['tag'], item.download['name']) in calls
 
 
 @pytest.mark.anyio

@@ -97,7 +97,7 @@ async def test_planner_obeys_clock_switch(tmp_path, enabled):
     settings.update({'model': {'base_url': 'https://fixture.invalid/v1', 'model': 'fixture'},
                      'onebot': {'enabled': True, 'access_token': 'clock-fixture-token-123'},
                      'time': {'awareness_enabled': enabled, 'timezone': 'UTC'}})
-    scope = store.upsert_scope({'id': 'qq:group:202'})
+    scope = store.upsert_scope({'id': 'qq:group:202', 'trigger_at': False})
     engine = SocialEngine(store, settings, model)
     try:
         message = store.add_message(scope['id'], '303', 'user', '你好', at_bot=True)

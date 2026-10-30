@@ -126,6 +126,7 @@ class UpdateManager:
         self.include_prerelease = False
         self._cache, self._check_lock, self._task = {}, asyncio.Lock(), None
         self._launching = False
+        self._cleaning = False
         self._auto_task = None
         self.download = {'status': 'idle', 'message': '尚未下载更新'}
         try:
@@ -167,6 +168,15 @@ class UpdateManager:
         if is_link(target) or is_link(temp): raise ValueError('更新记录包含链接')
         temp.write_text(json.dumps(self.download, ensure_ascii=False), 'utf-8')
         temp.replace(target)
+        identifier = self.download.get('id', '')
+        if re.fullmatch(r'[a-f0-9]{32}', identifier):
+            artifact_folder = folder / identifier
+            if is_link(artifact_folder): raise ValueError('更新目录包含链接')
+            artifact_folder.mkdir(exist_ok=True)
+            artifact = artifact_folder / 'update-artifact.json'
+            if is_link(artifact): raise ValueError('更新管理记录包含链接')
+            artifact.write_text(json.dumps({key: self.download.get(key) for key in
+                ('id', 'tag', 'kind', 'name', 'status', 'started_at')}, ensure_ascii=False), 'utf-8')
 
     def snapshot(self):
         value = copy.deepcopy(self.download)
@@ -254,6 +264,7 @@ class UpdateManager:
             return self.snapshot()
 
     def start_download(self, release_id, kind):
+        if self._cleaning: raise ValueError('正在清理历史更新，请稍后再试')
         if self._auto_task and not self._auto_task.done(): raise ValueError('一键更新进行中，请先取消或等待完成')
         if self._launching: raise ValueError('正在准备安装，请勿切换下载')
         if type(release_id) is not int or not isinstance(kind, str) or kind not in KINDS: raise ValueError('请选择发行版与文件类型')
@@ -351,6 +362,7 @@ class UpdateManager:
         return path
 
     def launch_installer(self, download_id, *, automatic=False):
+        if self._cleaning: raise ValueError('正在清理历史更新，请稍后再试')
         if not self.runtime['install_supported'] or self.download.get('kind') != 'installer':
             raise ValueError('只有 Windows 安装版支持直接启动更新；请下载对应文件手动部署')
         key = version_key(self.download['tag'])
@@ -411,6 +423,7 @@ class UpdateManager:
         return self.snapshot().get('install_result',{}).get('status') in ('preparing','backing_up','replacing','restarting')
 
     def launch_replacement(self, download_id):
+        if self._cleaning: raise ValueError('正在清理历史更新，请稍后再试')
         if not self.runtime.get('switch_supported'): raise ValueError('当前运行环境不支持程序内切换版本；容器请更换镜像')
         path = self.verified_file(download_id)
         target = application_base().resolve()
@@ -494,9 +507,39 @@ def install_updates(app, data_dir):
     def snapshot(request):
         return {**manager.snapshot(), 'local_install_allowed': local_peer(request) and callable(app.state.shutdown),
                 'local_policy_allowed':local_peer(request), 'remote_switch_enabled':app.state.settings.get().get('updates',{}).get('allow_remote',False),
-                'switch_allowed': callable(app.state.shutdown) and (local_peer(request) or app.state.settings.get().get('updates',{}).get('allow_remote',False))}
+                'switch_allowed': callable(app.state.shutdown) and (local_peer(request) or app.state.settings.get().get('updates',{}).get('allow_remote',False)),
+                'storage_cleanup_allowed': local_peer(request) or app.state.settings.get().get('updates',{}).get('allow_remote',False)}
+
+    @app.get('/api/updates/storage')
+    async def update_storage(request: Request):
+        from .update_storage import inventory
+        result = await asyncio.to_thread(inventory, manager)
+        return {**result, 'cleanup_allowed': snapshot(request)['storage_cleanup_allowed']}
+
+    @app.post('/api/updates/storage/cleanup')
+    async def clean_update_storage(request: Request, payload: dict = Body(...)):
+        from .update_storage import cleanup
+        if not snapshot(request)['storage_cleanup_allowed']:
+            raise HTTPException(403, '请在运行电脑上清理，或先由本机授权远程更新管理')
+        if manager._cleaning or manager._launching or manager.snapshot()['automatic_active'] or (manager._task and not manager._task.done()):
+            raise ValueError('更新或清理仍在进行，暂时不能清理历史文件')
+        manager._cleaning = True
+        worker = asyncio.create_task(asyncio.to_thread(cleanup, manager, payload.get('items')))
+        try:
+            return await asyncio.shield(worker)
+        except asyncio.CancelledError:
+            # Do not let a disconnected UI start a new update while deletion is
+            # still running in the worker thread.
+            from .backup_archives import drain_task
+            await drain_task(worker)
+            raise
+        finally:
+            manager._cleaning = False
 
     def check_idle():
+        backups = getattr(app.state, 'backup_exports', None)
+        if backups is not None and backups.busy():
+            raise ValueError('仍在生成备份，请等待完成或取消后更新')
         if any(job['status'] not in TERMINAL for job in app.state.runs.list()):
             raise ValueError('仍有后台任务进行中，请先完成或停止任务再安装')
         if app.state.provider._reservations:

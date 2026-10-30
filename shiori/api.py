@@ -46,6 +46,14 @@ def create_app(data_dir=None, *, start_workers=True, allow_remote=False):
     from .scheduler import TaskScheduler
     onebot = OneBotBridge(store, settings, chat)
     official = OfficialBridge(store, settings, chat)
+    chat.character_schedule.search = chat.search.search
+    schedule_queues = [bridge._flow.schedule_delivery for bridge in (onebot, official)
+                       if getattr(bridge._flow, 'schedule_delivery', None)]
+    chat.character_schedule.queue_status = lambda: [row for queue in schedule_queues for row in queue.status()]
+    def manage_schedule_queue(scope_id, action='clear'):
+        results = [queue.clear_scope(scope_id, action=action) for queue in schedule_queues]
+        return {'ok': True, 'changed': sum(result['changed'] for result in results)}
+    chat.character_schedule.queue_clear = manage_schedule_queue
 
     class Router:
         def status(self):
@@ -69,11 +77,16 @@ def create_app(data_dir=None, *, start_workers=True, allow_remote=False):
             await scheduler.start()
             await chat.knowledge.start()
             await chat.memory_lifecycle.start()
+            await chat.character_schedule.start()
         starter = asyncio.create_task(start_when_ready()) if start_workers else None
         yield
         if starter:
             starter.cancel()
             with contextlib.suppress(asyncio.CancelledError): await starter
+        if app.state.backup_restore is not None:
+            app.state.backup_restore['cancel'].set()
+            await drain_task(app.state.backup_restore['task'])
+        await app.state.backup_exports.close()
         await app.state.updates.close()
         await app.state.runs.close()
         await scheduler.stop()
@@ -84,6 +97,8 @@ def create_app(data_dir=None, *, start_workers=True, allow_remote=False):
 
     app = FastAPI(title='Shiori', version=__version__, lifespan=lifespan, docs_url=None, redoc_url=None)
     install_profiles(app, store, settings)
+    from .chat_workspace import install_chat_workspace
+    install_chat_workspace(app, store)
     app.state.store, app.state.settings, app.state.chat = store, settings, chat
     app.state.search = chat.search
     app.state.provider, app.state.bridge, app.state.scheduler = provider, router, scheduler
@@ -100,8 +115,11 @@ def create_app(data_dir=None, *, start_workers=True, allow_remote=False):
     from .statistics import install_statistics
     install_statistics(app,store,settings,onebot,official)
     app.state.shutdown = None
+    app.state.backup_restore = None
     from .auth_api import install_auth, local_peer, token_matches
     auth_http = install_auth(app, settings, data_dir, allow_remote=allow_remote)
+    from .life_schedule_api import install_character_schedule
+    install_character_schedule(app, chat.character_schedule)
     from .catalog_api import install_catalog
     install_catalog(app, settings, provider, store)
     from .stickers_api import install_stickers
@@ -156,7 +174,10 @@ def create_app(data_dir=None, *, start_workers=True, allow_remote=False):
             size = int(request.headers.get('content-length', '0') or 0)
         except ValueError:
             return JSONResponse({'detail': '请求长度格式错误'}, status_code=400)
+        from .backup_archives import MAX_ARCHIVE_BYTES
         maximum = 8192 if request.url.path.startswith('/api/auth/') or request.url.path == '/api/session' else settings.get()['scheduler'].get('request_max_mb', 32) * 1024 * 1024
+        if request.url.path == '/api/backup/restore':
+            maximum = MAX_ARCHIVE_BYTES + 1024 * 1024  # multipart envelope
         if size > maximum:
             return JSONResponse({'detail': '请求内容超过大小限制'}, status_code=413)
         if request.url.path.startswith('/api/'):
@@ -175,12 +196,25 @@ def create_app(data_dir=None, *, start_workers=True, allow_remote=False):
             if updating and not (request.url.path.startswith('/api/updates') or request.url.path in ('/api/auth/status','/api/auth/login','/api/auth/logout','/api/shutdown')):
                 return JSONResponse({'detail':'正在切换版本并检查启动状态，请稍后重试','code':'update_in_progress'},status_code=503)
             if request.method in ('POST','PUT','PATCH'):
-                raw = bytearray()
-                async for chunk in request.stream():
-                    raw.extend(chunk)
-                    if len(raw) > maximum:
-                        return JSONResponse({'detail': '请求体超过大小限制'}, status_code=413)
-                request._body = bytes(raw)
+                if request.url.path == '/api/backup/restore':
+                    # Let multipart UploadFile spool to disk. Keep a receive cap
+                    # even when a proxy omits or understates Content-Length.
+                    receive, received = request._receive, 0
+                    async def bounded_receive():
+                        nonlocal received
+                        message = await receive()
+                        received += len(message.get('body', b''))
+                        if received > maximum:
+                            raise HTTPException(413, '请求体超过大小限制')
+                        return message
+                    request._receive = bounded_receive
+                else:
+                    raw = bytearray()
+                    async for chunk in request.stream():
+                        raw.extend(chunk)
+                        if len(raw) > maximum:
+                            return JSONResponse({'detail': '请求体超过大小限制'}, status_code=413)
+                    request._body = bytes(raw)
         is_api = request.url.path.startswith('/api/')
         exclusive = request.url.path == '/api/backup/restore'
         if is_api:
@@ -199,14 +233,28 @@ def create_app(data_dir=None, *, start_workers=True, allow_remote=False):
                     active_requests += 1
         try:
             result = await call_next(request)
+        except asyncio.CancelledError:
+            if exclusive and app.state.backup_restore is not None:
+                app.state.backup_restore['cancel'].set()
+            raise
         finally:
             if is_api:
-                async with request_gate:
-                    if exclusive:
-                        maintenance = False
-                    else:
-                        active_requests -= 1
-                    request_gate.notify_all()
+                import anyio
+                with anyio.CancelScope(shield=True):
+                    workspace_worker = getattr(request.state, 'chat_workspace_worker', None)
+                    if workspace_worker is not None:
+                        await drain_task(workspace_worker)
+                    # call_next can be cancelled before its endpoint finishes.
+                    # Keep maintenance until every restore thread is drained,
+                    # and the commit or rollback has really completed.
+                    if exclusive and app.state.backup_restore is not None:
+                        await drain_task(app.state.backup_restore['task'])
+                    async with request_gate:
+                        if exclusive:
+                            maintenance = False
+                        else:
+                            active_requests -= 1
+                        request_gate.notify_all()
         result.headers['X-Content-Type-Options'] = 'nosniff'
         result.headers['Referrer-Policy'] = 'no-referrer'
         result.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
@@ -657,10 +705,16 @@ def create_app(data_dir=None, *, start_workers=True, allow_remote=False):
                            authenticated=lambda: auth_http.authenticated(request))
 
     def memory_payload(payload):
+        from .memory_events import normalize_episode, episode_content
         data = dict(payload)
         data.setdefault('scope_id', 'web:default')
         data.setdefault('user_id', 'owner')
         data.setdefault('visibility', 'group' if ':group:' in data['scope_id'] else 'private')
+        if data.get('episode') is not None:
+            if data.get('kind') != 'event':
+                raise ValueError('只有事件记忆可以包含 episode')
+            data['episode'] = normalize_episode(data['episode'])
+            data['content'] = episode_content(data['episode'])
         maximum = 300000 if data.get('kind') == 'note' else 6000
         if not str(data.get('content', '')).strip() or len(str(data['content'])) > maximum:
             raise ValueError(f'记忆内容需为 1—{maximum} 个字符')
@@ -671,25 +725,36 @@ def create_app(data_dir=None, *, start_workers=True, allow_remote=False):
         return data
 
     @app.get('/api/memories')
-    async def memories(scope_id: str | None = None, q: str = '', status: str | None = None, limit: int | None = None, offset: int = 0):
+    async def memories(scope_id: str | None = None, q: str = '', status: str | None = None, kind: str | None = None, limit: int | None = None, offset: int = 0):
         if limit is None:
-            return await asyncio.to_thread(store.list_memories, scope_id=scope_id, q=q, status=status)
-        return await asyncio.to_thread(store.memory_page, scope_id, q, status, limit=limit, offset=offset)
+            return await asyncio.to_thread(store.list_memories, scope_id=scope_id, q=q, status=status, kind=kind)
+        return await asyncio.to_thread(store.memory_page, scope_id, q, status, kind=kind, limit=limit, offset=offset)
 
     @app.post('/api/memories')
     async def new_memory(payload: dict = Body(...)): return store.create_memory(memory_payload(payload))
 
+    @app.get('/api/memories/{id}')
+    async def memory_detail(id: str):
+        return await asyncio.to_thread(store.get_memory, id)
+
+    @app.get('/api/memories/{id}/sources')
+    async def memory_sources(id: str, limit: int = 20, offset: int = 0):
+        return await asyncio.to_thread(store.memory_sources_page, id, limit=limit, offset=offset)
+
     @app.put('/api/memories/{id}')
     async def edit_memory(id: str, payload: dict = Body(...)):
-        if 'content' in payload or 'shareable' in payload or 'visibility' in payload:
-            memory_payload(dict(store.get_memory(id), **payload))
+        if {'content', 'episode', 'kind', 'shareable', 'visibility'} & payload.keys():
+            merged = dict(store.get_memory(id), **payload)
+            if 'content' in payload and 'episode' not in payload:
+                merged.pop('episode', None)
+            memory_payload(merged)
         return store.update_memory(id, payload)
 
     @app.get('/api/memory/candidates')
-    async def memory_candidates(scope_id: str | None = None, q: str = '', limit: int | None = None, offset: int = 0):
+    async def memory_candidates(scope_id: str | None = None, q: str = '', kind: str | None = None, limit: int | None = None, offset: int = 0):
         if limit is None:
-            return await asyncio.to_thread(store.list_memories, scope_id=scope_id, q=q, status='pending')
-        return await asyncio.to_thread(store.memory_page, scope_id, q, 'pending', limit=limit, offset=offset)
+            return await asyncio.to_thread(store.list_memories, scope_id=scope_id, q=q, status='pending', kind=kind)
+        return await asyncio.to_thread(store.memory_page, scope_id, q, 'pending', kind=kind, limit=limit, offset=offset)
 
     @app.get('/api/memory/search')
     async def memory_search(scope_id: str = 'web:default', user_id: str = 'owner', q: str = ''):
@@ -796,6 +861,11 @@ def create_app(data_dir=None, *, start_workers=True, allow_remote=False):
     @app.get('/api/expressions')
     async def expressions(scope_id: str | None = None, status: str | None = None):
         return [x for x in store.list_jargon(scope_id=scope_id, status=status) if x.get('entry_type') == 'expression']
+
+    @app.get('/api/jargon/{id}/evidence')
+    async def jargon_evidence(id: str, offset: int = 0, limit: int = 50):
+        from .jargon_evidence import evidence_page
+        return await asyncio.to_thread(evidence_page, store, id, offset=offset, limit=limit)
 
     @app.post('/api/expressions/analyze')
     async def analyze_expressions(payload: dict = Body(...)):
@@ -979,63 +1049,113 @@ def create_app(data_dir=None, *, start_workers=True, allow_remote=False):
                                                  'document': {key: value for key, value in parsed.items() if key != 'text'}, 'pinned': True})
         return {'filename': name, **{key: value for key, value in parsed.items() if key != 'text'}, 'text': parsed['text'][:2000], 'memory': memory, 'duplicate': bool(existing)}
 
+    def backup_auxiliary():
+        public = settings.public()
+        public['paused'] = True
+        public['onebot']['enabled'] = False
+        public['qq_official']['enabled'] = False
+        public['webui']['remote_enabled'] = False
+        files = {'settings.json': json.dumps(public, ensure_ascii=False)}
+        includes = ['personas', 'messages', 'memories', 'jargon', 'tasks', 'usage', 'events']
+        warnings = []
+        if chat.knowledge.status().get('degraded'):
+            warnings.append('人格知识损坏，未包含在此备份中；原件仍在data，请单独保留。')
+        else:
+            files['persona_knowledge.json'] = chat.knowledge.export_state()
+            includes.append('persona_knowledge')
+        files['tool_history.json'] = chat.tool_actions.export_history()
+        includes.append('tool_history_read_only')
+        files['jobs_history.json'] = json.dumps(app.state.runs.export_history(), ensure_ascii=False)
+        includes.append('jobs_history_read_only')
+        warnings.append('任务语料、Skill包与工作目录文件需单独保存；任务历史恢复后只读，不重放。')
+        warnings.append('表情包图片库需在机器人配置→表情包中单独备份；本备份不包含图片。')
+        if chat.tool_actions.recovery_warning:
+            warnings.append('旧工具台账有恢复警告，损坏原件仍需单独保留。')
+        files['manifest.json'] = json.dumps({'version': __version__,
+            'created_at': datetime.now(timezone.utc).isoformat(), 'secrets_included': False,
+            'includes': includes, 'warnings': warnings}, ensure_ascii=False)
+        return files
+
+    from .backup_archives import (BackupExports, extract_archive, spool_upload, require_space,
+                                  drain_task, restore_thread)
+    backups = app.state.backup_exports = BackupExports(data_dir, store, backup_auxiliary)
+
+    @app.post('/api/backup/jobs')
+    async def start_backup():
+        return backups.start()
+
+    @app.get('/api/backup/jobs/current')
+    async def current_backup():
+        return backups.snapshot()
+
+    @app.post('/api/backup/jobs/{identifier}/cancel')
+    async def cancel_backup(identifier: str):
+        try:
+            return backups.cancel(identifier)
+        except KeyError:
+            raise HTTPException(404, '备份任务不存在或已失效')
+
+    @app.get('/api/backup/jobs/{identifier}/file')
+    async def download_backup(identifier: str):
+        return backups.download(identifier)
+
     @app.get('/api/backup')
     async def backup():
-        with tempfile.TemporaryDirectory(dir=data_dir) as temporary:
-            dbpath = Path(temporary) / 'qunyu.db'
-            store.backup(dbpath)
-            buffer = io.BytesIO()
-            with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_DEFLATED) as archive:
-                archive.write(dbpath, 'qunyu.db')
-                public = settings.public()
-                public['paused'] = True
-                public['onebot']['enabled'] = False
-                public['qq_official']['enabled'] = False
-                public['webui']['remote_enabled'] = False
-                archive.writestr('settings.json', json.dumps(public, ensure_ascii=False))
-                includes = ['personas', 'messages', 'memories', 'jargon', 'tasks', 'usage', 'events']
-                warnings = []
-                if chat.knowledge.status().get('degraded'):
-                    warnings.append('人格知识损坏，未包含在此备份中；原件仍在data，请单独保留。')
-                else:
-                    archive.writestr('persona_knowledge.json', chat.knowledge.export_state())
-                    includes.append('persona_knowledge')
-                archive.writestr('tool_history.json', chat.tool_actions.export_history())
-                includes.append('tool_history_read_only')
-                archive.writestr('jobs_history.json',json.dumps(app.state.runs.export_history(),ensure_ascii=False))
-                includes.append('jobs_history_read_only')
-                warnings.append('任务语料、Skill包与工作目录文件需单独保存；任务历史恢复后只读，不重放。')
-                warnings.append('表情包图片库需在机器人配置→表情包中单独备份；本备份不包含图片。')
-                if chat.tool_actions.recovery_warning:
-                    warnings.append('旧工具台账有恢复警告，损坏原件仍需单独保留。')
-                archive.writestr('manifest.json', json.dumps({'version': __version__, 'created_at': datetime.now(timezone.utc).isoformat(), 'secrets_included': False, 'includes': includes, 'warnings':warnings}, ensure_ascii=False))
-        return Response(buffer.getvalue(), media_type='application/zip', headers={'Content-Disposition': f'attachment; filename="shiori-backup-{datetime.now().strftime("%Y%m%d-%H%M%S")}.zip"'})
+        task = backups.start()
+        result = await backups.wait(task['id'])
+        if result['status'] != 'completed':
+            raise ValueError(result['message'])
+        return backups.download(task['id'])
 
     @app.post('/api/backup/restore')
     async def restore(file: UploadFile = File(...)):
-        raw = await file.read(16 * 1024 * 1024 + 1)
-        if len(raw) > 16 * 1024 * 1024:
-            raise ValueError('备份超过首版 16MB 恢复限制')
+        if backups.busy():
+            raise ValueError('备份正在生成，请完成或取消后再恢复')
+        cancelled = asyncio.Event()
+        task = asyncio.create_task(restore_contents(file, cancelled))
+        operation = {'task': task, 'cancel': cancelled}
+        app.state.backup_restore = operation
         try:
-            archive = zipfile.ZipFile(io.BytesIO(raw))
-            if set(archive.namelist()) - {'qunyu.db', 'settings.json', 'manifest.json', 'persona_knowledge.json','tool_history.json','jobs_history.json'} or 'qunyu.db' not in archive.namelist() or len(archive.namelist()) != len(set(archive.namelist())):
-                raise ValueError('备份内容不符合格式')
-            if sum(x.file_size for x in archive.infolist()) > 64 * 1024 * 1024:
-                raise ValueError('备份解压体积过大')
+            return await asyncio.shield(task)
+        except asyncio.CancelledError:
+            cancelled.set()
+            await drain_task(task)
+            raise
+        finally:
+            if task.done() and app.state.backup_restore is operation:
+                app.state.backup_restore = None
+
+    async def restore_contents(file, cancelled):
+        def check_preparation():
+            if cancelled.is_set():
+                raise ValueError('恢复已取消，原始数据未修改')
+        try:
             with tempfile.TemporaryDirectory(dir=data_dir) as temporary:
-                candidate = Path(temporary) / 'restore.db'
-                candidate.write_bytes(archive.read('qunyu.db'))
-                store.restore_from(candidate, validate_only=True)
+                folder = Path(temporary)
+                uploaded = folder / 'upload.zip'
+                await restore_thread(spool_upload, file.file, uploaded)
+                check_preparation()
+                members = await restore_thread(extract_archive, uploaded, folder)
+                check_preparation()
+                candidate = members['qunyu.db']
+                await restore_thread(store.restore_from, candidate, validate_only=True)
+                check_preparation()
+                # Keep room for the original safety snapshot, SQLite copy-on-
+                # write/journal work, and a rollback before stopping workers.
+                await restore_thread(require_space, data_dir,
+                    3 * max(candidate.stat().st_size, store.path.stat().st_size))
+                def read_member(name, default):
+                    return json.loads(members[name].read_text('utf-8')) if name in members else default
                 from .knowledge import PersonaKnowledge
-                knowledge_state = json.loads(archive.read('persona_knowledge.json')) if 'persona_knowledge.json' in archive.namelist() else {'version':1,'items':[],'budget':{'day':'','searches':0},'personas':{}}
+                knowledge_state = read_member('persona_knowledge.json', {'version':1,'items':[],'budget':{'day':'','searches':0},'personas':{}})
                 PersonaKnowledge.validate_state(knowledge_state)
                 from .tool_actions import ToolActions
-                tool_history=json.loads(archive.read('tool_history.json')) if 'tool_history.json' in archive.namelist() else {'version':1,'runs':[]}
+                tool_history=read_member('tool_history.json', {'version':1,'runs':[]})
                 ToolActions.validate_history(tool_history)
                 from .runs import RunManager
-                jobs_history=json.loads(archive.read('jobs_history.json')) if 'jobs_history.json' in archive.namelist() else {'version':1,'jobs':[]}
+                jobs_history=read_member('jobs_history.json', {'version':1,'jobs':[]})
                 RunManager.validate_history(jobs_history)
-                cfg = json.loads(archive.read('settings.json')) if 'settings.json' in archive.namelist() else {}
+                cfg = read_member('settings.json', {})
                 if not isinstance(cfg, dict) or any(section in cfg and not isinstance(cfg[section], dict) for section in ('model', 'onebot', 'qq_official', 'budget', 'memory', 'routing', 'context', 'identity', 'output', 'exploration','planner','access','computer','webui','search')):
                     raise ValueError('备份设置格式不正确')
                 cfg['paused'] = True
@@ -1066,6 +1186,9 @@ def create_app(data_dir=None, *, start_workers=True, allow_remote=False):
                 previous_jobs=json.dumps(app.state.runs._jobs,ensure_ascii=False)
                 safety = data_dir / ('before-restore-' + datetime.now().strftime('%Y%m%d-%H%M%S-%f') + '.db')
                 snapshotted = False
+                check_preparation()
+                # Past this point an HTTP disconnect must not interrupt the
+                # commit/rollback. The separately owned operation is drained.
                 try:
                     settings.update({'paused': True})
                     await app.state.runs.close()
@@ -1073,26 +1196,28 @@ def create_app(data_dir=None, *, start_workers=True, allow_remote=False):
                     await onebot.stop()
                     await official.stop()
                     await chat.close()
-                    store.backup(safety)
+                    await restore_thread(store.backup, safety)
                     snapshotted = True
-                    store.restore_from(candidate)
+                    await restore_thread(store.restore_from, candidate)
                     settings.update(cfg)
                     auth_http.allow_remote = False
                     knowledge_path.write_text(json.dumps(knowledge_state, ensure_ascii=False), 'utf-8')
                     ledger_path.write_text('[]','utf-8')
                     chat.reset_engines()
+                    for queue in schedule_queues:
+                        queue.reload(restored=True)
                     chat.tool_actions.import_history(current_history)
                     chat.tool_actions.import_history(tool_history)
                     app.state.runs.import_history(jobs_history)
                     chat.memory.clear_index()
-                except Exception as exc:
+                except (Exception, asyncio.CancelledError) as exc:
                     app.state.runs._jobs=json.loads(previous_jobs)
                     for restored_job in app.state.runs._jobs.values():
                         if restored_job.get('status') not in ('completed','failed','cancelled','interrupted'):
                             restored_job.update(status='interrupted',approval=None,error='恢复已回滚，原任务停止，未自动重放')
                     app.state.runs._save()
                     if snapshotted:
-                        store.restore_from(safety)
+                        await restore_thread(store.restore_from, safety)
                     settings.update(previous)
                     if previous_knowledge is None:
                         knowledge_path.unlink(missing_ok=True)
@@ -1101,15 +1226,19 @@ def create_app(data_dir=None, *, start_workers=True, allow_remote=False):
                     if previous_ledger is None: ledger_path.unlink(missing_ok=True)
                     else: ledger_path.write_bytes(previous_ledger)
                     chat.reset_engines()
+                    for queue in schedule_queues:
+                        queue.reload()
                     chat.memory.clear_index()
                     if start_workers:
                         await reconnect()
                         await scheduler.start()
                         await chat.knowledge.start()
+                        await chat.character_schedule.start()
                     raise ValueError('恢复失败，已保留恢复前数据与设置') from exc
                 if start_workers:
                     await scheduler.start()
                     await chat.knowledge.start()
+                    await chat.character_schedule.start()
         except (zipfile.BadZipFile, sqlite3.Error, KeyError, json.JSONDecodeError, TypeError, OverflowError) as exc:
             raise ValueError('备份无效或版本不兼容') from exc
         return {'ok': True, 'message': '已恢复并暂停运行。工具回执与任务历史仅供查看，不会重新执行。密钥不在备份内，请重新配置、检查任务后恢复运行。'}
@@ -1129,6 +1258,8 @@ def create_app(data_dir=None, *, start_workers=True, allow_remote=False):
     index = index.replace('?v=' + __version__, '?v=' + __version__ + '&amp;rev=' + revision)
 
     @app.get('/', include_in_schema=False)
+    @app.get('/chat', include_in_schema=False)
+    @app.get('/chat/', include_in_schema=False)
     @app.get('/index.html', include_in_schema=False)
     async def ui_document():
         return Response(index, media_type='text/html', headers={'Cache-Control':'no-store'})

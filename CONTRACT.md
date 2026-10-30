@@ -1,8 +1,8 @@
-# Shiori 0.1.6 集成约定
+# Shiori 0.2.1-beta 集成约定
 
-本文描述0.1.6源码集成约定，版本发布与下载以GitHub实际公开资产为准；旧版不保证具备本版新增接口。
+本文描述本地0.2.1-beta源码集成约定，版本发布与下载以GitHub实际公开资产为准；旧版不保证具备本版新增接口。
 
-本文供当前源码开发与接入使用，运行时校验以 `shiori/api.py`、`experience_api.py` 及对应服务为准。历史内部版本说明归档于 `docs/archive/`，不覆盖当前约定。产品名为 **Shiori**，核心包为 `shiori`；`mikubot`、`qunyu` 仅为旧导入和启动兼容层，计划在 **0.3.0** 移除，新集成应直接使用 `shiori`。本次改名仅在本地完成，GitHub 仓库地址维持 `iownmmiku/mikubot`。
+本文供当前源码开发与接入使用，运行时校验以 `shiori/api.py`、`experience_api.py` 及对应服务为准。历史内部版本说明归档于 `docs/archive/`，不覆盖当前约定。产品名为 **Shiori**，核心包为 `shiori`；`mikubot`、`qunyu` 仅为旧导入和启动兼容层，计划在 **0.3.0** 移除，新集成应直接使用 `shiori`。主仓库为 `iownmmiku/Shiori`，旧 `mikubot` 仓库只提供迁移说明。
 
 ## 运行与认证
 
@@ -33,6 +33,26 @@ Python 3.11–3.13（推荐3.12），FastAPI、SQLite；正式入口为 `python 
 `AccessManager` 在本机或平台认证入口签发内部身份凭据，任务每一步、审批及继续时复核。私聊/群允许列表只控制聊天资格。普通用户可以使用允许的记忆、计算、待办等聊天工具，不获得本机电脑能力或配置管理权限。
 
 ## 新工作流接口
+
+### 事件记忆（0.2.1-beta 本地开发）
+
+- `GET /api/memories`、`GET /api/memory/candidates` 支持 `kind=event|fact|preference|note`；类型条件在 SQL 分页前生效。`GET /api/memories/{id}` 读取完整记录，不使用搜索片段代替正文。
+- `GET /api/memories/{id}/sources?limit=20&offset=0` 返回 `items,total,limit,offset,next_offset,has_more`，limit 为 1–200。每项含 `id,available,message` 及不可用时的 `reason`；须通过当前来源的会话、身份、指纹和撤销校验。所有接口均需管理台认证。
+- 仅 `kind=event` 可以包含可选 `episode`：`title` 最多 120 字、`summary` 500 字、必填 `narrative` 3600 字、`location` 200 字、`outcome` 600 字；`participants` 为最多 8 项、每项最多 80 字的原文称呼数组。额外字段与不合法类型拒绝。服务端生成最多 6000 字的标准 `content`，进入既有索引和版本校验。
+- `episode:null` 清除结构；仅更新 `content` 而不提供 `episode` 时清除旧结构，避免正文和结构不一致。旧文本事件继续可用。事件日期仍使用记录级时间字段，不从结构内推断权限或来源；结束时间不得早于开始时间。
+- 自动候选仅接受模型返回的内容字段，原消息指纹由服务端事务生成；旧记录缺少指纹时来源不可核验，不自动补造。来源 API 为管理视图，聊天召回仍使用原作用域权限检查。
+
+### 本地项目与 QQ 监控（0.2.1-beta 本地开发）
+
+`GET /chat` 返回与 `/` 相同的登录外壳，不绕过认证。下列 `/api` 均使用管理台认证：
+
+- `GET /api/chat/workspace` 返回 projects、conversations 和 truncated；会话为组织摘要，实际人格、模型和配置仍从 `/api/scopes` 读取。
+- `POST /api/chat/projects {name,description?}`、`PATCH /api/chat/projects/{id} {name?,description?,archived?}`、`DELETE /api/chat/projects/{id}`。删除仅移除项目和归属，不删除消息或记忆。
+- `POST /api/chat/conversations {name?,project_id?}`、`PATCH /api/chat/conversations/{scope_id} {name?,project_id?,pinned?,archived?}` 仅接受 `web:` 会话。组织字段写入 scope 的 `chat_workspace`，不会变更配置继承、记忆空间或管理员权限。
+- `GET /api/qq/chats?limit=200&offset=0` 返回 items、total、has_more。limit 为 1–500；仅列出 OneBot 与官方 QQ 的群聊/私聊。last_message 只有前 300 字与图片数量等轻量预览，不含图片正文。
+- `GET /api/qq/chats/{scope_id}/messages?limit=80&before=ID` 或 `after=ID`；两个游标不能同时传入，且必须属于同会话。返回从旧到新排列的完整 items、has_more、next_before、next_after；limit 为 1–200。这里只读，不派发模型或 QQ 消息。
+
+当前上限为 200 个项目、2000 个本地会话。项目是组织元数据，既不形成共享提示词，也不授予文件系统访问权限。`chat_projects` 随完整备份保存；允许缺少此表的旧备份恢复后自动建空表。
 
 以下入口都需要本地管理台认证；QQ 任务另由连接器认证入口转交，禁止由 HTTP 请求冒充 QQ 身份。
 
@@ -74,6 +94,16 @@ Python 3.11–3.13（推荐3.12），FastAPI、SQLite；正式入口为 `python 
 
 `GET /api/knowledge/status` 的人格计划提供 `disabled_reason`；可选 `last_result` 记录最近一次完成时间、原兴趣、实际查询、各结果数量和最多12条过滤明细。诊断地址移除查询参数与片段，详情总计最多128KiB并受人格知识整文件5MiB上限约束；容量紧张时先清理详情，保留完成消息。旧备份可以没有这些字段。并列主题通过可选 `focus_cursors`、`last_focus` 保留轮换进度，知识条目仍关联原兴趣；跳过排除主题不消耗探索次数。全局与人格自动探索开关不因迁移改变，手动探索也不绕过来源、暂停与额度检查。详见[人格兴趣探索](docs/INTEREST_EXPLORATION.md)。
 
+## 群聊提及回应（0.2.1-beta，本地待发布）
+
+`identity.respond_to_at` / `respond_to_name` 与有效会话 `trigger_at` / `trigger_name` 的 true 表示直接生成回复，false 表示仍识别对应 @ / 名称提及并单独交给 Planner，不作为普通群消息等待集中判断。机器人配置和会话字段 null 保留原继承规则；不改字段名或已有配置值。有效 `plan_enabled` 关闭或判断模型不可用时，false 模式不会自行强制回应。`trigger_reply` 的引用回复行为不变。
+
+防抖在触发决策之前进行，同群来源统一收集后仅处理一轮；真实原消息作者、指纹、暂停/准入、代际失效与工具授权继续复核。日程延后仍优先暂存，释放后使用同一流程。直接回复只省去参与判断，不绕过生成预算、来源或发送检查。
+
+`always_reply:true` 对群聊与私聊均生效，跳过 Planner，但不越过防抖、暂停、准入、日程及来源检查。会话更新只提交变化项；`inherit_fields` 接受明确的可继承字段白名单，原子删除该字段的会话值与覆盖标记，保留其他覆盖。
+
+人格知识引用按 ID 和当前内容指纹核验，不为流式每个片段遍历整个知识库；过期、撤权、人格与来源规则仍实时生效。普通 QQ 图片在会话锁外预取，全服务最多三个下载，整批共享 15 秒期限；超时后的工作线程在真正结束前继续占用名额。下载后重新核对原消息、图片来源和有效开关。
+
 ## 任务执行边界
 
 常规聊天默认 `output.mode: model`，生成提示词要求独立消息用空行分隔，单换行属于条内排版；完整代码与JSON保护。`reply_parts`记录在助手消息元数据并在聊天API返回，原正文及来源仍按一条逻辑回复保存。发送端只读这些生成边界，保留条数/传输上限和每条权限复核。旧`target_chars/max_chars`仅在显式`mode: length`时用于兼容；关闭输出分段仍保留传输上限。
@@ -95,5 +125,11 @@ Python 3.11–3.13（推荐3.12），FastAPI、SQLite；正式入口为 `python 
 `context.recent_turns`默认24，范围1—100；近期窗口按用户轮次对齐，仍受发送历史消息数与字符上限限制。`max_history_messages`只限制对话模型的原文，不限制自动摘要的独立有界候选批次。时间召回保持规范消息与指纹不变，展示改写在校验后进行，并作为历史参考而非新用户轮次。`context_compressed=true`仅用于实际发送有效摘要的轮次；摘要无法容纳时恢复原文并报告false。提取游标采用created_at与插入顺序，首次无一天截断，分页前排除遗忘来源。详见[整改与验收边界](docs/HISTORY_PIPELINE_AUDIT.md)。
 
 完整应用备份含数据库、脱敏设置、人格知识、只读工具与后台任务历史。恢复后暂停、断开通道、清除密钥，历史审批无效、操作不重放。原始语料、附件、Skill ZIP、电脑工作目录及任意用户文件不应被视为已随应用备份打包，需另行保留。插件源码 `plugins/` 与工作目录产物、表情包 `stickers/library.sqlite3` 也需独立备份；表情包页面提供独立库导出。
+
+备份导出使用 `POST /api/backup/jobs`、`GET /api/backup/jobs/current`、`POST /api/backup/jobs/{id}/cancel` 和 `GET /api/backup/jobs/{id}/file`。单进程只保留一个临时导出任务，状态为 `idle/running/completed/cancelled/failed`，任务 ID 为 32 位十六进制。旧 `GET /api/backup` 保留等待下载兼容。导入导出统一限制为 ZIP 256 MiB、展开总量 1 GiB、辅助 JSON 每项 16 MiB；使用磁盘流式处理，并验证文件名、重复成员、压缩类型、CRC、结构与磁盘余量。已认证恢复上传走单独有界 multipart 管道；其他管理 API 和登录上限不变。
+
+`GET /api/jargon/{id}/evidence?offset=0&limit=50` 按原始消息 ID 返回分页证据；最多 50 项，分别标明 available/missing/unavailable，不回退旧文本快照。`GET /api/updates/storage` 返回更新占用和可清理状态，`POST /api/updates/storage/cleanup` 接收 `items:[{id,fingerprint}]`，在当前状态与预览指纹一致时才删除明确选择的历史任务。沿用远程更新权限；当前任务、最新恢复备份和恢复状态未知的目录不可清理。
+
+运行失败回执 `metadata.failure_feedback` 保留在消息记录供界面与日志排障，不送入聊天、Planner 或新摘要。包含该类来源的旧摘要在使用时失效并回退有效原消息，不破坏性改写历史记录。
 
 测试不连接用户真实 QQ，也不默认请求收费模型。真实模型回放必须显式开启，合成路由案例只验证回归路径，不证明智能质量。正式交付验证记录在 `TEST_REPORT.md`。

@@ -6,16 +6,19 @@ FTS5 is optional: an ordinary inverted table supplies the same bounded API.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 import json
 import logging
 import math
 import sqlite3
+import time
 
 
 LOGGER = logging.getLogger(__name__)
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 BUILD_BATCH = 64
 QUERY_TERMS = 64
+BUILD_SECONDS = 0.04
 
 
 def query_terms(text):
@@ -60,6 +63,7 @@ class MemorySearchIndex:
         self.mode = 'uninitialized'
         self.warning = ''
         self.initialized = False
+        self.pending_sync = None
         try:
             self._open()
         except sqlite3.DatabaseError:
@@ -80,6 +84,9 @@ class MemorySearchIndex:
         version = self.connection.execute('PRAGMA user_version').fetchone()[0]
         if version not in (0, SCHEMA_VERSION):
             raise sqlite3.DatabaseError('memory search schema changed')
+        tables = {row[0] for row in self.connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if version == SCHEMA_VERSION and not {'documents', 'postings', 'source_state', 'index_state'} <= tables:
+            raise sqlite3.DatabaseError('memory search tables missing')
         self.connection.executescript("""
             CREATE TABLE IF NOT EXISTS documents (
                 row_id INTEGER PRIMARY KEY, id TEXT NOT NULL UNIQUE,
@@ -92,6 +99,10 @@ class MemorySearchIndex:
             CREATE TABLE IF NOT EXISTS postings (
                 term TEXT NOT NULL,row_id INTEGER NOT NULL,PRIMARY KEY(term,row_id));
             CREATE INDEX IF NOT EXISTS postings_document ON postings(row_id);
+            CREATE TABLE IF NOT EXISTS source_state (
+                id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS index_state (
+                key TEXT PRIMARY KEY, value TEXT NOT NULL);
         """)
         try:
             self._create_fts()
@@ -103,6 +114,18 @@ class MemorySearchIndex:
             self.warning = 'FTS5不可用，记忆候选检索已使用普通倒排索引。'
             LOGGER.warning(self.warning)
         self.connection.execute(f'PRAGMA user_version={SCHEMA_VERSION}')
+        stored_mode = self.connection.execute("SELECT value FROM index_state WHERE key='mode'").fetchone()
+        incomplete_fts = (self.mode == 'fts5' and
+            self.connection.execute('SELECT COUNT(*) FROM memory_fts').fetchone()[0] !=
+            self.connection.execute('SELECT COUNT(*) FROM documents').fetchone()[0])
+        if stored_mode is None or stored_mode[0] != self.mode or incomplete_fts:
+            # A cache built without FTS cannot reuse empty/new FTS tables later.
+            self.connection.execute('DELETE FROM source_state')
+            self.connection.execute('DELETE FROM documents')
+            self.connection.execute('DELETE FROM postings')
+            if self.mode == 'fts5':
+                self.connection.execute('DELETE FROM memory_fts')
+            self.connection.execute("INSERT OR REPLACE INTO index_state VALUES('mode',?)", (self.mode,))
         self.connection.commit()
 
     def recreate(self):
@@ -114,6 +137,7 @@ class MemorySearchIndex:
         self._open()
 
     def close(self):
+        self.pending_sync = None
         if self.connection is not None:
             self.connection.close()
             self.connection = None
@@ -154,28 +178,69 @@ class MemorySearchIndex:
                 self.connection.execute('DELETE FROM postings WHERE row_id=?', (row[0],))
             self.connection.execute('DELETE FROM documents WHERE row_id=?', (row[0],))
 
-    def sync(self, source, dirty=None):
-        """Decode all bodies once, then only modified IDs; main schema is untouched."""
-        rebuild = not self.initialized or dirty is None
+    def start_sync(self, dirty=None):
+        """Prepare a resumable pass. Store serializes each bounded step.
+
+        A full pass records hashes for existing rows and uses a rowid cursor,
+        never keeping a main-database cursor/transaction between batches.
+        Store catches writes between batches and schedules a dirty catch-up or
+        restarts validation after external edits, rollback or restore.
+        """
+        self.initialized = False
+        if dirty is None:
+            self.pending_sync = {'mode': 'full', 'rowid': 0,
+                'remaining': dict(self.connection.execute('SELECT id,fingerprint FROM source_state'))}
+        else:
+            self.pending_sync = {'mode': 'dirty', 'ids': list(dirty)}
+
+    def sync_step(self, source):
+        """Process at most 64 records / roughly 40ms, then release Store lock."""
+        pending = self.pending_sync
+        if pending is None:
+            return True
+        started = time.monotonic()
         with self.connection:
-            if rebuild:
-                if self.mode == 'fts5':
-                    self.connection.execute('DELETE FROM memory_fts')
-                self.connection.execute('DELETE FROM postings')
-                self.connection.execute('DELETE FROM documents')
-                cursor = source.execute("SELECT data FROM memories WHERE status='active' ORDER BY rowid")
-                while rows := cursor.fetchmany(BUILD_BATCH):
-                    for row in rows:
-                        self._replace(json.loads(row[0]))
+            if pending['mode'] == 'full':
+                rows = source.execute('SELECT rowid,id,data FROM memories WHERE rowid>? ORDER BY rowid LIMIT ?',
+                                      (pending['rowid'], BUILD_BATCH)).fetchall()
+                processed = 0
+                for rowid, identifier, raw in rows:
+                    fingerprint = hashlib.sha256(raw.encode('utf-8')).hexdigest()
+                    if pending['remaining'].pop(identifier, None) != fingerprint:
+                        self._replace(json.loads(raw))
+                        self.connection.execute('INSERT OR REPLACE INTO source_state VALUES(?,?)', (identifier, fingerprint))
+                    pending['rowid'] = rowid
+                    processed += 1
+                    if time.monotonic() - started >= BUILD_SECONDS:
+                        break
+                if processed == len(rows) and len(rows) < BUILD_BATCH:
+                    self.pending_sync = {'mode': 'deleted', 'ids': list(pending['remaining'])}
             else:
-                keys = list(dirty)
-                for start in range(0, len(keys), BUILD_BATCH):
-                    part = keys[start:start + BUILD_BATCH]
-                    for identifier in part:
-                        self._remove(identifier)
-                    rows = source.execute('SELECT data FROM memories WHERE id IN (' + ','.join('?' for _ in part) + ')', part)
-                    for row in rows:
-                        self._replace(json.loads(row[0]))
+                keys = pending['ids'][-BUILD_BATCH:]
+                rows = {}
+                if pending['mode'] == 'dirty' and keys:
+                    rows = dict(source.execute('SELECT id,data FROM memories WHERE id IN (' + ','.join('?' for _ in keys) + ')', keys))
+                for identifier in reversed(keys):
+                    self._remove(identifier)
+                    self.connection.execute('DELETE FROM source_state WHERE id=?', (identifier,))
+                    if identifier in rows:
+                        raw = rows[identifier]
+                        self._replace(json.loads(raw))
+                        self.connection.execute('INSERT INTO source_state VALUES(?,?)',
+                            (identifier, hashlib.sha256(raw.encode('utf-8')).hexdigest()))
+                    pending['ids'].pop()
+                    if time.monotonic() - started >= BUILD_SECONDS:
+                        break
+                if not pending['ids']:
+                    self.pending_sync = None
+        return self.pending_sync is None
+
+    def sync(self, source, dirty=None):
+        """Small synchronous catch-up; large/cold passes run in Store's worker."""
+        full = not self.initialized or dirty is None
+        self.start_sync(None if full else dirty)
+        while not self.sync_step(source):
+            pass
         self.initialized = True
 
     def candidates(self, boundary, query, limit):

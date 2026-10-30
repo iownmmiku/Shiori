@@ -199,7 +199,7 @@ def main():
     parser.add_argument('exe', type=Path)
     parser.add_argument('--data-dir', required=True, type=Path)
     parser.add_argument('--port', type=int, default=18767)
-    parser.add_argument('--expect-version', '--expect', dest='expect_version', default='0.2.0')
+    parser.add_argument('--expect-version', '--expect', dest='expect_version', default='0.2.1-beta')
     parser.add_argument('--mcp-fixture-url', default='')
     args = parser.parse_args()
     data = args.data_dir.resolve()

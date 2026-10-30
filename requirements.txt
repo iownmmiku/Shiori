@@ -8,6 +8,8 @@ pystray==0.19.5; sys_platform == 'win32'
 pillow==12.3.0
 pypdf==6.20.1
 jsonschema==4.26.0
+holidays==0.107
+tzdata==2026.5
 pywebview==6.2.1; sys_platform == 'win32'
 pythonnet==3.2.1; sys_platform == 'win32'
 clr_loader==0.3.1; sys_platform == 'win32'

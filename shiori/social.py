@@ -104,6 +104,18 @@ def _named(scope, text, config=None):
     return any(re.search(r'(?<![A-Za-z0-9_])' + re.escape(str(alias)) + r'(?![A-Za-z0-9_])', text, re.I) for alias in aliases[:13] if alias)
 
 
+def _reply_trigger(identity, *, at_bot=False, reply_to_bot=False, named=False):
+    """Addressing survives a disabled mandatory reply switch.
+
+    @/name switches choose direct generation versus a dedicated Planner turn;
+    they do not turn an addressed message into passive group chatter. Quoted
+    replies retain their independently configured trigger behavior.
+    """
+    addressed = at_bot or named or (reply_to_bot and identity['trigger_reply'])
+    mandatory = (at_bot and identity['trigger_at']) or (named and identity['trigger_name'])
+    return bool(addressed), bool(mandatory)
+
+
 def _topic(text):
     """Small, local lexical signature; no embedding/model call for each message."""
     words = set(re.findall(r'[a-z][a-z0-9_]{1,20}', str(text).casefold()))
@@ -167,6 +179,7 @@ class SocialEngine:
         self.local_command_fn = None
         self.knowledge_fn = None
         self.knowledge_current_fn = None
+        self.schedule_context_fn = None
 
     def _planner_options(self, scope):
         options = {'min_interval_ms': 1200, 'daily_calls': 300, 'daily_tokens': 12000, 'max_age_ms': 15000,
@@ -363,7 +376,7 @@ class SocialEngine:
             if item.get('role') != 'assistant' or item['id'] in blocked:
                 continue
             metadata = item.get('metadata') or {}
-            if metadata.get('knowledge_refs'):
+            if metadata.get('knowledge_refs') or metadata.get('failure_feedback'):
                 continue  # The Chat history callback owns persona-knowledge validation.
             sources = set(metadata.get('context_source_ids', []))
             sources.update(id for id in metadata.get('source_ids', []) if isinstance(id, str))
@@ -472,7 +485,7 @@ class SocialEngine:
                 return candidate
         return None
 
-    async def plan(self, scope, message, *, direct=False, reply_to_bot=False, continuation=False):
+    async def plan(self, scope, message, *, direct=False, reply_to_bot=False, continuation=False, addressing_text=None):
         """Decide reply/skip and an intent. A planner never waits or grants tool access."""
         plan_started = time.monotonic()
         scope_id, user_id = scope['id'], str(message.get('user_id', ''))
@@ -490,9 +503,16 @@ class SocialEngine:
         private = ':private:' in scope_id or scope_id.startswith('web:')
         raw_at = bool(metadata.get('at_bot', direct and not private))
         raw_reply = bool(reply_to_bot or metadata.get('reply_to_bot'))
-        named = _named(scope, text, cfg)
-        explicit = bool((raw_at and identity['trigger_at']) or (raw_reply and identity['trigger_reply'])
-                        or (named and identity['trigger_name']))
+        # Speaker labels added to a combined prompt are context, not mentions.
+        # Only the original member text may activate a configured name/alias.
+        named = _named(scope, text if addressing_text is None else addressing_text, cfg)
+        explicit, mandatory = _reply_trigger(identity, at_bot=raw_at, reply_to_bot=raw_reply, named=named)
+        mandatory = mandatory or identity['always_reply']
+        explicit = explicit or identity['always_reply']
+        mention_planner = not private and (raw_at or named) and not mandatory
+        # Outside the debounce window a fresh addressed request needs its own
+        # decision, even if the preceding reply is still being assembled.
+        continuation = continuation and not mention_planner
         if message.get('id') in self._answered[scope_id]:
             return decide('skip', '这条消息已经回应')
         # Stops and superseding requests invalidate in-flight replies even with Planner off.
@@ -522,12 +542,19 @@ class SocialEngine:
 
         if private and (identity['always_reply'] or not identity['plan_enabled']):
             return accept('当前私聊按每条必回复策略处理', addressed=True, intent='回应当前私聊消息')
+        if not private and identity['always_reply']:
+            return accept('当前群聊按每条必回复策略处理', addressed=True, intent='回应当前群聊消息')
         if (explicit or private or replacement) and self.local_command_fn and self.local_command_fn(scope_id, text):
             return accept('本地命令按当前权限执行，无需语义规划', addressed=True, intent='处理当前本地命令')
+        if not private and mandatory:
+            return accept('已开启提及或 @ 直接回复，按本地规则生成回答', addressed=True,
+                          intent='回应当前直接请求')
         if continuation:
             return accept('已启用合并窗口内同一请求的补充消息', addressed=explicit)
         if not identity['plan_enabled']:
-            if explicit or replacement:
+            if mention_planner:
+                return decide('skip', '提及或 @ 当前由 Planner 判断，但 Planner 已关闭', explicit=True)
+            if (raw_reply and identity['trigger_reply']) or replacement:
                 return accept('Planner 已关闭，按启用的直接触发回应', addressed=True, intent='回应当前直接请求')
             return decide('skip', 'Planner 已关闭且没有直接触发')
         if not explicit and not private and not replacement:
@@ -547,7 +574,9 @@ class SocialEngine:
                               error_code='planner_backoff', retry_after_ms=round(remaining * 1000))
         model = resolve_model(cfg, 'planner')
         if self.provider is None or not model.get('base_url') or not model.get('model'):
-            if explicit or private or replacement:
+            if mention_planner:
+                return decide('skip', '提及或 @ 当前由 Planner 判断，但没有可用 Planner 模型', explicit=True, semantic=False)
+            if private or (raw_reply and identity['trigger_reply']) or replacement:
                 return accept('没有可用 Planner 模型，按本地直接触发规则回应', addressed=True,
                               intent='回应当前直接消息', semantic=False)
             return decide('skip', '没有可用 Planner 模型，本地规则保持旁听', semantic=False,
@@ -584,8 +613,8 @@ class SocialEngine:
                    'current_message_id': message['id'], 'current_user_id': user_id,
                    'current_message_text': text[:12000],
                    'current_reply_to_source_id': metadata.get('reply_to_source_id'),
-                   'signals': {'at_bot': raw_at and identity['trigger_at'], 'reply_to_bot': raw_reply and identity['trigger_reply'],
-                               'named': named and identity['trigger_name'], 'private': private, 'explicit': explicit,
+                   'signals': {'at_bot': raw_at, 'reply_to_bot': raw_reply and identity['trigger_reply'],
+                               'named': named, 'private': private, 'explicit': explicit,
                                'has_images': bool(metadata.get('images')), 'followup': followup},
                    'participation': {'mode': activity, 'followup_seconds': _value(scope, 'followup_seconds', 90),
                        'policy': ('有人际交流价值即可自然接话，但仍需具体贡献，不能抢答、重复或仅因关键词相同插话。'
@@ -607,6 +636,10 @@ class SocialEngine:
                 # Full timestamp provenance stays in the canonical record;
                 # repeating receipt/recording/zone on every row bloats input.
                 item['time'] = {key: stamp[key] for key in ('anchor', 'anchor_source')}
+        if self.schedule_context_fn:
+            schedule = self.schedule_context_fn(scope_id, user_id)
+            if schedule:
+                payload['character_schedule'] = schedule
         referenced = [x for x in records if x.get('role') in ('assistant', 'user')]
         history_guard = self.history_guard_fn(scope_id, user_id, referenced) if self.history_guard_fn else None
         self._open_requests.add(key)
@@ -1061,6 +1094,20 @@ class ConversationFlow:
         group = scope_id.startswith(('qq:group:', 'qqofficial:group:'))
         key = (scope_id, 'group') if group else actor_key
         scope = self.store.get_scope(scope_id)
+        schedule_delivery = getattr(self, 'schedule_delivery', None)
+        if schedule_delivery:
+            identity = resolved_identity(self.settings.get(), scope)
+            explicit, _ = _reply_trigger(identity, at_bot=metadata.get('at_bot', direct),
+                reply_to_bot=reply_to_bot or metadata.get('reply_to_bot'),
+                named=_named(scope, text, self.settings.get()))
+            explicit = explicit or ':private:' in scope_id or identity['always_reply']
+            local_command = getattr(self.chat, 'is_local_command', None)
+            command = (str(text).lstrip().startswith('/') or
+                       (callable(local_command) and local_command(scope_id, text)))
+            if _interrupt(text) and not _replacement(text):
+                schedule_delivery.cancel_member(scope_id, user_id)
+            elif explicit and not command and await schedule_delivery.capture(message, direct=direct, reply_to_bot=reply_to_bot):
+                return {'accepted': True, 'code': 'schedule_buffered'}
         options = resolved_debounce(self.settings.get(), scope)
         if options['enabled'] or self._debounce_keys.get(key, 0):
             social = getattr(self.chat, 'social', None) or self._fallback
@@ -1276,6 +1323,7 @@ class ConversationFlow:
                 metadata = dict(entries[-1]['metadata'], images=images, flow_trace_id=batch['trace_id'],
                                 at_bot=any(entry['metadata'].get('at_bot') for entry in entries),
                                 reply_to_bot=batch['reply_to_bot'],
+                                schedule_release=any(entry['metadata'].get('schedule_release') for entry in entries),
                                 merged_message_ids=[entry['message']['id'] for entry in entries])
                 plan_text = text
                 if key[1] == 'group' and len({entry['message']['user_id'] for entry in entries}) > 1:
@@ -1320,9 +1368,12 @@ class ConversationFlow:
         key = (scope_id, str(user_id))
         pending = self._batches.get(key)
         identity = resolved_identity(self.settings.get(), scope)
-        explicit = bool((metadata.get('at_bot', direct) and identity['trigger_at']) or (reply_to_bot and identity['trigger_reply'])
-                        or (metadata.get('reply_to_bot') and identity['trigger_reply'])
-                        or (_named(scope, text, self.settings.get()) and identity['trigger_name']) or ':private:' in scope_id)
+        at_bot, named = metadata.get('at_bot', direct), _named(scope, text, self.settings.get())
+        explicit, mandatory = _reply_trigger(identity, at_bot=at_bot,
+            reply_to_bot=reply_to_bot or metadata.get('reply_to_bot'), named=named)
+        mandatory = mandatory or identity['always_reply']
+        mention_planner = ':private:' not in scope_id and (at_bot or named) and not mandatory
+        explicit = explicit or ':private:' in scope_id or identity['always_reply']
         planner_cfg=self.settings.get().get('planner',{})
         if explicit and scope_id in self._planner_batches:
             discarded=self._planner_batches.pop(scope_id)
@@ -1336,7 +1387,7 @@ class ConversationFlow:
                 social._decision(scope_id,str(user_id),message,'skip','Planner 主动判断间隔内，本轮仅观察',explicit=False)
                 return {'accepted':False,'code':'cooldown'}
             return await self._queue_planner(scope_id,user_id,text,images,metadata,message,wait=wait)
-        replacing = pending is not None and pending['entries'] and (_replacement(text) or (explicit and not _incomplete(pending['entries'][-1]['text'])))
+        replacing = pending is not None and pending['entries'] and (_replacement(text) or (explicit and (mention_planner or not _incomplete(pending['entries'][-1]['text']))))
         explicit = explicit or (key in social._open_requests and _replacement(text))
         extending = (pending is not None and not replacing and len(pending['entries']) < 8 and not _interrupt(text)
                      and not metadata.get('mentioned_user_ids') and (not metadata.get('reply_to_id') or metadata.get('reply_to_bot')))
@@ -1350,7 +1401,8 @@ class ConversationFlow:
                                          decision.get('generation'), metadata, identity)
                 social.finish_request(scope_id, user_id, decision.get('generation'))
             return {'accepted': False, 'code': 'ingress_busy'}
-        decision = await social.plan(scope, message, direct=direct, reply_to_bot=reply_to_bot, continuation=extending)
+        decision = await social.plan(scope, message, direct=direct, reply_to_bot=reply_to_bot,
+                                     continuation=extending, addressing_text=text)
         if extending and decision['reply']:
             decision.update(reason=pending['reason'], explicit=pending['explicit'])
         if not decision['reply']:
@@ -1386,7 +1438,14 @@ class ConversationFlow:
             task.add_done_callback(self._jobs.discard)
         batch['entries'].extend(collected if collected is not None else [entry])
         if wait:
-            await asyncio.shield(batch['future'])
+            delivery = await asyncio.shield(batch['future'])
+            if metadata.get('schedule_release'):
+                receipt = delivery if isinstance(delivery, dict) else {}
+                delivered = receipt.get('outcome') == 'delivered'
+                return {'accepted': delivered, 'code': 'accepted' if delivered else 'reply_failed',
+                        'outcome': receipt.get('outcome', 'interrupted'),
+                        'confirmed_parts': receipt.get('confirmed_parts', 0),
+                        'total_parts': receipt.get('total_parts', 0)}
         return {'accepted': True, 'code': 'accepted'}
 
     async def _queue_planner(self,scope_id,user_id,text,images,metadata,message,*,wait):
@@ -1711,7 +1770,9 @@ class ConversationFlow:
             if self._batches.get(key) is batch:
                 self._batches.pop(key, None)
             if not batch['future'].done():
-                batch['future'].set_result(None)
+                batch['future'].set_result({'outcome': batch.get('outcome', 'suppressed'),
+                                           'confirmed_parts': batch.get('confirmed_parts', 0),
+                                           'total_parts': batch.get('total_parts', 0)})
 
     async def close(self):
         self._closed = True

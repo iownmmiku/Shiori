@@ -10,7 +10,7 @@ let fail=false;
 const sandbox={window:{},state:{page:'settings',authenticated:true},document:{hidden:false},e:esc,fmt:String,icon:()=>'',notice:text=>esc(text),
   button:(label,action,style,symbol,extra='')=>`<button data-action="${action}" ${extra}>${esc(label)}</button>`,
   select:(name,label,options,value)=>`<select name="${name}" aria-label="${label}">${options.map(([id,text])=>`<option value="${id}" ${id===value?'selected':''}>${esc(text)}</option>`).join('')}</select>`,
-  $:selector=>selector==='#updates-section'?node:null,toast(){},setTimeout:()=>++polls,clearTimeout(){},
+  $:selector=>selector==='#updates-section'?node:null,toast(){},openModal:(title,description,html)=>{node.innerHTML=html;},setTimeout:()=>++polls,clearTimeout(){},
   confirmAction:async(a,b,callback)=>{confirm={a,b,callback};},
   api:async(url,options)=>{calls.push({url,options});if(fail)throw Error('network failed');return structuredClone(result);}};
 vm.createContext(sandbox);vm.runInContext(fs.readFileSync(path.join(__dirname,'../shiori/static/updates.js'),'utf8'),sandbox);
@@ -47,5 +47,13 @@ vm.createContext(sandbox);vm.runInContext(fs.readFileSync(path.join(__dirname,'.
   assert.ok(!node.innerHTML.includes('data-action="update-apply"'));
   const switchBefore=calls.length;await ui.handleAction('update-switch',{});assert.equal(calls.length,switchBefore);
   await confirm.callback();assert.equal(calls.at(-1).url,'/api/updates/switch');assert.equal(calls.at(-1).options.body.release_id,12);
-  ui.close();console.log('Update UI selection, escaping, direct switch and explicit install checks passed');
+  result={items:[{id:'a'.repeat(32),fingerprint:'exact-preview',tag:'<bad>',bytes:1024,backup_bytes:0,can_delete:true},{id:'b'.repeat(32),bytes:512,backup_bytes:512,reason:'最新恢复备份',can_delete:false}],cleanup_allowed:true,total_bytes:1536,reclaimable_bytes:1024};
+  await ui.handleAction('update-storage',{});
+  assert.match(node.innerHTML,/&lt;bad&gt;/);assert.match(node.innerHTML,/最新恢复备份/);
+  const cleanupBefore=calls.length;await ui.handleAction('update-cleanup',{dataset:{id:'a'.repeat(32)}});
+  assert.equal(calls.length,cleanupBefore,'cleanup requires review of exact historical artifact');
+  result={released_bytes:1024};await confirm.callback();
+  assert.equal(calls.at(-1).url,'/api/updates/storage/cleanup');
+  assert.equal(calls.at(-1).options.body.items[0].fingerprint,'exact-preview');
+  ui.close();console.log('Update UI selection, escaping, direct switch, storage cleanup and explicit install checks passed');
 })().catch(error=>{console.error(error);process.exitCode=1;});

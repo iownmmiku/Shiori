@@ -20,6 +20,7 @@ class Settings:
         self.config = deepcopy(DEFAULTS)
         self.config['model'].update(base_url='https://test.invalid/v1', model='test')
         self.config['onebot'].update(chat_policy="whitelist", enabled=True, owner_ids=['101'], allowed_groups=['202'])
+        self.config['identity'].update(respond_to_at=False, respond_to_name=False)
 
     def get(self):
         return deepcopy(self.config)
@@ -88,11 +89,15 @@ async def test_mentions_and_quoted_names_can_be_semantically_vetoed(setup):
     ('trigger_reply', {'reply_to_bot': True}, '再说一遍', False),
     ('trigger_name', {}, 'miku你好', False),
 ])
-async def test_independent_trigger_can_be_disabled_without_other_trigger_leak(setup, field, metadata, text, direct):
+async def test_disabled_mentions_use_planner_while_disabled_reply_stays_passive(setup, field, metadata, text, direct):
     store, _, provider, social = setup
     scope = store.upsert_scope({'id': 'qq:group:202', field: False, 'proactive_reply': False})
     result = await social.plan(scope, message(store, text, **metadata), direct=direct)
-    assert result['action'] == 'skip' and not provider.calls
+    if field == 'trigger_reply':
+        assert result['action'] == 'skip' and not provider.calls
+    else:
+        assert result['action'] == 'reply' and result['semantic'] and result['explicit']
+        assert len(provider.calls) == 1
 
 
 @pytest.mark.anyio
@@ -117,7 +122,7 @@ async def test_private_mandatory_policy_never_calls_or_can_be_vetoed_by_planner(
 @pytest.mark.anyio
 async def test_planner_off_group_keeps_only_direct_enabled_triggers(setup):
     store, _, provider, social = setup
-    scope = store.upsert_scope({'id': 'qq:group:202', 'plan_enabled': False})
+    scope = store.upsert_scope({'id': 'qq:group:202', 'plan_enabled': False, 'trigger_name': True})
     assert (await social.plan(scope, message(store, '初音未来你觉得如何')) )['action'] == 'reply'
     assert (await social.plan(scope, message(store, '大家说说今晚看什么番')))['action'] == 'skip'
     assert not provider.calls
@@ -133,12 +138,12 @@ async def test_web_dialogue_is_not_gated_by_qq_at_name_or_reply_switch(setup):
 
 
 @pytest.mark.anyio
-async def test_without_model_fallback_is_local_and_honestly_labelled(setup):
+async def test_without_model_mentions_never_fall_back_to_mandatory_reply(setup):
     store, settings, provider, social = setup
     settings.config['model'].update(base_url='', model='')
     scope = store.get_scope('qq:group:202')
     result = await social.plan(scope, message(store, '初音未来，晚上好'))
-    assert result['action'] == 'reply' and not result['semantic'] and '本地' in result['reason']
+    assert result['action'] == 'skip' and not result['semantic']
     assert (await social.plan(scope, message(store, '大家晚上好')))['action'] == 'skip'
     assert not provider.calls
 

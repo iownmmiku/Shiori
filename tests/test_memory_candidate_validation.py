@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 from shiori.chat import ChatService
-from shiori.db import Store
+from shiori.db import Store, message_fingerprint
 from shiori.memory_lifecycle import MemoryLifecycle
 from shiori.settings import DEFAULTS
 
@@ -243,9 +243,10 @@ async def test_transactional_ingest_preserves_normal_memory_defaults(runtime):
     raw['source_ids'] = [env.records[1]['id']]
     actual = env.chat.memory.ingest_candidates([raw], scope_id='web:default', user_id='owner',
                                              source_ids=[env.records[1]['id']])[0]
-    ignored = {'id', 'created_at', 'updated_at', 'source_ids'}
+    ignored = {'id', 'created_at', 'updated_at', 'source_ids', 'source_fingerprints'}
     assert {key: value for key, value in actual.items() if key not in ignored} == {
         key: value for key, value in expected.items() if key not in ignored}
+    assert actual['source_fingerprints'] == {env.records[1]['id']: message_fingerprint(env.records[1])}
 
 
 @pytest.mark.anyio
