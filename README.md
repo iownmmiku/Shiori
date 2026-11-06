@@ -4,7 +4,7 @@
 
 > 主仓库为 `iownmmiku/Shiori`；旧 `mikubot` 仓库是没有安装文件的迁移说明占位仓库。**0.1.6 及更早版本无法在应用内更新，请从本仓库发行页手动下载安装包覆盖安装，继续使用原数据目录。**
 
-当前源码版本为 **0.2.1**。提供 Windows 安装版、便携版与源码部署；安装包和便携包无需 Python，源码支持 Python 3.11–3.13。0.2.1 的安装包、便携包和源码包随对应的 GitHub Release 提供；在它发布之前，可下载的稳定版为 0.2.0，预发布版为 0.2.1-beta，也可以直接克隆本仓库的 main 分支运行 0.2.1 源码。
+本次版本为 **0.2.1（正式版）**，GitHub 标签为 `v0.2.1`。提供 Windows 安装版、便携版与源码部署；安装包和便携包无需 Python，源码支持 Python 3.11–3.13。
 
 本机运行的 AI 聊天机器人与任务助手。预装可删除的初音未来人格，支持独立聊天、QQ 接入、记忆、黑话学习、人格蒸馏和管理员电脑任务。
 
@@ -18,25 +18,15 @@
 
 ## 下载与选择
 
-日常使用选择 **[稳定版 0.2.0](https://github.com/iownmmiku/Shiori/releases/tag/v0.2.0)**；愿意测试新功能可选择 **[预发布版 0.2.1-beta](https://github.com/iownmmiku/Shiori/releases/tag/v0.2.1-beta)**，展开发行记录的 Assets 下载。安装包未做 Windows 代码签名，系统可能出现 SmartScreen 提示；运行前核对旁置的同名 `.sha256`。
-
-**稳定版 0.2.0：**
+从 **[0.2.1 发行页](https://github.com/iownmmiku/Shiori/releases/tag/v0.2.1)** 展开 Assets 下载。安装包未做 Windows 代码签名，系统可能出现 SmartScreen 提示；运行前核对旁置的同名 `.sha256`。
 
 | 文件 | 适合谁 | 使用方式 |
 | --- | --- | --- |
-| [shiori-0.2.0-Windows-Setup.exe](https://github.com/iownmmiku/Shiori/releases/download/v0.2.0/shiori-0.2.0-Windows-Setup.exe) | Windows 用户，推荐 | 一键安装 |
-| [shiori-0.2.0-Windows-x64.zip](https://github.com/iownmmiku/Shiori/releases/download/v0.2.0/shiori-0.2.0-Windows-x64.zip) | 希望解压即用 | 完整解压后运行 `shiori.exe` |
-| [shiori-0.2.0-source.zip](https://github.com/iownmmiku/Shiori/releases/download/v0.2.0/shiori-0.2.0-source.zip) | 希望运行或修改代码 | 安装 Python 3.12，按下方命令启动 |
+| [shiori-0.2.1-Windows-Setup.exe](https://github.com/iownmmiku/Shiori/releases/download/v0.2.1/shiori-0.2.1-Windows-Setup.exe) | Windows 用户，推荐 | 一键安装 |
+| [shiori-0.2.1-Windows-x64.zip](https://github.com/iownmmiku/Shiori/releases/download/v0.2.1/shiori-0.2.1-Windows-x64.zip) | 希望解压即用 | 完整解压后运行 `shiori.exe` |
+| [shiori-0.2.1-source.zip](https://github.com/iownmmiku/Shiori/releases/download/v0.2.1/shiori-0.2.1-source.zip) | 希望运行或修改代码 | 安装 Python 3.12，按下方命令启动 |
 
-**预发布版 0.2.1-beta：**
-
-| 文件 | 适合谁 | 使用方式 |
-| --- | --- | --- |
-| [shiori-0.2.1-beta-Windows-Setup.exe](https://github.com/iownmmiku/Shiori/releases/download/v0.2.1-beta/shiori-0.2.1-beta-Windows-Setup.exe) | 希望安装测试版的 Windows 用户 | 退出旧实例、备份数据后安装 |
-| [shiori-0.2.1-beta-Windows-x64.zip](https://github.com/iownmmiku/Shiori/releases/download/v0.2.1-beta/shiori-0.2.1-beta-Windows-x64.zip) | 希望在独立目录试用 | 完整解压后运行 `shiori.exe`，使用独立数据目录 |
-| [shiori-0.2.1-beta-source.zip](https://github.com/iownmmiku/Shiori/releases/download/v0.2.1-beta/shiori-0.2.1-beta-source.zip) | 希望运行或修改测试版源码 | 安装 Python 3.12，按下方命令启动 |
-
-0.2.0 用户可在右上角“版本与更新”打开 **“显示测试版”**，重新检查后选择 `v0.2.1-beta`。测试版使用独立的完整版本号 `0.2.1-beta`，不会被当作正式 0.2.1；关闭测试版显示后仍按正式版列表选择。**试用前另存完整数据副本，不要让测试实例与稳定实例同时写同一数据目录。**便携版首次试用可运行 `shiori.exe --data-dir "D:\shiori-beta-data"`，避免自动沿用已有稳定版数据。安装测试版后，关闭“显示测试版”不会自动降级。
+0.2.0 和 0.2.1-beta 用户可在右上角“版本与更新”重新检查，选择 `v0.2.1` 切换；升级前另存完整数据副本。使用测试版的用户切换后即回到正式版通道，可以关闭“显示测试版”。历史版本见 [Releases](https://github.com/iownmmiku/Shiori/releases)。
 
 安装版和便携版无需 Python、Node 或 Git，默认打开独立桌面窗口。它们不包含模型账号、API Key、QQ 客户端或 NapCat/SnowLuma，需要自行准备。模型调用按所选服务商规则计费。
 
@@ -139,7 +129,7 @@ Windows 默认数据在 **`%LOCALAPPDATA%\shiori\data`**，独立于程序目录
 
 右上角“版本与更新”可检查固定 GitHub 仓库、选择版本和查看说明。0.1.5 起支持后台校验程序文件、备份数据、直接替换程序、自动重启与启动失败回退，无需再操作安装器。适用于 Windows 安装版、便携版及非容器源码服务；源码本地修改会阻止覆盖，远程切换需宿主管理员授权。详见[更新指南](docs/UPDATES.md)。
 
-默认只显示正式版。试用本次预发布时开启 **“显示测试版”**，检查并选择 `v0.2.1-beta`；稳定版仍为 0.2.0。测试版升级后不直接覆盖降级，回到历史版本需使用对应备份独立部署，详见更新指南。
+默认只显示正式版。需要试用预发布版本时开启 **“显示测试版”**。测试版升级后不直接覆盖降级，回到历史版本需使用对应备份独立部署，详见更新指南。
 
 0.1.6 及更早版本需从本仓库发行页手动下载，退出旧实例后覆盖安装或按原部署方式替换程序，沿用原数据目录；它们不能通过旧仓库的更新入口直接切换到本版。0.2.0 起支持从新的 Shiori 更新源切换版本。
 
