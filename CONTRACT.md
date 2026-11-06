@@ -1,6 +1,6 @@
-# Shiori 0.2.1-beta 集成约定
+# Shiori 0.2.1 集成约定
 
-本文描述本地0.2.1-beta源码集成约定，版本发布与下载以GitHub实际公开资产为准；旧版不保证具备本版新增接口。
+本文描述 0.2.1 源码集成约定，版本发布与下载以GitHub实际公开资产为准；旧版不保证具备本版新增接口。
 
 本文供当前源码开发与接入使用，运行时校验以 `shiori/api.py`、`experience_api.py` 及对应服务为准。历史内部版本说明归档于 `docs/archive/`，不覆盖当前约定。产品名为 **Shiori**，核心包为 `shiori`；`mikubot`、`qunyu` 仅为旧导入和启动兼容层，计划在 **0.3.0** 移除，新集成应直接使用 `shiori`。主仓库为 `iownmmiku/Shiori`，旧 `mikubot` 仓库只提供迁移说明。
 
@@ -34,7 +34,7 @@ Python 3.11–3.13（推荐3.12），FastAPI、SQLite；正式入口为 `python 
 
 ## 新工作流接口
 
-### 事件记忆（0.2.1-beta 本地开发）
+### 事件记忆（0.2.1 起）
 
 - `GET /api/memories`、`GET /api/memory/candidates` 支持 `kind=event|fact|preference|note`；类型条件在 SQL 分页前生效。`GET /api/memories/{id}` 读取完整记录，不使用搜索片段代替正文。
 - `GET /api/memories/{id}/sources?limit=20&offset=0` 返回 `items,total,limit,offset,next_offset,has_more`，limit 为 1–200。每项含 `id,available,message` 及不可用时的 `reason`；须通过当前来源的会话、身份、指纹和撤销校验。所有接口均需管理台认证。
@@ -42,7 +42,7 @@ Python 3.11–3.13（推荐3.12），FastAPI、SQLite；正式入口为 `python 
 - `episode:null` 清除结构；仅更新 `content` 而不提供 `episode` 时清除旧结构，避免正文和结构不一致。旧文本事件继续可用。事件日期仍使用记录级时间字段，不从结构内推断权限或来源；结束时间不得早于开始时间。
 - 自动候选仅接受模型返回的内容字段，原消息指纹由服务端事务生成；旧记录缺少指纹时来源不可核验，不自动补造。来源 API 为管理视图，聊天召回仍使用原作用域权限检查。
 
-### 本地项目与 QQ 监控（0.2.1-beta 本地开发）
+### 本地项目与 QQ 监控（0.2.1 起）
 
 `GET /chat` 返回与 `/` 相同的登录外壳，不绕过认证。下列 `/api` 均使用管理台认证：
 
@@ -94,7 +94,7 @@ Python 3.11–3.13（推荐3.12），FastAPI、SQLite；正式入口为 `python 
 
 `GET /api/knowledge/status` 的人格计划提供 `disabled_reason`；可选 `last_result` 记录最近一次完成时间、原兴趣、实际查询、各结果数量和最多12条过滤明细。诊断地址移除查询参数与片段，详情总计最多128KiB并受人格知识整文件5MiB上限约束；容量紧张时先清理详情，保留完成消息。旧备份可以没有这些字段。并列主题通过可选 `focus_cursors`、`last_focus` 保留轮换进度，知识条目仍关联原兴趣；跳过排除主题不消耗探索次数。全局与人格自动探索开关不因迁移改变，手动探索也不绕过来源、暂停与额度检查。详见[人格兴趣探索](docs/INTEREST_EXPLORATION.md)。
 
-## 群聊提及回应（0.2.1-beta，本地待发布）
+## 群聊提及回应（0.2.1 起）
 
 `identity.respond_to_at` / `respond_to_name` 与有效会话 `trigger_at` / `trigger_name` 的 true 表示直接生成回复，false 表示仍识别对应 @ / 名称提及并单独交给 Planner，不作为普通群消息等待集中判断。机器人配置和会话字段 null 保留原继承规则；不改字段名或已有配置值。有效 `plan_enabled` 关闭或判断模型不可用时，false 模式不会自行强制回应。`trigger_reply` 的引用回复行为不变。
 

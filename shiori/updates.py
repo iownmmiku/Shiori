@@ -49,6 +49,26 @@ def _time():
     return datetime.now(timezone.utc).isoformat()
 
 
+def relaunch_arguments(argv, data_dir, port):
+    """Current arguments with one authoritative data directory and fixed port.
+
+    Each update appends these, so earlier copies are removed first; otherwise
+    the service command grows by three options on every update.
+    """
+    kept, skip = [], False
+    for value in argv:
+        if skip:
+            skip = False
+            continue
+        if value in ('--data-dir', '--port'):
+            skip = True
+            continue
+        if value == '--strict-port' or value.startswith(('--data-dir=', '--port=')):
+            continue
+        kept.append(value)
+    return [*kept, '--data-dir', str(data_dir), '--port', str(port), '--strict-port']
+
+
 def runtime_info():
     frozen = bool(getattr(sys, 'frozen', False))
     base = application_base()
@@ -495,7 +515,7 @@ class UpdateManager:
             worker=folder/'update-worker.py'
             worker.write_bytes((Path(__file__).parent/'update_runtime.py').read_bytes())
             command=[sys.executable,str(worker),'--config',str(folder/'switch.json')]
-            launch=[sys.executable,'-m','shiori',*sys.argv[1:]]
+            launch=[sys.executable,'-m','shiori']
         else:
             # The helper uses its own EXE and libraries so Windows does not
             # retain locks on the very program files being replaced.
@@ -505,9 +525,9 @@ class UpdateManager:
             shutil.copy2(target/'shiori.exe',helper/'shiori.exe')
             shutil.copytree(target/'_internal',helper/'_internal',symlinks=False)
             command=[str(helper/'shiori.exe'),'--update-worker',str(folder/'switch.json')]
-            launch=[str(target/'shiori.exe'),*sys.argv[1:]]
+            launch=[str(target/'shiori.exe')]
         record=json.loads((self.data_dir/'server.json').read_text('utf-8'))
-        launch += ['--data-dir',str(self.data_dir),'--port',str(record['port']),'--strict-port']
+        launch += relaunch_arguments(sys.argv[1:],self.data_dir,record['port'])
         config={'target':str(target),'data':str(self.data_dir),'archive':str(path),'sha256':self.download['sha256'],
                 'parent_pid':os.getpid(),'download_id':download_id,'kind':self.download['kind'],
                 'version':self.download['tag'].removeprefix('v'),'port':record['port'],'launch':launch,'service':self.runtime.get('service',''),

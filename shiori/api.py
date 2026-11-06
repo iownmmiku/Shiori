@@ -4,7 +4,6 @@ import asyncio
 import contextlib
 import hashlib
 import hmac
-import io
 import json
 import os
 import re
@@ -15,10 +14,9 @@ import zipfile
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import urlsplit
 
 from fastapi import Body, FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__

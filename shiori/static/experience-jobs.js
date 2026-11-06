@@ -22,7 +22,7 @@ window.ShioriExperienceJobs={create(runtime,helpers){
 
     async function renderJobs() {
       const jobs = rows(await api("/api/jobs")); state.liveJobs = jobs;
-      return heading("TASKS","后台任务","查看执行步骤与实际结果，正在运行的任务可随时停止。",button("刷新任务","refresh","","refresh")) + (jobs.length ? `<div id="jobs-list">${jobs.map(job => jobDetail(job)).join("")}</div>` : empty("tasks","还没有后台任务","直接在聊天中描述想完成的事，或在人格页开始一次蒸馏。","go-chat","开始聊天"));
+      return heading("","后台任务","查看每个任务的执行步骤和结果，运行中的任务可以随时停止。",button("刷新任务","refresh","","refresh")) + (jobs.length ? `<div id="jobs-list">${jobs.map(job => jobDetail(job)).join("")}</div>` : empty("tasks","还没有后台任务","直接在聊天中描述想完成的事，或在人格页开始一次蒸馏。","go-chat","开始聊天"));
     }
   return {jobDetail,renderJobs};
 }};

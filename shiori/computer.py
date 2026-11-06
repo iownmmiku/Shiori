@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import asyncio
 import codecs
-from collections import deque
 import hashlib
 import itertools
 import json

@@ -133,6 +133,46 @@ async def test_qq_images_download_concurrently_outside_conversation_lock(tmp_pat
 
 
 @pytest.mark.anyio
+async def test_unreadable_image_is_dropped_and_the_text_is_still_answered(tmp_path, monkeypatch):
+    from shiori.stickers import StickerImageRejected
+    store, cfg = Store(tmp_path), Config()
+    cfg.value['model']['vision'] = True
+    scope = 'qq:private:303'
+    store.upsert_scope({'id': scope, 'auto_memory': False})
+    calls = []
+
+    class Seeing(Model):
+        async def complete(self, messages, **kwargs):
+            calls.append(messages)
+            return await super().complete(messages, **kwargs)
+
+    chat = ChatService(store, cfg, Seeing())
+    def download(url, **kwargs):
+        if url.endswith('=1'):
+            raise StickerImageRejected('byte_limit', byte_count=9 * 1024 * 1024, byte_limit=kwargs['max_bytes'])
+        return PNG, 'image/png'
+    monkeypatch.setattr('shiori.stickers.download_image', download)
+    try:
+        result = await asyncio.wait_for(chat.respond(scope, '303', '这几张图哪张好看', images=URLS), 2)
+        assert result['reply']
+        last = calls[-1][-1]['content']
+        urls = [part['image_url']['url'] for part in last if part.get('type') == 'image_url']
+        text = next(part['text'] for part in last if part.get('type') == 'text')
+        assert len(urls) == 2 and all(url.startswith('data:image/png;base64,') for url in urls)
+        assert '1 张图片未能读取' in text and not any(url in json.dumps(calls) for url in URLS)
+        events = [e for e in store.list_events() if e['kind'] == 'qq_image_error']
+        assert events and events[0]['details']['unreadable'] == 1
+        # A picture-only message with nothing readable still has nothing to answer.
+        monkeypatch.setattr('shiori.stickers.download_image',
+                            lambda url, **kwargs: (_ for _ in ()).throw(ValueError('图片下载未成功')))
+        with pytest.raises(ValueError, match='QQ图片未能读取'):
+            await asyncio.wait_for(chat.respond(scope, '303', '', images=URLS[:1]), 2)
+    finally:
+        await chat.close()
+        store.close()
+
+
+@pytest.mark.anyio
 async def test_image_batch_deadline_and_cancel_cannot_multiply_blocked_workers(tmp_path, monkeypatch):
     store, cfg = Store(tmp_path), Config()
     chat = ChatService(store, cfg, Model())
@@ -143,15 +183,15 @@ async def test_image_batch_deadline_and_cancel_cannot_multiply_blocked_workers(t
     second = None
     try:
         await asyncio.wait_for(downloads.entered.wait(), 1)
-        with pytest.raises(ValueError, match='QQ图片未能读取'):
-            await asyncio.wait_for(first, .5)
+        assert await asyncio.wait_for(first, .5) == ([], len(URLS))
         second = asyncio.create_task(chat._prepare_qq_images('qq:private:303', URLS))
-        with pytest.raises(ValueError, match='QQ图片未能读取'):
-            await asyncio.wait_for(second, .5)
+        assert await asyncio.wait_for(second, .5) == ([], len(URLS))
         assert downloads.count == 3  # Timed-out socket threads still own their slots.
+        assert [e for e in store.list_events() if e['kind'] == 'qq_image_error']
         downloads.release.set()
-        prepared = await asyncio.wait_for(chat._prepare_qq_images('qq:private:303', URLS), 1)
-        assert downloads.count == 6 and all(item.startswith('data:image/png;base64,') for item in prepared)
+        prepared, unreadable = await asyncio.wait_for(chat._prepare_qq_images('qq:private:303', URLS), 1)
+        assert unreadable == 0 and downloads.count == 6
+        assert all(item.startswith('data:image/png;base64,') for item in prepared)
     finally:
         downloads.release.set()
         await asyncio.gather(*[task for task in (first, second) if task], return_exceptions=True)

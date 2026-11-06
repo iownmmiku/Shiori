@@ -19,7 +19,7 @@ window.ShioriAssets = (() => {
       else{node.src='/static/'+name+suffix;node.async=true;}
       node.onload=()=>resolve();
       node.onerror=()=>{node.remove();resources.delete(name);reject(new Error('页面资源加载失败，请重新加载。'));};
-      const theme=css && beforeTheme && document.querySelector('link[href^="/static/rhine.css"]');
+      const theme=css && beforeTheme && document.querySelector('link[href^="/static/theme.css"]');
       if(theme)document.head.insertBefore(node,theme);else document.head.appendChild(node);
     });
     resources.set(name,promise);

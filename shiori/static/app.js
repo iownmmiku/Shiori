@@ -154,7 +154,7 @@ function renderNavigation() {
   $("#sidebar-status-dot").className = `status-dot ${state.settings.paused ? "warning" : modelReady ? "online" : ""}`;
   $("#sidebar-status-text").textContent = state.settings.paused ? "已暂停自动回复" : modelReady ? "本地服务已就绪" : "等待配置模型";
   $("#sidebar-status-sub").textContent = modelReady ? (configuredModel().model || "你的数据，留在你的电脑") : "连接模型即可开始聊天";
-  const versionLabel = (state.boot?.version || "0.2.1-beta").replace(/-beta$/, " beta");
+  const versionLabel = (state.boot?.version || "0.2.1").replace(/-beta$/, " beta");
   $("#version-label").textContent = versionLabel;
   $("#workspace-version").textContent = versionLabel;
   if ($("#header-version")) $("#header-version").textContent = "v" + versionLabel;
@@ -295,7 +295,7 @@ async function renderPage() {
     window.ShioriQQMonitor?.afterRender();
     window.ShioriUpdates?.afterRender();
     window.ShioriFeatures.afterRender?.();
-  } catch (error) { if (id === state.renderId) main.innerHTML = `${heading("LOCAL WORKSPACE",pageNames[state.page],"数据暂时没有加载成功。请确认本地服务仍在运行。") }<div class="inline-error">${e(error.message)}</div><div class="section-actions">${button("重新加载","refresh","primary","refresh")}</div>`; }
+  } catch (error) { if (id === state.renderId) main.innerHTML = `${heading("",pageNames[state.page],"加载失败，请确认本地服务仍在运行。") }<div class="inline-error">${e(error.message)}</div><div class="section-actions">${button("重新加载","refresh","primary","refresh")}</div>`; }
 }
 
 
@@ -606,7 +606,7 @@ document.addEventListener("submit",async event => {
     if (kind === "approve-tool-run") await approveToolRun(form);
     else if (kind === "mcp-allowlist") await saveMcpAllowlist(form);
     else if (kind === "confirm") { await state.confirm(); closeModal(); toast(state.stopped ? "Shiori已退出，可以关闭页面" : "操作已完成"); if (!state.stopped) await bootstrap(); }
-    else if (kind === "memory-review") { await api(`/api/memories/${encodeURIComponent(state.modalRecord.id)}/approve`,{method:"POST",body:{replace_conflicts:getForm(form).replace_conflicts || false}}); closeModal(); toast("这段记忆，已经认真记住了"); await bootstrap(); }
+    else if (kind === "memory-review") { await api(`/api/memories/${encodeURIComponent(state.modalRecord.id)}/approve`,{method:"POST",body:{replace_conflicts:getForm(form).replace_conflicts || false}}); closeModal(); toast("已保存这条记忆"); await bootstrap(); }
     else if (kind === "culture-switches") { await api(`/api/scopes/${encodeURIComponent(state.scope)}`,{method:"PUT",body:getForm(form)}); toast("学习、理解与使用规则已保存"); await bootstrap(); }
     else if (kind === "expression-switches") { await api(`/api/scopes/${encodeURIComponent(state.scope)}`,{method:"PUT",body:getForm(form)}); toast("表达学习与使用规则已保存"); await bootstrap(); }
     else if (kind === "knowledge-search") { const values = getForm(form),searchedScope = state.scope; state.knowledgeQuery = values.q; state.knowledgeUser = values.user_id; const results = await api(`/api/memory/search?${query({scope_id:searchedScope,user_id:values.user_id,q:values.q})}`); state.knowledgeResults = {...results,scope_id:searchedScope}; await renderPage(); }

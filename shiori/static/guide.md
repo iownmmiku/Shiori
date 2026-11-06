@@ -1,12 +1,12 @@
-> 当前版本为 **Shiori 0.2.1-beta（修订重建，预发布）**，稳定版仍为 **0.2.0**。本次加入统一 Chat 工具流程等补充改动；此前 beta 用户需要重新切换同一版本或重新下载，用发行页本次 SHA-256 区分新旧文件。主仓库为 `iownmmiku/Shiori`。旧 `mikubot` 地址是没有安装文件的迁移说明占位仓库，不再跳转。0.1.6 及更早版本需要手动获取新版，继续使用原数据目录。
+> 当前版本为 **Shiori 0.2.1**（正式版），包含 0.2.1-beta 的全部功能，并新增界面重做和多项运行修复。主仓库为 `iownmmiku/Shiori`。旧 `mikubot` 地址是没有安装文件的迁移说明占位仓库，不再跳转。0.1.6 及更早版本需要手动获取新版，继续使用原数据目录。
 
 > 连续消息、时间来源、模型入口和插件包的操作与兼容说明见[配置与消息处理](https://github.com/iownmmiku/Shiori/blob/main/docs/CONFIGURATION_WORKFLOWS.md)。
 
 > 对话衔接、时间回忆和摘要的当前规则见[历史与上下文说明](https://github.com/iownmmiku/Shiori/blob/main/docs/HISTORY_PIPELINE_AUDIT.md)。近期对话默认按24个用户轮次选择；受历史消息数和文字上限约束，不代表无限历史。
 
-# Shiori 0.2.1-beta 使用指南
+# Shiori 0.2.1 使用指南
 
-本文描述 Shiori 0.2.1-beta 的聊天、模型、QQ、人格、记忆、电脑任务与角色日程流程。界面采用 Analysis OS 视觉样式。[更新日志](https://github.com/iownmmiku/Shiori/blob/main/RELEASE_NOTES.md)与[测试报告](https://github.com/iownmmiku/Shiori/blob/main/TEST_REPORT.md)说明变化和实际验收范围，升级前保留完整数据副本。
+本文描述 Shiori 0.2.1 的聊天、模型、QQ、人格、记忆、电脑任务与角色日程流程。[更新日志](https://github.com/iownmmiku/Shiori/blob/main/RELEASE_NOTES.md)与[测试报告](https://github.com/iownmmiku/Shiori/blob/main/TEST_REPORT.md)说明变化和实际验收范围，升级前保留完整数据副本。
 
 Shiori 是本机运行的聊天机器人和任务助手。默认人格为初音未来，可以在管理台聊天，也可以接入 NapCat、SnowLuma 或 QQ 官方机器人。电脑任务由管理员发起；普通聊天用户不会因能聊天而获得管理员权限。
 
@@ -14,7 +14,7 @@ Shiori 是本机运行的聊天机器人和任务助手。默认人格为初音�
 
 在 [GitHub Releases 0.2.0](https://github.com/iownmmiku/Shiori/releases/tag/v0.2.0) 的 Assets 中下载：`shiori-0.2.0-Windows-Setup.exe` 是推荐安装版；`shiori-0.2.0-Windows-x64.zip` 是完整解压后运行的便携版；`shiori-0.2.0-source.zip` 需要 Python 3.11–3.13（推荐3.12）。安装包未做 Windows 代码签名，运行前核对旁置同名 `.sha256`。安装版与便携版无需 Python 或 Node，也不包含模型密钥、QQ 客户端和连接器。
 
-测试版文件为 `shiori-0.2.1-beta-Windows-Setup.exe`、`shiori-0.2.1-beta-Windows-x64.zip` 和 `shiori-0.2.1-beta-source.zip`，见 [0.2.1-beta 预发布页](https://github.com/iownmmiku/Shiori/releases/tag/v0.2.1-beta)。0.2.0 用户可在“版本与更新”开启“显示测试版”再选择。此前 beta 用户重新检查后可切换同一版本，或重新下载覆盖安装；文件名与版本号未变，请核对本次 SHA-256。测试版不替代正式版，试用时使用单独的数据副本。
+0.2.1 的发行文件为 `shiori-0.2.1-Windows-Setup.exe`、`shiori-0.2.1-Windows-x64.zip` 和 `shiori-0.2.1-source.zip`，随对应的 [GitHub Release](https://github.com/iownmmiku/Shiori/releases) 提供，下载后请核对同名 `.sha256`。使用 0.2.1-beta 的用户升级到 0.2.1 后即回到正式版通道，可以关闭“显示测试版”。
 
 ## Chat 工作台与 QQ 聊天管理
 
@@ -38,7 +38,7 @@ Chat 首次显示最近 80 条记录；向上点击“加载更早记录”可�
 
 ## 集中的配置入口
 
-0.2.1-beta 新增独立的 **自动化 → 角色日程** 页面，可管理人格周表、每日安排、节庆、纪念日与生活日记，并选择是否按忙闲状态延迟合并回复。功能默认关闭，日记独立于真实记忆，详见[角色日程使用说明](https://github.com/iownmmiku/Shiori/blob/main/docs/CHARACTER_SCHEDULE.md)。此功能尚未包含在已发布的 0.2.0 安装文件中。
+0.2.1 起提供独立的 **自动化 → 角色日程** 页面，可管理人格周表、每日安排、节庆、纪念日与生活日记，并选择是否按忙闲状态延迟合并回复。功能默认关闭，日记独立于真实记忆，详见[角色日程使用说明](https://github.com/iownmmiku/Shiori/blob/main/docs/CHARACTER_SCHEDULE.md)。0.2.0 不包含此功能。
 
 **机器人配置 → 网页搜索**支持公共搜索、Tavily、DeepSeek Search、Brave Search，聊天和后台通用搜索共用。填写对应密钥、保存并测试即可；每日上限和失败回退可单独设置，详见[网页搜索](https://github.com/iownmmiku/Shiori/blob/main/docs/WEB_SEARCH.md)。此入口随0.1.6正式版提供，原beta包不包含。
 
@@ -413,7 +413,7 @@ powershell -ExecutionPolicy Bypass -File .\start.ps1 -Stop
 字符数包含中文、英文、标点和空格，不计换行。优先让AI生成时遵守；超出时缩短展示，可展开原始回复。代码、链接和JSON不截成残片，无法放下会提示查看原文；未匹配括号保留，只处理AI正文，系统指令和工具确认凭据保留。内容规则开启时增量预览按安全完整段出现，末段等最终结果。完整边界见[输出说明](https://github.com/iownmmiku/Shiori/blob/main/docs/MODEL_OUTPUT.md)。
 
 
-## 事件记忆（0.2.1-beta 本地开发）
+## 事件记忆（0.2.1 起）
 
 打开 **记忆档案**，可以按“事件、事实、偏好、笔记”筛选。事件卡片先显示概述；点击详情查看完整经过、参与者、地点、结果和原消息来源。来源可翻页，无法核验、已删除或已修改的原消息会明确提示，不能当作可靠证据继续展示。
 

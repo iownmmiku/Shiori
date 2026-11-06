@@ -15,7 +15,7 @@ from shiori.db import Store
 from shiori.settings import Settings
 from shiori.social import SocialEngine, ConversationFlow
 from shiori.stickers import StickerLibrary, download_image, MAX_IMAGE
-from shiori.provider import ProviderStreamError
+from shiori.provider import ProviderRateLimitError, ProviderStreamError
 
 
 def png():
@@ -98,6 +98,39 @@ def test_sticker_incomplete_stream_retry_consumes_each_daily_call(library, monke
     assert len(seen) == attempts and engine.page()['total'] == int(success)
     quota = engine.quota_status()
     assert quota['vision'] == attempts and quota['total'] == attempts
+
+
+def test_rate_limit_pauses_sticker_calls_and_records_no_traceback(library, monkeypatch):
+    store, cfg, model, engine = library
+    now = [1000.0]
+    engine.clock = lambda: now[0]
+    seen = []
+    async def limited(messages, **kwargs):
+        seen.append(kwargs['purpose'])
+        raise ProviderRateLimitError('模型服务返回429', retryable=True)
+    monkeypatch.setattr(model, 'complete', limited)
+    asyncio.run(collect(store, engine))
+    assert seen == ['sticker_vision'] and engine.cooling()
+    kinds = [e['kind'] for e in store.list_events()]
+    assert 'stickers_error' not in kinds
+    assert any(e['kind'] == 'stickers_skipped' and e['details']['reason'] == 'upstream_busy' for e in store.list_events())
+    # While cooling, neither collection nor selection reaches the model.
+    asyncio.run(collect(store, engine))
+    assert asyncio.run(engine.choose('qq:group:1', '123', '谢谢', '谢谢你', lambda: True)) is None
+    assert seen == ['sticker_vision']
+    now[0] += 601
+    monkeypatch.setattr(model, 'complete', Model.complete.__get__(model))
+    asyncio.run(collect(store, engine))
+    assert not engine.cooling() and engine.page()['total'] == 1
+
+
+def test_vision_reply_with_preface_or_fence_is_still_parsed():
+    from shiori.stickers import _json
+    assert _json('好的，结果如下：\n```json\n{"is_sticker": true, "tags": ["{"]}\n```') == {'is_sticker': True, 'tags': ['{']}
+    assert _json('{"a": 1}') == {'a': 1}
+    for bad in ('', '没有识别出来', '[1, 2]'):
+        with pytest.raises(ValueError):
+            _json(bad)
 
 
 @pytest.mark.parametrize('clear,confidence',[(False,.99),(True,.3)])

@@ -16,7 +16,7 @@ from .provider import ProviderError, input_size
 from .timing import TurnTiming, measure, timed, timed_lock
 from .timeparse import parse_due, calendar_fields, format_due
 from .timezones import (current_time_context, clock_instruction, ingress_times, message_anchor,
-                        message_time_context, message_time_label, message_time_reference, reference_time, utc_timestamp)
+                        message_time_context, message_time_label, message_time_reference, utc_timestamp)
 from .tools import calculate, read_public
 from .search import SearchService
 from .memory import MemoryEngine, SemanticBudget
@@ -35,6 +35,11 @@ from .chat_preview import preview_filter
 _GROUP_REQUEST = ContextVar('shiori_group_request', default=None)
 _GROUP_READ_TOOLS = frozenset(('calculate', 'recall_memory', 'lookup_jargon', 'web_search', 'read_webpage'))
 QQ_IMAGE_BATCH_TIMEOUT = 15.0
+
+
+class QQImageSourceChanged(ValueError):
+    """The batch's source messages or permission changed while images loaded."""
+
 
 def _schema(name, description, properties, required=()):
     return {'type': 'function', 'function': {'name': name, 'description': description,
@@ -362,7 +367,12 @@ class ChatService:
         return await resolver(scope_id, images, before_send=before_send)
 
     async def _prepare_qq_images(self, scope_id, images, *, before_send=None):
-        """Prepare a bounded batch without occupying the conversation lock."""
+        """Prepare a bounded batch without occupying the conversation lock.
+
+        Returns ``(prepared, unreadable)``. A picture that cannot be read is
+        dropped and counted, so the text sent in the same batch is still
+        answered; a changed source or permission still aborts the turn.
+        """
         from .stickers import download_image
         async def load(image):
             if not image.startswith('https://'):
@@ -385,18 +395,33 @@ class ChatService:
             raw, mime = await asyncio.shield(future)
             return f'data:{mime};base64,' + base64.b64encode(raw).decode()
 
-        tasks = []
+        total, tasks, batch_error = len(images), [], None
         with measure('image_prepare_ms'):
             try:
-                async with asyncio.timeout(QQ_IMAGE_BATCH_TIMEOUT):
-                    images = await self._resolve_qq_image_refs(scope_id, images, before_send=before_send)
-                    if before_send is not None and not before_send():
-                        raise ValueError('图片来源或权限已变化')
-                    tasks = [asyncio.create_task(load(image)) for image in images]
-                    return await asyncio.gather(*tasks)
-            except (ValueError, OSError, TimeoutError) as exc:
-                self.store.add_exception('qq_image_error', 'QQ图片未能读取，未向模型发送失效链接', exc, scope_id=scope_id)
-                raise ValueError('这张QQ图片未能读取，可能已过期或连接受限，请重新发送图片后重试。') from exc
+                try:
+                    async with asyncio.timeout(QQ_IMAGE_BATCH_TIMEOUT):
+                        images = await self._resolve_qq_image_refs(scope_id, images, before_send=before_send)
+                        if before_send is not None and not before_send():
+                            raise QQImageSourceChanged('图片来源或权限已变化')
+                        tasks = [asyncio.create_task(load(image)) for image in images]
+                        await asyncio.gather(*tasks, return_exceptions=True)
+                except QQImageSourceChanged:
+                    raise
+                except (ValueError, OSError, TimeoutError) as exc:
+                    batch_error = exc
+                prepared, errors = [], []
+                for task in tasks:
+                    if task.done() and not task.cancelled() and task.exception() is None:
+                        prepared.append(task.result())
+                    else:
+                        errors.append(task.exception() if task.done() and not task.cancelled() else batch_error)
+                if not tasks and batch_error is not None:
+                    errors = [batch_error] * total
+                if errors:
+                    first = next((error for error in errors if error is not None), batch_error) or TimeoutError('图片读取超时')
+                    self.store.add_exception('qq_image_error', 'QQ图片未能读取，未向模型发送失效链接', first,
+                                             scope_id=scope_id, unreadable=len(errors), total=total)
+                return prepared, len(errors)
             finally:
                 for task in tasks:
                     if not task.done():
@@ -409,7 +434,7 @@ class ChatService:
         if (not text and not images) or len(text) > 12000:
             raise ValueError('消息需为 1—12000 个字符，或附一张图片')
         images = validate_images(images or [], allow_onebot_refs=scope_id.startswith('qq:'))
-        image_sources = {}
+        image_sources, unreadable_images = {}, 0
         if images and scope_id.startswith(('qq:', 'qqofficial:')):
             scope = self._allowed(scope_id, user_id, metadata)
             if not self._request_current(scope_id, user_id, metadata):
@@ -438,7 +463,9 @@ class ChatService:
                         and (not image_group or self._group_sources_current(image_group))
                         and (not image_sources or (not self._sources_changed(scope_id, image_sources)
                             and self.store.message_source_snapshot_current(scope_id, image_sources))))
-            images = await self._prepare_qq_images(scope_id, images, before_send=image_current)
+            images, unreadable_images = await self._prepare_qq_images(scope_id, images, before_send=image_current)
+            if not images and not text:
+                raise ValueError('这张QQ图片未能读取，可能已过期或连接受限，请重新发送图片后重试。')
         async with timed_lock(self._locks[scope_id], 'scope_wait_ms'):
             scope = self._allowed(scope_id, user_id, metadata)
             if (not self._request_current(scope_id, user_id, metadata)
@@ -468,6 +495,8 @@ class ChatService:
                 self._capture_schedule_material(user_message)
                 if scope.get('auto_memory',True):self.memory_lifecycle.observe(scope_id,str(user_id))
             metadata = dict(metadata, source_ids=current_ids)
+            if unreadable_images:
+                metadata['_unreadable_images'] = unreadable_images
             local_turn = self._local_turn(scope_id, user_id, metadata)
             turn_source_snapshot = {} if local_turn else None
             if local_turn:
@@ -1191,6 +1220,9 @@ class ChatService:
                 if source['id'] not in handled and source['id'] in metadata.get('_tool_source_ids', metadata.get('source_ids', [])))
         elif ':group:' in scope['id']:
             content = f"[当前请求人 {user_id}，引用消息 {metadata.get('reply_to_id') or '无'}]\n" + content
+        if metadata.get('_unreadable_images'):
+            content += (f"\n【系统说明：本轮有 {metadata['_unreadable_images']} 张图片未能读取（可能已过期或过大），"
+                        '你看不到它们的内容；不要描述或猜测这些图片，需要时请对方重新发送。】')
         if images:
             content = [{'type': 'text', 'text': content}] + [{'type': 'image_url', 'image_url': {'url': x}} for x in images]
         messages.append({'role': 'user', 'content': content})

@@ -179,15 +179,23 @@ async def test_failed_qq_image_read_is_timed_and_never_calls_the_model(tmp_path,
         raise TimeoutError('fixture image deadline')
     monkeypatch.setattr(stickers, 'download_image', download)
     async def model(*args, **kwargs):
-        pytest.fail('the inaccessible image must not be sent upstream')
+        pytest.fail('a picture-only message with nothing readable has nothing to send upstream')
     chat.provider.complete = model
     try:
         with pytest.raises(ValueError, match='图片未能读取'):
-            await chat.respond('qq:private:303', '303', '看看图片', images=['https://fixture.invalid/image.png'])
+            await chat.respond('qq:private:303', '303', '', images=['https://fixture.invalid/image.png'])
         event = next(item for item in store.list_events() if item['kind'] == 'chat_timing')
         assert event['details']['status'] == 'failed'
         assert event['details']['timings']['image_prepare_ms'] >= 10
         assert 'reply_model_ms' not in event['details']['timings']
+        # With text in the same message, the unreadable link is dropped and the text is answered.
+        sent = []
+        async def text_only(messages, **kwargs):
+            sent.append(messages)
+            return await Model().complete(messages, **kwargs)
+        chat.provider.complete = text_only
+        result = await chat.respond('qq:private:303', '303', '看看图片', images=['https://fixture.invalid/image.png'])
+        assert result['reply'] and sent and 'fixture.invalid' not in str(sent)
     finally:
         await chat.close()
         store.close()

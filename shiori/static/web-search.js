@@ -70,7 +70,7 @@ window.ShioriWebSearch = (() => {
 
   async function render() {
     const config = saved(), id = selected(), status = await loadStatus();
-    return heading("WEB SEARCH","网页搜索","为聊天配置真实网页检索，查看来源链接和每日搜索次数。")
+    return heading("","网页搜索","为聊天配置网页检索，查看来源链接和每日搜索次数。")
       + `<section class="panel settings-section" data-web-search><h2>搜索设置</h2><form data-form="web-search" data-provider="${e(id)}">`
       + toggle("enabled","启用网页搜索","关闭聊天、蒸馏与兴趣探索中的通用网页搜索。",config.enabled !== false)
       + select("provider","搜索渠道",Object.entries(presets).map(([key,item]) => [key,item.name]),id)

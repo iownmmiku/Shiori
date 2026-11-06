@@ -858,9 +858,9 @@ function main() {
   //      "扩展工具", and the add action reads 添加MCP服务.
   {
     assert.ok(!toolsPageSource.includes("扩展工具"), "the MCP page no longer says 扩展工具");
-    assert.match(toolsPageSource, /"MCP","连接你选择的 MCP 服务/, "the page title is MCP");
+    assert.match(toolsPageSource, /"MCP","连接 MCP 服务/, "the page title is MCP");
     assert.match(toolsPageSource, /button\("添加MCP服务","new-mcp"/, "the add action reads 添加MCP服务");
-    assert.match(toolsPageSource, /empty\("tools","添加你需要的 MCP 服务"/, "the empty state reads MCP");
+    assert.match(toolsPageSource, /empty\("tools","还没有 MCP 服务"/, "the empty state reads MCP");
     assert.match(toolsPageSource, /<h2>我的 MCP 服务<\/h2>/, "the services section reads MCP");
     assert.match(toolsPageSource, /所有 MCP 调用均需本地逐次批准/, "the approval notice reads MCP");
     // The sidebar card, the breadcrumb and the page title must agree.

@@ -1,4 +1,4 @@
-/* Event memories extend the Rhine archive styling without replacing legacy cards. */
+/* Event memories extend the record cards without replacing legacy ones. */
 .memory-kind-filters{display:flex;gap:7px;flex-wrap:wrap;margin:0 0 18px}
 .memory-event-card{display:flex;flex-direction:column;min-width:0}
 .memory-event-card .record-actions{margin-top:auto;padding-top:16px}
@@ -12,19 +12,19 @@
 .memory-event-card .record-meta{padding-top:11px;border-top:1px solid var(--line-2);margin-top:10px;margin-bottom:10px}
 .memory-event-detail{padding:0 0 8px}
 :root .memory-event-detail>h3{font-size:22px;line-height:1.55;overflow-wrap:anywhere;margin:6px 0 14px}
-.memory-event-detail>.memory-event-summary{padding:13px 15px;border-left:2px solid var(--teal);background:var(--panel-2);font-size:13px;line-height:1.9;white-space:pre-wrap;overflow-wrap:anywhere}
+.memory-event-detail>.memory-event-summary{padding:13px 15px;border-left:3px solid var(--teal);border-radius:0 10px 10px 0;background:var(--panel-2);font-size:13px;line-height:1.9;white-space:pre-wrap;overflow-wrap:anywhere}
 .memory-event-detail>h4{font-size:12px;letter-spacing:.4px;margin:22px 0 8px;color:var(--ink)}
 .memory-event-narrative{font-size:13px;line-height:2;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--ink-2)}
 :root .memory-detail-text{max-height:none;white-space:pre-wrap;overflow-wrap:anywhere}
-.memory-event-form{padding:16px;border:1px solid var(--line);border-left:2px solid var(--teal);background:var(--panel-2);margin:0 0 22px}
+.memory-event-form{padding:16px;border:1px solid var(--line);border-left:3px solid var(--teal);border-radius:12px;background:var(--panel-2);margin:0 0 22px}
 .memory-event-form .field:last-child{margin-bottom:0}
-.memory-event-form>.memory-event-time{margin-top:4px;font-size:10px}
+.memory-event-form>.memory-event-time{margin-top:4px;font-size:11px}
 .memory-legacy-note{font-size:11px;line-height:1.9;color:var(--muted);margin:8px 0 16px}
 .memory-legacy-note>.btn{margin-left:7px}
 .memory-source-section{border-top:1px solid var(--line);margin-top:23px;padding-top:19px}
 .memory-source-section>h3,.memory-conflict-section>h3{font-size:14px;margin-bottom:10px}
 .memory-source-section>.help-caption{margin:0 0 12px}
-.memory-source-section .source-item{padding:12px 14px;border-left:2px solid var(--line);background:var(--panel-2)}
+.memory-source-section .source-item{padding:12px 14px;border-left:3px solid var(--line-3);border-radius:0 10px 10px 0;background:var(--panel-2)}
 .memory-source-section .source-item>p{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.9;font-size:12px}
 .memory-source-unavailable{color:var(--muted)}
 .memory-source-unavailable>small{overflow-wrap:anywhere}

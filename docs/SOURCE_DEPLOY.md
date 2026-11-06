@@ -1,6 +1,6 @@
 # Shiori 源码部署指南
 
-本文描述当前 Shiori 源码部署。稳定版为 0.2.0，本地 0.2.1-beta 尚未发布；安装包、便携包与源码在[GitHub Releases](https://github.com/iownmmiku/Shiori/releases)按实际公开资产下载。端口告警与 `--strict-port` 继续可用；完整隔离、HTTPS、Linux/Docker步骤与验收范围见[部署与安全说明](DEPLOYMENT_AND_SAFETY.md)。
+本文描述当前 Shiori 源码部署。当前源码版本为 0.2.1；安装包、便携包与源码在[GitHub Releases](https://github.com/iownmmiku/Shiori/releases)按实际公开资产下载。端口告警与 `--strict-port` 继续可用；完整隔离、HTTPS、Linux/Docker步骤与验收范围见[部署与安全说明](DEPLOYMENT_AND_SAFETY.md)。
 
 0.1.6 及更早版本内置旧仓库地址，需要从 Shiori 发行页手动获取新版；0.2.0 起支持应用内切换。源码有本地修改时不会自动覆盖，应先保留改动，再在独立目录部署目标源码。试用测试版时使用单独的数据副本，勿让两个实例同时写同一目录；历史版本降级不直接覆盖当前数据，详见[版本与更新](UPDATES.md)。
 
@@ -161,4 +161,4 @@ print(result['name'], result['version'])
 
 真实模式显式开启后可能计费，见[回放说明](archive/REPLAY-v0.6.md)。源码发行白名单包括部署文件、核心与兼容包；维护者构建使用`scripts/package_source.py`和`scripts/build.ps1`。
 
-源码支持在“版本与更新”选择已发布的目标版本，校验后由更新助手替换发行清单中的程序文件并重启；不会自动覆盖本地修改。源码目录需可写，Docker 仍通过镜像更新。测试版需开启“显示测试版”；当前 0.2.1-beta 尚未发布。具体流程与边界见[更新指南](UPDATES.md)。
+源码支持在“版本与更新”选择已发布的目标版本，校验后由更新助手替换发行清单中的程序文件并重启；不会自动覆盖本地修改。源码目录需可写，Docker 仍通过镜像更新。测试版需开启“显示测试版”。具体流程与边界见[更新指南](UPDATES.md)。

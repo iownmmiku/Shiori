@@ -67,7 +67,7 @@ async function main() {
 
   quick.open();
   assert.match(content.innerHTML,/原称呼/);
-  assert.match(content.innerHTML,/先聊起来，其他随时再设置/);
+  assert.match(content.innerHTML,/先连上模型，其他稍后再设置/);
   assert.ok(!calls.length,"opening setup must never save, probe, or overwrite configuration");
   activeForm = {values:{name:"unsaved-name",aliases:"unsaved"}};
   await quick.handleAction("quick-skip",{});

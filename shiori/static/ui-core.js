@@ -16,10 +16,10 @@ function toast(message,error = false) {
   syncToastLayer();
   const item = document.createElement("div"); item.className = `toast${error ? " error" : ""}`;
   item.innerHTML = icon(error ? "info" : "check") + `<span>${e(message)}</span>`;
-  $("#toast-region").append(item); setTimeout(() => item.remove(),error ? 8000 : 4200);
+  $("#toast-region").append(item); setTimeout(() => { item.classList.add("leaving"); setTimeout(() => item.remove(),280); },error ? 8000 : 4200);
 }
 
-function heading(eyebrow,title,description,actions = "") { return `<div class="page-heading"><div><div class="eyebrow">${e(eyebrow)}</div><h1>${e(title)}</h1><p>${e(description)}</p></div><div class="heading-actions">${actions}</div></div>`; }
+function heading(eyebrow,title,description,actions = "") { return `<div class="page-heading"><div>${eyebrow ? `<div class="eyebrow">${e(eyebrow)}</div>` : ""}<h1>${e(title)}</h1>${description ? `<p>${e(description)}</p>` : ""}</div><div class="heading-actions">${actions}</div></div>`; }
 
 function button(text,action,style = "",symbol = "",attrs = "") { return `<button type="button" class="btn ${style}" data-action="${e(action)}" ${attrs}>${symbol ? icon(symbol) : ""}${e(text)}</button>`; }
 

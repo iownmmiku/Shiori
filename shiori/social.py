@@ -7,7 +7,7 @@ import json
 import re
 import time
 from collections import defaultdict, deque
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from uuid import uuid4
 
 from .settings import resolve_model, resolved_identity, resolved_debounce

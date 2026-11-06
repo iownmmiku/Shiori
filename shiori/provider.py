@@ -11,7 +11,7 @@ import heapq
 import uuid
 import hashlib
 from collections import OrderedDict
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from contextlib import asynccontextmanager, contextmanager
 from contextvars import ContextVar
 from urllib.parse import urlsplit
@@ -20,7 +20,7 @@ import httpx
 from .settings import (resolve_model, MAX_OUTPUT_TOKENS, CUSTOM_PARAM_RESERVED,
                        CUSTOM_PARAM_MAX_ABS, CUSTOM_PARAM_MAX_STRING, CUSTOM_PARAM_MAX_JSON,
                        CUSTOM_PARAM_MAX_COUNT)
-from .timezones import config_zone, day_bounds, refresh_dispatch_time
+from .timezones import day_bounds, refresh_dispatch_time
 from .model_stream import (receive_chat, ModelStreamError, IncompleteModelStreamError,
                            usage_token_count, preserve_completed_body)
 from .chat_preview import emit_preview, preview_active

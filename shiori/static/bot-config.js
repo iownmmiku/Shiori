@@ -24,7 +24,7 @@
     for(const id of ['model-section','providers-section','routing-section','updates-section','qq-section','identity-section','computer-section','admins-section','output-section','planner-budget-section','memory-settings-section','context-section','exploration-section'])template.content.querySelector('#'+id)?.remove();
     template.content.querySelectorAll('section').forEach(node=>{if(node.querySelector('[data-form="routing"],[data-form="provider"]'))node.remove();});
     template.content.querySelectorAll('.settings-foldout').forEach(node=>{if(!node.querySelector('section,form'))node.remove();});
-    return template.innerHTML.replace('<h1>设置与连接</h1>','<h1>系统设置</h1>').replace('连接模型与 QQ，管理预算，也照顾好本地数据。','管理登录与远程入口、预算和本地数据。').replace('<div class="settings-main">','<div class="settings-main"><section class="panel settings-section"><h2>机器人配置已集中到一页</h2><p>名称、人格、回复、QQ 接入和电脑权限都在这里调整。</p>'+button('打开机器人配置','go-persona','primary','settings')+'</section>');
+    return template.innerHTML.replace('<h1>设置与连接</h1>','<h1>系统设置</h1>').replace('<p>模型、QQ、预算和本地数据。</p>','<p>登录与远程入口、预算和本地数据。</p>').replace('<div class="settings-main">','<div class="settings-main"><section class="panel settings-section"><h2>机器人配置已集中到一页</h2><p>名称、人格、回复、QQ 接入和电脑权限都在这里调整。</p>'+button('打开机器人配置','go-persona','primary','settings')+'</section>');
   };
   experience.renderPersonas=async()=>{
     const tab=state.botTab || "basic";
@@ -42,7 +42,7 @@
       const settings=enhanceQQ(await settingsPage());
       body=tab==="qq"?section(settings,"qq-section"):section(settings,"computer-section")+section(settings,"admins-section");
     }
-    return heading("BOT CONFIGURATION","机器人配置","先设置一份默认配置，所有新聊天自动使用。特殊聊天再单独调整。",button("快速入门","setup","","spark"))+`<nav class="bot-config-tabs" aria-label="机器人配置分类">${tabs.map(([id,title])=>button(title,"bot-tab",id===tab?"primary":"ghost","",`data-id="${id}" aria-pressed="${id===tab}"`)).join("")}</nav><div class="bot-config-body">${body}</div>`;
+    return heading("","机器人配置","新聊天默认使用这份配置，个别聊天可以单独调整。",button("快速入门","setup","","spark"))+`<nav class="bot-config-tabs" aria-label="机器人配置分类">${tabs.map(([id,title])=>button(title,"bot-tab",id===tab?"primary":"ghost","",`data-id="${id}" aria-pressed="${id===tab}"`)).join("")}</nav><div class="bot-config-body">${body}</div>`;
   };
   const originalAction=experience.handleAction;
   experience.handleAction=async(action,target)=>{
