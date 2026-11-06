@@ -137,7 +137,12 @@ def test_cancelled_cleanup_keeps_lock_until_worker_finishes(tmp_path, monkeypatc
                     request.cancel()
                 await asyncio.sleep(.02)
                 for _ in range(2):
-                    request.cancel()
+                    # Repeat the same kind of cancellation. Since AnyIO 4.16 a
+                    # scope no longer swallows native task.cancel() calls.
+                    if cancel_scope:
+                        held['scope'].cancel()
+                    else:
+                        request.cancel()
                     await asyncio.sleep(.02)
                     assert not request.done(), 'cancellation abandoned the cleanup worker'
                     assert mgr._cleaning and not finished.is_set()
