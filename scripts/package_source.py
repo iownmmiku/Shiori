@@ -30,7 +30,7 @@ TREE_TYPES = {
     'third_party/pystray': {'.py', '.md', '.json', '.txt'},
 }
 EXCLUDED_DIRS = {'data', 'build', 'dist', '__pycache__', 'node_modules', 'licenses', 'desktop-profile'}
-EXCLUDED_NAMES = {'settings.json', 'admin.token', 'server.json', 'jobs.json', 'persona_knowledge.json', 'webui-password.json'}
+EXCLUDED_NAMES = {'settings.json', 'admin.token', 'server.json', 'jobs.json', 'persona_knowledge.json', 'webui-password.json', 'webui-sessions.json'}
 RESOURCE_NOTICES = {'LICENSE', 'NOTICE', 'COPYING', 'LICENSE.txt', 'NOTICE.txt'}
 STATIC_TYPES = {'.html', '.js', '.css', '.md', '.svg', '.png', '.jpg', '.jpeg', '.ico'}
 

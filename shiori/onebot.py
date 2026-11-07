@@ -9,18 +9,31 @@ import re
 import time
 import uuid
 from collections import OrderedDict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlsplit
 
-from .social import ConversationFlow
+from .social import IMAGE_ONLY_TEXT, ConversationFlow
 from .settings import resolve_model, resolved_identity
 from .output import OutputLimitError, split_transport_output
+from .delivery import NOT_SENT
+from .send_pacing import SendPacer, refusal
 from .access import manager_for, private_allowed, chat_allowed
 from .qq_diagnostics import QQDiagnostics, private_scope
 from .timezones import config_zone, ingress_times
 
 
 IMAGE_RESOLVE_TIMEOUT = 10.0
+
+
+class _RateLimited:
+    """A part QQ refused for the group's per-minute limit; never delivered."""
+    __slots__ = ('limit',)
+
+    def __init__(self, limit):
+        self.limit = limit
+
+    def __bool__(self):
+        return False
 
 
 def _ids(value):
@@ -62,7 +75,10 @@ class OneBotBridge:
         self._outgoing = OrderedDict()
         self._diagnostics = QQDiagnostics(store, 'onebot')
         self._failure_feedback_at = {}
+        self._pacer = SendPacer()
+        self._pacer_loaded = False
         self._flow = ConversationFlow(store, settings, chat, self._emit, self._allowed, self._diagnostics.mark)
+        self._flow.pace, self._flow.send_room = self._pace, self._send_room
         chat._onebot_image_resolver = self.resolve_images
         if getattr(chat, 'character_schedule', None):
             from .schedule_delivery import ScheduleDelivery
@@ -247,7 +263,6 @@ class OneBotBridge:
             return 'connector_disabled'
         if self.settings.get().get('paused'):
             return 'paused'
-        cfg = self._config()
         parts = scope_id.split(':')
         if len(parts) != 3 or parts[0] != 'qq' or not parts[2].isdigit():
             return 'invalid_scope'
@@ -433,7 +448,7 @@ class OneBotBridge:
         if not text and not images:
             self._diagnostics.mark('empty_message', scope_id=scope_id, user_id=user_id)
             return
-        text = text or '请看看这张图片。'
+        text = text or IMAGE_ONLY_TEXT
         metadata = {**message_times, 'platform': 'qq', 'platform_message_id': platform_id,
                     'onebot_self_id': str(payload.get('self_id', '')), 'source_id': platform_id,
                     'sender_name': str((payload.get('sender') or {}).get('card') or (payload.get('sender') or {}).get('nickname') or user_id),
@@ -550,14 +565,73 @@ class OneBotBridge:
             receipt = dict(metadata or {})
             if len(parts) > 1:
                 receipt['output_part'] = {'index': index, 'total': len(parts)}
-            if not await self._send_part(scope_id, part, metadata=receipt):
-                return False
+            sent = await self._send_part(scope_id, part, metadata=receipt)
+            if not sent:
+                return sent
         return bool(parts)
 
+    def _limits(self):
+        """Limits refused within the last day survive a restart."""
+        if not self._pacer_loaded:
+            self._pacer_loaded = True
+            since = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat(timespec='microseconds').replace('+00:00', 'Z')
+            try:
+                with self.store._lock:
+                    rows = self.store._conn.execute(
+                        "SELECT data FROM events WHERE kind='qq_rate_limited' AND created_at>=? ORDER BY created_at",
+                        (since,)).fetchall()
+                for (data,) in rows:
+                    details = json.loads(data).get('details') or {}
+                    if isinstance(details.get('scope_id'), str) and type(details.get('limit')) is int and 1 <= details['limit'] <= 60:
+                        self._pacer.learn(details['scope_id'], details['limit'])
+            except Exception:
+                pass  # Missing history only means the limit is learned again.
+        return self._pacer
+
+    def _count_send(self, scope_id):
+        if ':group:' in scope_id:
+            self._pacer.record(scope_id)
+
+    def _send_room(self, scope_id):
+        return self._limits().room(scope_id) if ':group:' in scope_id else None
+
+    async def _pace(self, scope_id):
+        """Wait until the group's learned per-minute limit has room."""
+        if ':group:' not in scope_id:
+            return 0.0
+        pacer, waited = self._limits(), 0.0
+        while waited < 3 * pacer.window and (delay := pacer.delay(scope_id)) > 0:
+            await asyncio.sleep(delay)
+            waited += delay
+        return waited
+
     async def _send_part(self, scope_id, text, *, metadata=None):
-        started = time.perf_counter()
-        sticker=(metadata or {}).get('sticker')
+        sticker = (metadata or {}).get('sticker')
         if not self._allowed(scope_id) or self._socket is None or not str(text).strip() and not sticker:
+            return False
+        waited = await self._pace(scope_id)
+        result = await self._send_once(scope_id, text, metadata, waited)
+        if not isinstance(result, _RateLimited):
+            return result
+        # QQ refused this part for the group's rate limit, so it was never
+        # delivered. Send it once more after the window has room, while the
+        # caller still wants it; a second refusal is final.
+        waited = await self._pace(scope_id)
+        guard = (metadata or {}).get('send_current')
+        if not self._allowed(scope_id) or callable(guard) and not guard():
+            self.store.add_event('qq_delivery', '限速等待后本段已不再需要发送；确认未送达', scope_id=scope_id,
+                                 assistant_message_id=(metadata or {}).get('assistant_message_id'),
+                                 output_part=(metadata or {}).get('output_part'), delivery_status='not_sent')
+            return NOT_SENT
+        result = await self._send_once(scope_id, text, metadata, waited, retry=True)
+        return NOT_SENT if isinstance(result, _RateLimited) else result
+
+    async def _send_once(self, scope_id, text, metadata, waited=0.0, *, retry=False):
+        """One dispatch: True, False (delivery unknown), NOT_SENT (refused),
+        or _RateLimited when QQ refused it for the group's rate limit."""
+        started = time.perf_counter()
+        sticker = (metadata or {}).get('sticker')
+        if not self._allowed(scope_id) or self._socket is None:
             return False
         try:
             scope = self.store.get_scope(scope_id)
@@ -592,7 +666,11 @@ class OneBotBridge:
                               ack_wait_ms=round(max(0, (received or now) - write_finished) * 1000, 2))
             if received is not None:
                 values['ack_resume_ms'] = round(max(0, now - received) * 1000, 2)
+            if waited:
+                values['rate_wait_ms'] = round(waited * 1000, 2)
             return values
+        part = {'assistant_message_id': (metadata or {}).get('assistant_message_id'),
+                'output_part': (metadata or {}).get('output_part')}
         try:
             action = {'action': 'send_group_msg' if kind == 'group' else 'send_private_msg', 'params': params, 'echo': echo}
             write_started = time.perf_counter()
@@ -611,15 +689,30 @@ class OneBotBridge:
                 result = await future
             confirmed = bool(result and result.get('status') == 'ok' and result.get('retcode') == 0
                              and isinstance(result.get('data'), dict) and result['data'].get('message_id') is not None)
+            refused, limit = refusal(result)
+            if confirmed or not refused:
+                self._count_send(scope_id)  # accepted, or possibly delivered
             if not confirmed:
                 code = result.get('retcode') if isinstance(result, dict) else None
                 code = str(code)[:16] if isinstance(code, (int, float)) else None
                 self._last_error = '连接器未确认送达' + (f'（retcode={code}）' if code is not None else '')
                 self._diagnostics.mark('send_failed', scope_id=scope_id, stage='failed')
+                if limit and ':group:' in scope_id:
+                    wait = self._pacer.refused(scope_id, limit)
+                    self._last_error = f'QQ 群限速：每分钟最多 {limit} 条'
+                    self.store.add_event('qq_rate_limited',
+                                         '群限速再次拒收本段，确认未送达；不再重试' if retry else
+                                         f'群限速拒收本段（每分钟 {limit} 条），确认未送达；约 {round(wait)} 秒后重发一次',
+                                         scope_id=scope_id, limit=limit, wait_seconds=round(wait, 1), retry=retry,
+                                         platform_code=code, send_timing=timings(), delivery_status='not_sent', **part)
+                    return _RateLimited(limit)
+                if refused:
+                    reason = str(result.get('wording') or result.get('message') or '')[:160]
+                    self.store.add_event('qq_delivery', 'QQ 拒收本段，确认未送达', scope_id=scope_id, platform_code=code,
+                                         reason=reason, send_timing=timings(), delivery_status='not_sent', **part)
+                    return NOT_SENT
                 self.store.add_event('qq_delivery', 'QQ 发送结果未确认；请勿自动重复发送', scope_id=scope_id,
-                                     platform_code=code,
-                                     assistant_message_id=(metadata or {}).get('assistant_message_id'), send_timing=timings(),
-                                     output_part=(metadata or {}).get('output_part'))
+                                     platform_code=code, send_timing=timings(), **part)
             else:
                 self._diagnostics.mark('reply_failed' if (metadata or {}).get('failure_feedback') else 'sent', scope_id=scope_id,
                                        stage='failed' if (metadata or {}).get('failure_feedback') else 'sent', emit=False)
@@ -633,6 +726,7 @@ class OneBotBridge:
             return confirmed
         except asyncio.CancelledError:
             if dispatched:
+                self._count_send(scope_id)
                 try:
                     self.store.add_event('qq_delivery', 'QQ发送等待已取消，已派发分段的送达状态未知；不会自动重发',
                         scope_id=scope_id, assistant_message_id=(metadata or {}).get('assistant_message_id'),
@@ -641,6 +735,8 @@ class OneBotBridge:
                     pass  # A failed timing write must not replace cancellation.
             raise
         except Exception as exc:
+            if dispatched:
+                self._count_send(scope_id)
             self._diagnostics.mark('send_failed', scope_id=scope_id, stage='failed')
             self._last_error = f'发送结果未确认（{type(exc).__name__}）'
             self.store.add_exception('qq_delivery', '发送超时或连接中断，送达状态未知', exc, scope_id=scope_id,

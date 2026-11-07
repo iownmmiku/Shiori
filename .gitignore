@@ -22,6 +22,7 @@ settings.json
 server.json
 desktop.json
 webui-password.json
+webui-sessions.json
 .env
 .env.*
 !.env.example

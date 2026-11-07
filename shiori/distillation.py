@@ -24,6 +24,12 @@ from .tools import read_public, search_public
 from .character_catalog import CharacterCatalog, wiki_works, work_matches
 
 RESOURCE_DIR = Path(__file__).parent / 'resources' / 'csp'
+# Waits before each retry of one analysis step. A step has no side effects,
+# so retrying is safe; every attempt still counts against the task budget.
+RETRY_DELAYS = (1.0, 4.0)
+# Output room for the persona text itself: 2500—4500 Chinese characters need
+# well over 3000 tokens, and running out costs a full, larger second try.
+PERSONA_TOKENS, COMPRESS_TOKENS = 6000, 4500
 EXCLUDED_DOMAINS = ('zhihu.com', 'mp.weixin.qq.com', 'baike.baidu.com')
 DIMENSIONS = (
     ('01-setting', '身份设定与采用的时间线', '身份 世界观 版本 时间线'),
@@ -372,7 +378,8 @@ class DistillationService:
             budget.check()
             checkpoint['reused'] += 1
             return checkpoint['state']['results'][cache_key]
-        for attempt in range(2):
+        attempts = len(RETRY_DELAYS) + 1
+        for attempt in range(attempts):
             reserved = budget.reserve(messages, max_tokens)
             if checkpoint:
                 checkpoint['state']['usage'] = budget.summary()
@@ -388,6 +395,13 @@ class DistillationService:
                         return not cfg.get('paused') and current==selected and selected['id'] in cfg.get('routing',{}).get('fallback',[])
                     return True
                 options={'config':selected} if selected is not None else {}
+                if attempt == attempts - 1 and getattr(budget, 'stream_broken', False):
+                    # Long answers through relays most often fail mid-stream;
+                    # the last try asks for the whole answer in one response.
+                    base = selected if selected is not None else (
+                        self.provider.resolve('distillation', scope_id) if hasattr(self.provider, 'resolve') else None)
+                    if isinstance(base, dict) and base.get('stream_mode', 'off') != 'off':
+                        options = {'config': dict(base, stream_mode='off')}
                 result = await self.provider.complete(messages, purpose='distillation', scope_id=scope_id,
                                                       max_tokens=max_tokens, before_send=authorized,**options)
                 break
@@ -400,9 +414,12 @@ class DistillationService:
                 if checkpoint:
                     checkpoint['state']['usage'] = budget.summary()
                     checkpoint['save'](distillation_cache=checkpoint['state'])
-                if attempt:
-                    raise type(exc)(str(exc) + '；当前分析已重试1次仍未完成。可在模型供应商中选择专用人格蒸馏模型；已完成步骤保留。') from exc
+                if attempt == attempts - 1:
+                    raise type(exc)(str(exc) + f'；当前分析已重试{attempts - 1}次仍未完成。已完成的步骤保存在检查点，'
+                                    '可在任务列表点“继续”从断点接着做；也可以在模型供应商中为人格蒸馏指定更稳定的模型。') from exc
                 budget.check()
+                if isinstance(exc, ProviderStreamError):
+                    budget.stream_broken = True
                 if isinstance(exc,ProviderOutputBudgetError):max_tokens=min(16000,max_tokens*4)
                 if hasattr(self.provider,'settings') and hasattr(self.provider,'resolve'):
                     from .settings import resolve_model
@@ -413,9 +430,9 @@ class DistillationService:
                             budget.active_model=candidate
                             break
                 await _progress(getattr(budget, 'progress', None), 'retry',
-                    '模型输出额度耗尽，正在预算内扩大输出额度后重试（最多1次）' if isinstance(exc,ProviderOutputBudgetError) else
-                    '模型连接未完整结束，正在重试当前分析（最多1次，计入任务配额；已完成步骤保留）')
-                await asyncio.sleep(.4)
+                    f'模型输出额度耗尽，正在预算内扩大输出额度后重试（第 {attempt + 1}/{attempts - 1} 次）' if isinstance(exc,ProviderOutputBudgetError) else
+                    f'模型连接未完整结束，{RETRY_DELAYS[attempt]:g} 秒后重试当前分析（第 {attempt + 1}/{attempts - 1} 次，计入任务配额；已完成步骤保留）')
+                await asyncio.sleep(RETRY_DELAYS[attempt])
         budget.finish(result, reserved)
         budget.check()
         content = result.get('content')
@@ -478,7 +495,7 @@ class DistillationService:
             await _progress(progress, 'persona', '正在按描述生成人格草稿', 0, 1)
             personality = await self._complete('按以下要求编写可直接用于聊天的人格正文，包含身份设定、性格、表达、互动习惯和边界。'
                 '不超过 5000 字，只返回正文，不返回 JSON 或代码围栏。人格名称：' + name,
-                description, budget, scope_id, max_tokens=3000, creative=True)
+                description, budget, scope_id, max_tokens=PERSONA_TOKENS, creative=True)
             if len(personality) > 5600:
                 raise ValueError('人格草稿过长，请缩短描述或调整模型后重试')
             result = {'mode': mode, 'name': name, 'personality': personality, 'prompt': personality,
@@ -500,10 +517,10 @@ class DistillationService:
                 + template)
         if len(evidence) > 70000:
             raise ValueError('人格合成资料过长，请拆分材料，不能静默丢弃后续内容')
-        personality = await self._complete(task, evidence, budget, scope_id, max_tokens=3000)
+        personality = await self._complete(task, evidence, budget, scope_id, max_tokens=PERSONA_TOKENS)
         if len(personality) > 5600:
             personality = await self._complete('将下列已提炼人格压缩至 5000 字以内，保留行为规则、矛盾与资料边界，不增加新事实。只返回正文。',
-                                               personality, budget, scope_id, max_tokens=2500)
+                                               personality, budget, scope_id, max_tokens=COMPRESS_TOKENS)
         if len(personality) > 5600:
             raise ValueError('人格草稿超出聊天人格长度限制，请调整材料或模型后重试')
         boundary = '\n\n资料边界：本稿是基于所选材料的行为与表达描写；未提供的信息保持未知。工具和电脑权限始终由 Shiori 的管理员设置决定。'

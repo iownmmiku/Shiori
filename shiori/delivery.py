@@ -8,6 +8,20 @@ from .db import message_fingerprint, utc_now
 from .settings import resolved_identity
 
 
+class _NotSent:
+    """Falsy send result: the platform refused the part, so it never arrived."""
+    __slots__ = ()
+
+    def __bool__(self):
+        return False
+
+    def __repr__(self):
+        return 'NOT_SENT'
+
+
+NOT_SENT = _NotSent()
+
+
 def _delivery_fingerprint(record):
     # Keep legacy memory/source hashes compatible, while binding receipt
     # snapshots to the top-level clock fields used by the current runtime.
@@ -130,7 +144,7 @@ def install_delivery(app,store,onebot,official):
                     ok=await flow.emit(record['scope_id'],part['text'],dict(record['metadata'],assistant_message_id=record.get('assistant_message_id'),output_part={'index':index,'total':len(record['parts'])}))
                 except BaseException:
                     part['status']='unknown';ledger.save(record);raise
-                part['status']='confirmed' if ok else 'unknown';ledger.save(record)
+                part['status']='confirmed' if ok else 'pending' if ok is NOT_SENT else 'unknown';ledger.save(record)
                 if not ok:break
                 sent+=1
             return {'sent':sent,'record':record}

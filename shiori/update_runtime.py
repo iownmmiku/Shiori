@@ -200,7 +200,7 @@ def stage_archive(archive, stage, kind, version):
             if stat.S_ISLNK(mode) or name.casefold() in folded: raise ValueError('更新包包含链接或重名文件')
             folded.add(name.casefold());total += item.file_size
             if total > 4*1024**3 or item.flag_bits & 1: raise ValueError('更新包过大或已加密')
-            if name in ('settings.json','admin.token','webui-password.json',RECEIPT,LEGACY_RECEIPT,*INSTALL_MARKERS): raise ValueError('更新包包含个人配置')
+            if name in ('settings.json','admin.token','webui-password.json','webui-sessions.json',RECEIPT,LEGACY_RECEIPT,*INSTALL_MARKERS): raise ValueError('更新包包含个人配置')
             target = destination(stage, name)
             target.parent.mkdir(parents=True, exist_ok=True)
             with source.open(item) as incoming, target.open('xb') as output: shutil.copyfileobj(incoming, output, 1024*1024)

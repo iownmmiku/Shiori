@@ -40,6 +40,14 @@ class Model:
         return {'content': self.content, 'usage': {'input_tokens': 100, 'output_tokens': 80}}
 
 
+@pytest.fixture(autouse=True)
+def fast_retries(monkeypatch):
+    monkeypatch.setattr('shiori.distillation.RETRY_DELAYS', (0.0, 0.0))
+
+
+
+
+
 @pytest.fixture
 def service(tmp_path):
     pages = {
@@ -256,19 +264,19 @@ async def test_batched_research_resume_reuses_notes_and_retains_failed_attempts(
     for page in pages.values(): page['text'] = '测试人物在测试作品中表现认真。' * 900
     discovery = await engine.discover({'character':'测试人物','work':'测试作品'})
     payload = {'mode':'character','discovery_id':discovery['discovery_id'],'confirmed':True,
-               'max_calls':13,'candidate_ids':[row['id'] for row in discovery['candidates']]}
+               'max_calls':14,'candidate_ids':[row['id'] for row in discovery['candidates']]}
     complete = model.complete
     attempts, saved = [], []
     async def flaky(messages, **kwargs):
         attempts.append(messages)
-        if len(attempts) in (5,6): raise ProviderStreamError('流中断')
+        if len(attempts) in (5,6,7): raise ProviderStreamError('流中断')
         return await complete(messages, **kwargs)
     monkeypatch.setattr(model, 'complete', flaky)
     save = lambda **state:saved.append(json.loads(json.dumps(state)))
     with pytest.raises(ProviderStreamError): await engine.generate(payload, checkpoint=save)
-    assert len(attempts) == 6
+    assert len(attempts) == 7
     result = await engine.generate(payload, checkpoint=save, resume_state=saved[-1]['distillation_cache'])
-    assert len(attempts) == 13 and result['usage']['calls'] == 13
+    assert len(attempts) == 14 and result['usage']['calls'] == 14
     assert result['resumed_steps'] == 4 and result['usage']['estimated']
 
 
@@ -290,7 +298,7 @@ async def test_distillation_retries_current_analysis_once_and_counts_unknown_cos
 
 
 @pytest.mark.anyio
-async def test_distillation_persistent_failure_stops_after_two_and_saves_attempt_budget(service, monkeypatch):
+async def test_distillation_persistent_failure_stops_after_three_and_saves_attempt_budget(service, monkeypatch):
     engine, model, _ = service
     attempts, saved = [], []
     async def fail(messages, **kwargs):
@@ -299,9 +307,9 @@ async def test_distillation_persistent_failure_stops_after_two_and_saves_attempt
     monkeypatch.setattr(model, 'complete', fail)
     with pytest.raises(ProviderStreamError):
         await engine.generate({'mode':'generate','description':'读书伙伴'}, checkpoint=lambda **state:saved.append(json.loads(json.dumps(state))))
-    assert len(attempts) == 2
+    assert len(attempts) == 3
     cache = saved[-1]['distillation_cache']
-    assert cache['usage']['calls'] == 2 and cache['usage']['estimated'] and not cache['results']
+    assert cache['usage']['calls'] == 3 and cache['usage']['estimated'] and not cache['results']
 
 
 @pytest.mark.anyio
@@ -460,3 +468,25 @@ def test_artifact_identifier_never_resolves_outside_storage(service):
         engine.artifact_path('../../admin.token')
     with pytest.raises(ValueError, match='不存在'):
         engine.artifact_path('a' * 32)
+
+
+@pytest.mark.anyio
+async def test_last_retry_after_broken_streams_asks_for_one_whole_response(service, monkeypatch):
+    engine, model, _ = service
+    model.resolve = lambda purpose, scope_id: {'id': 'm', 'model': 'mock', 'stream_mode': 'auto'}
+    complete, configs = model.complete, []
+    async def flaky(messages, **kwargs):
+        configs.append(kwargs.get('config'))
+        if len(configs) < 3: raise ProviderStreamError('流中断')
+        return await complete(messages, **kwargs)
+    monkeypatch.setattr(model, 'complete', flaky)
+    result = await engine.generate({'mode':'generate','description':'温柔的读书伙伴'})
+    assert result['personality'] and configs[:2] == [None, None]
+    assert configs[2]['stream_mode'] == 'off' and configs[2]['model'] == 'mock'
+
+
+@pytest.mark.anyio
+async def test_persona_writing_has_room_for_the_requested_length(service):
+    engine, model, _ = service
+    await engine.generate({'mode':'generate','description':'温柔的读书伙伴'})
+    assert model.calls[-1][1]['max_tokens'] >= 6000

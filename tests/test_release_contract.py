@@ -65,7 +65,7 @@ def test_actual_smoke_feature_guards_use_the_full_public_contract(name, version)
 
 
 def test_release_version_and_web_asset_cache_labels_match():
-    assert __version__ == '0.2.1'
+    assert __version__ == '0.2.2-beta'
     versions = re.findall(r'\?v=([^"&\s]+)', (ROOT / 'shiori/static/index.html').read_text('utf-8'))
     assert versions and set(versions) == {__version__}
 

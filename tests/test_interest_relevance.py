@@ -100,9 +100,10 @@ async def test_compound_focus_rotation_persists_and_keeps_interest_association(e
     await service.explore('topic', manual=True)
     reboot = PersonaKnowledge(store, cfg, None, search, read)
     result = await reboot.explore('topic', manual=True)
-    assert [query.split(' 最新资讯')[0] for query in queries] == ['关东煮', '音乐', '薄荷甜点']
+    # Each run searches its focus, then falls back once with another phrasing.
+    assert queries == ['关东煮', '关东煮 最新', '音乐 最新', '音乐', '薄荷甜点 推荐', '薄荷甜点']
     assert result['last_result']['interest'] == '关东煮与薄荷甜点'
-    assert result['last_result']['query'].startswith('薄荷甜点 ')
+    assert result['last_result']['query'] == '薄荷甜点 推荐；薄荷甜点'
     assert reboot.status()['personas']['topic']['last_focus'] == '薄荷甜点'
     PersonaKnowledge.validate_state(json.loads(reboot.export_state()))
 
@@ -113,7 +114,8 @@ async def test_excluded_interests_do_not_stall_later_interests_or_spend_extra_qu
     store.save_persona({'id': 'topic', 'interests': ['关东煮', '音乐'], 'excluded_topics': ['关东煮']})
     for _ in range(3):
         await service.explore('topic', manual=True)
-    assert len(queries) == 3 and all(query.startswith('音乐 ') for query in queries)
+    # The fallback search belongs to the same exploration and spends no extra quota.
+    assert len(queries) == 6 and all(query.startswith('音乐') for query in queries)
     assert service.status()['searches_today'] == 3
 
 
@@ -122,7 +124,7 @@ async def test_excluding_one_compound_focus_keeps_other_focus_available(env):
     store, cfg, service, queries, _, _ = env
     store.save_persona({'id': 'topic', 'interests': ['关东煮与薄荷甜点'], 'excluded_topics': ['关东煮']})
     await service.explore('topic', manual=True)
-    assert queries[0].startswith('薄荷甜点 ')
+    assert queries[0] == '薄荷甜点'
     assert service.status()['searches_today'] == 1
 
 
@@ -135,15 +137,15 @@ async def test_all_excluded_returns_without_search_or_quota_and_reconfig_recover
     assert not queries and service.status()['searches_today'] == 0
     store.save_persona({'id': 'topic', 'excluded_topics': ['关东煮', '薄荷甜点']})
     await service.explore('topic', manual=True)
-    assert queries[0].startswith('音乐 ')
+    assert queries[0] == '音乐'
 
 
 @pytest.mark.anyio
-async def test_query_stays_within_search_limit_without_losing_date_suffix(env):
+async def test_query_stays_within_search_limit(env):
     store, cfg, service, queries, _, _ = env
     store.save_persona({'id': 'topic', 'interests': ['测试主题' * 40]})
     await service.explore('topic', manual=True)
-    assert len(queries[0]) == 128 and queries[0].endswith('月')
+    assert queries[0] == ('测试主题' * 40)[:100] and all(len(query) <= 128 for query in queries)
 
 
 @pytest.mark.anyio

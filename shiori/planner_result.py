@@ -7,7 +7,10 @@ import json
 MAX_PLAN_CHARS = 16000
 MAX_PLAN_DEPTH = 32
 FIELDS = frozenset(('action', 'target_message_id', 'target_user_id',
-                    'addressed_to_bot', 'intent', 'reason', 'needed_info'))
+                    'addressed_to_bot', 'intent', 'reason', 'needed_info', 'value',
+                    'audience', 'speaker_intent'))
+AUDIENCES = ('bot', 'member', 'group', 'none')
+OPTIONAL = ('needed_info', 'value', 'audience', 'speaker_intent')
 
 
 def response_format(mode):
@@ -21,7 +24,8 @@ def response_format(mode):
             'properties': {'action': {'type': 'string', 'enum': ['reply', 'skip']},
                 'target_message_id': {'type': 'string'}, 'target_user_id': {'type': 'string'},
                 'addressed_to_bot': {'type': 'boolean'}, 'intent': {'type': 'string'},
-                'reason': {'type': 'string'},
+                'reason': {'type': 'string'}, 'value': {'type': 'integer'},
+                'audience': {'type': 'string', 'enum': list(AUDIENCES)}, 'speaker_intent': {'type': 'string'},
                 'needed_info': {'type': 'array', 'items': {'type': 'string'}}},
             'required': sorted(FIELDS)}}}
 
@@ -117,4 +121,25 @@ def parse_plan(text, *, message_id, user_id):
     needed = choice.get('needed_info', [])
     if not isinstance(needed, list) or not all(isinstance(item, str) for item in needed):
         raise PlanValidationError('invalid_type', 'needed_info')
-    return {key: choice[key] for key in FIELDS if key != 'needed_info'} | {'needed_info': needed}
+    value = _value(choice.get('value'))
+    # Who the message is for and what its speaker wants are hints for the
+    # reply; an unusable hint is dropped rather than failing the whole plan.
+    extra = {}
+    if value is not None:
+        extra['value'] = value
+    if choice.get('audience') in AUDIENCES:
+        extra['audience'] = choice['audience']
+    if isinstance(choice.get('speaker_intent'), str) and choice['speaker_intent'].strip():
+        extra['speaker_intent'] = choice['speaker_intent'].strip()[:200]
+    return {key: choice[key] for key in FIELDS if key not in OPTIONAL} | {'needed_info': needed} | extra
+
+
+def _value(value):
+    """The 0—100 worth of speaking up. Missing means the model gave none."""
+    if value is None:
+        return None
+    if isinstance(value, str) and value.strip().isdigit():
+        value = int(value.strip())
+    if type(value) not in (int, float) or value != value or value in (float('inf'), float('-inf')):
+        raise PlanValidationError('invalid_type', 'value')
+    return int(round(min(100, max(0, value))))

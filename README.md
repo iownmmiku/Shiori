@@ -1,10 +1,12 @@
-# Shiori 0.2.1
+# Shiori 0.2.2-beta
 
-> **0.2.1 正式版**：包含 0.2.1-beta 的 Chat 工作台、QQ 聊天管理、事件长期记忆与角色日程，并新增界面重做和多项运行修复。详见[更新日志](RELEASE_NOTES.md)。
+> **[0.2.2-beta 预发布版](https://github.com/iownmmiku/Shiori/releases/tag/v0.2.2-beta)**：QQ 群发言限速与拒收记录、接话积极度、更准确地判断"这句话在对谁说"、WebUI 保持登录、表情包全库通用、兴趣探索与人格蒸馏修复、更详细的运行日志。本版用于测试新功能，试用前请保留完整数据副本。详见[更新日志](RELEASE_NOTES.md)。
+
+> **稳定版仍为 [0.2.1](https://github.com/iownmmiku/Shiori/releases/tag/v0.2.1)**：包含 Chat 工作台、QQ 聊天管理、事件长期记忆、角色日程和界面重做。
 
 > 主仓库为 `iownmmiku/Shiori`；旧 `mikubot` 仓库是没有安装文件的迁移说明占位仓库。**0.1.6 及更早版本无法在应用内更新，请从本仓库发行页手动下载安装包覆盖安装，继续使用原数据目录。**
 
-本次版本为 **0.2.1（正式版）**，GitHub 标签为 `v0.2.1`。提供 Windows 安装版、便携版与源码部署；安装包和便携包无需 Python，源码支持 Python 3.11–3.13。
+本次版本为 **0.2.2-beta（预发布）**，GitHub 标签为 `v0.2.2-beta`，不替代稳定版 0.2.1。提供 Windows 安装版、便携版与源码部署；安装包和便携包无需 Python，源码支持 Python 3.11–3.13。
 
 本机运行的 AI 聊天机器人与任务助手。预装可删除的初音未来人格，支持独立聊天、QQ 接入、记忆、黑话学习、人格蒸馏和管理员电脑任务。
 
@@ -18,7 +20,17 @@
 
 ## 下载与选择
 
-从 **[0.2.1 发行页](https://github.com/iownmmiku/Shiori/releases/tag/v0.2.1)** 展开 Assets 下载。安装包未做 Windows 代码签名，系统可能出现 SmartScreen 提示；运行前核对旁置的同名 `.sha256`。
+日常使用选择 **[稳定版 0.2.1](https://github.com/iownmmiku/Shiori/releases/tag/v0.2.1)**；愿意测试新功能可选择 **[预发布版 0.2.2-beta](https://github.com/iownmmiku/Shiori/releases/tag/v0.2.2-beta)**，展开发行记录的 Assets 下载。安装包未做 Windows 代码签名，系统可能出现 SmartScreen 提示；运行前核对旁置的同名 `.sha256`。
+
+**预发布版 0.2.2-beta：**
+
+| 文件 | 适合谁 | 使用方式 |
+| --- | --- | --- |
+| [shiori-0.2.2-beta-Windows-Setup.exe](https://github.com/iownmmiku/Shiori/releases/download/v0.2.2-beta/shiori-0.2.2-beta-Windows-Setup.exe) | 想试用新功能的 Windows 用户 | 一键安装 |
+| [shiori-0.2.2-beta-Windows-x64.zip](https://github.com/iownmmiku/Shiori/releases/download/v0.2.2-beta/shiori-0.2.2-beta-Windows-x64.zip) | 希望解压即用 | 完整解压后运行 `shiori.exe` |
+| [shiori-0.2.2-beta-source.zip](https://github.com/iownmmiku/Shiori/releases/download/v0.2.2-beta/shiori-0.2.2-beta-source.zip) | 希望运行或修改代码 | 安装 Python 3.12，按下方命令启动 |
+
+**稳定版 0.2.1：**
 
 | 文件 | 适合谁 | 使用方式 |
 | --- | --- | --- |
@@ -26,7 +38,7 @@
 | [shiori-0.2.1-Windows-x64.zip](https://github.com/iownmmiku/Shiori/releases/download/v0.2.1/shiori-0.2.1-Windows-x64.zip) | 希望解压即用 | 完整解压后运行 `shiori.exe` |
 | [shiori-0.2.1-source.zip](https://github.com/iownmmiku/Shiori/releases/download/v0.2.1/shiori-0.2.1-source.zip) | 希望运行或修改代码 | 安装 Python 3.12，按下方命令启动 |
 
-0.2.0 和 0.2.1-beta 用户可在右上角“版本与更新”重新检查，选择 `v0.2.1` 切换；升级前另存完整数据副本。使用测试版的用户切换后即回到正式版通道，可以关闭“显示测试版”。历史版本见 [Releases](https://github.com/iownmmiku/Shiori/releases)。
+0.2.0 和 0.2.1-beta 用户可在右上角“版本与更新”重新检查，选择 `v0.2.1` 切换。想试用 0.2.2-beta 的用户在“版本与更新”打开“显示测试版”，重新检查后选择 `v0.2.2-beta`；升级前另存完整数据副本。历史版本见 [Releases](https://github.com/iownmmiku/Shiori/releases)。
 
 安装版和便携版无需 Python、Node 或 Git，默认打开独立桌面窗口。它们不包含模型账号、API Key、QQ 客户端或 NapCat/SnowLuma，需要自行准备。模型调用按所选服务商规则计费。
 

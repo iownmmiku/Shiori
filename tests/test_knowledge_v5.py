@@ -69,7 +69,25 @@ async def test_exploration_date_does_not_pass_chinese_to_locale_strftime(store, 
     monkeypatch.setattr('shiori.knowledge._now', lambda: AsciiFormatDate(2026, 10, 19, tzinfo=timezone.utc))
     service, sources = engine(store, provider=Provider())
     await service.explore('interested')
-    assert sources.queries and sources.queries[0].endswith('2026年10月')
+    # Queries no longer embed a formatted date; the first is the plain topic.
+    assert sources.queries and sources.queries[0] == '动画'
+
+
+@pytest.mark.anyio
+async def test_exploration_rotates_queries_and_falls_back_once_when_nothing_fits(store):
+    class Empty(Sources):
+        async def read(self, url):
+            self.urls.append(url)
+            return {'title': '人体运动', 'url': url, 'text': 'Body movement types in anatomy and biology.' * 20}
+    service, sources = engine(store, provider=Provider(), sources=Empty())
+    first = await service.explore('interested')
+    assert first['created'] == 0 and sources.queries == ['动画', '动画 最新']
+    events = [item for item in store.list_events(20) if item['kind'] == 'knowledge_exploration']
+    detail = events[0]['details']
+    assert [entry['query'] for entry in detail['searches']] == ['动画', '动画 最新']
+    assert detail['reason'] == 'no_relevant_sources' and detail['filtered'] >= 1 and detail['rejections']
+    await service.explore('interested')
+    assert sources.queries[2] == '音乐 最新'
 
 
 @pytest.mark.anyio

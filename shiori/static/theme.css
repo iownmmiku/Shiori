@@ -396,3 +396,25 @@
 :root .bot-config-tabs .btn.primary::before,:root .memory-kind-filters .btn.primary::before{content:none}
 :root .security-password-form>.btn{align-self:end;height:auto}
 :root .modal-body{padding-top:20px}
+/* Runtime log rows: time · level · event · chat · message, summary below, details on demand */
+:root .runtime-log-line{display:block;padding:6px 0}
+:root div.runtime-log-line,:root details.runtime-log-line>summary{display:flex;flex-wrap:wrap;align-items:baseline;gap:3px 10px}
+:root details.runtime-log-line>summary{cursor:pointer;list-style:none}
+:root details.runtime-log-line>summary::-webkit-details-marker{display:none}
+:root details.runtime-log-line>summary::before{content:"▸";color:#7fa59c;font-size:10px;width:8px}
+:root details.runtime-log-line[open]>summary::before{content:"▾"}
+:root .runtime-log-line time{flex:0 0 auto;color:#7f948f;font-size:11px}
+:root .runtime-log-line .log-level{flex:0 0 auto;font-size:10px;letter-spacing:.04em;color:#8fb5ac}
+:root .log-kind{flex:0 0 auto;font-size:11px;line-height:1.7;padding:0 8px;border-radius:999px;background:#ffffff14;color:#d6e6e1}
+:root .log-kind.cat-qq{background:#1f8f7e55}
+:root .log-kind.cat-planner{background:#5b6fd655}
+:root .log-kind.cat-reply{background:#2f8fb855}
+:root .log-kind.cat-model{background:#8a6dd055}
+:root .log-kind.cat-memory{background:#b07a3555}
+:root .log-kind.cat-learning,:root .log-kind.cat-stickers{background:#a8508f55}
+:root .log-kind.cat-schedule,:root .log-kind.cat-knowledge{background:#5f8f3f55}
+:root .log-scope{flex:0 0 auto;color:#9fc7bd;font-size:11px;max-width:16em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+:root .runtime-log-line .log-message{flex:1 1 260px;min-width:0;overflow-wrap:anywhere;color:#e1ebe8}
+:root .log-summary{flex:1 1 100%;padding-left:18px;color:#9fb3ae;font-size:11px;overflow-wrap:anywhere}
+:root .log-detail{margin:6px 0 2px 18px;padding:9px 11px;background:#0e1716;border-radius:8px;color:#b9cbc6;font-size:11px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere;max-height:360px;overflow:auto}
+:root .level-error .log-message,:root .level-critical .log-message{color:#ffc4bc}

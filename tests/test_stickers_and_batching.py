@@ -168,22 +168,32 @@ def test_send_probability_ambiguity_and_current_version_are_rechecked(library):
     with pytest.raises(ValueError):engine.payload(item['id'],'qq:group:1',1)
 
 
-def test_scope_sharing_source_revocation_and_delete_tombstone(library):
+def test_shared_library_source_revocation_and_delete_tombstone(library):
     store,cfg,model,engine=library
     source=asyncio.run(collect(store,engine));item=engine.page()['items'][0]
+    # One library for every chat: usable in another group and in a private chat.
     store.upsert_scope({'id':'qq:group:2'})
-    with pytest.raises(ValueError):engine.payload(item['id'],'qq:group:2')
-    for scope in ('qq:group:1','qq:group:2'):store.upsert_scope({'id':scope,'memory_space':'shared'})
-    engine.update(item['id'],{'shareable':True})
     assert engine.payload(item['id'],'qq:group:2')[1]
-    cfg.update({'onebot':{'blocked_groups':['1']}})
+    # A chat the bot may not talk in gets nothing; the origin's status does not matter.
+    cfg.update({'onebot':{'blocked_groups':['2']}})
     with pytest.raises(ValueError):engine.payload(item['id'],'qq:group:2')
+    cfg.update({'onebot':{'blocked_groups':['1']}})
+    assert engine.payload(item['id'],'qq:group:2')[1]
     cfg.update({'onebot':{'blocked_groups':[]}})
+    # Withdrawing the source message withdraws the sticker everywhere.
     tombstone=store.create_memory({'scope_id':'qq:group:1','user_id':'123','kind':'fact','content':'撤销这个来源','source_ids':[source['id']]})
     store.delete_memory(tombstone['id'])
-    with pytest.raises(ValueError):engine.payload(item['id'],'qq:group:1')
+    for scope in ('qq:group:1','qq:group:2'):
+        with pytest.raises(ValueError):engine.payload(item['id'],scope)
     engine.delete(item['id']);asyncio.run(collect(store,engine))
     assert engine.page()['total']==0 and len(model.calls)==1
+
+
+def test_an_image_is_collected_once_across_chats(library):
+    store,cfg,model,engine=library
+    asyncio.run(collect(store,engine))
+    asyncio.run(collect(store,engine,scope='qq:group:2'))
+    assert engine.page()['total']==1 and len(model.calls)==1
 
 
 def test_vision_race_and_daily_quota_do_not_save_stale_images(library):

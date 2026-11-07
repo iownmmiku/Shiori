@@ -88,9 +88,18 @@ async def test_modes_have_distinct_semantic_policy_and_followup_window_is_effect
     social.note_reply(scope['id'], '303')
     scope = store.upsert_scope({'id': scope['id'], 'activity': 'active', 'cooldown_seconds': 600,
                                'followup_seconds': 90, 'planner_min_interval_ms': 0})
+    # During the cooldown the member just answered is still judged, but is
+    # answered only when the Planner finds the message is said to the bot.
     result = await social.plan(scope, message(store, '刚才电子音乐专辑的合成器部分也很好听'))
     active = json.loads(planner.calls[-1][0][-1]['content'])
-    assert result['reply'] and active['signals']['followup']
+    assert not result['reply'] and active['signals']['followup']
+    original = planner.complete
+    async def addressed(messages, **kwargs):
+        response = await original(messages, **kwargs)
+        return {'content': response['content'].replace('"addressed_to_bot": false', '"addressed_to_bot": true')}
+    planner.complete = addressed
+    assert (await social.plan(scope, message(store, '那合成器音色是怎么做的')))['reply']
+    planner.complete = original
     assert balanced['policy'] != active['participation']['policy']
     scope = store.upsert_scope({'id': scope['id'], 'followup_seconds': 0})
     count = len(planner.calls)

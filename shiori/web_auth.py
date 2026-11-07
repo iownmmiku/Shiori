@@ -22,10 +22,18 @@ from .settings import _protect, _unprotect
 
 
 PASSWORD_FILE = 'security/webui-password.json'
+# "Keep me signed in" sessions survive restarts. The file holds only SHA-256
+# digests of the session tokens, bound to the current password generation.
+SESSIONS_FILE = 'security/webui-sessions.json'
 COOKIE_NAME = 'shiori_session'
 MIN_PASSWORD_LENGTH = 8
 MAX_PASSWORD_LENGTH = 256
 SESSION_SECONDS = 12 * 60 * 60
+REMEMBER_DAYS = 30
+MAX_REMEMBER_DAYS = 365
+# A remembered session used at least this long after its last renewal is
+# extended to its full lifetime again, so a device in regular use stays in.
+RENEW_AFTER_SECONDS = 24 * 60 * 60
 _SCRYPT = {'n': 32768, 'r': 8, 'p': 1, 'dklen': 32}
 _MAX_FILE_BYTES = 16384
 
@@ -43,13 +51,16 @@ class WebAuth:
     Windows encrypts the *salted scrypt verifier*, never the password, using the
     current Windows account's DPAPI key. Other systems store only the salted
     verifier and restrict its file permissions; they do not pretend Base64 is
-    encryption. Sessions intentionally expire when this process restarts.
+    encryption. Ordinary sessions expire when this process restarts; sessions
+    the user asked to keep are stored as token digests and survive it until
+    they expire, are signed out, or the password changes.
     """
 
     def __init__(self, data_dir: Path, bootstrap_token: Callable[[], str] | str,
                  *, clock: Callable[[], float] = time.time):
         self.data_dir = Path(data_dir).resolve()
         self.path = self.data_dir / PASSWORD_FILE
+        self.sessions_path = self.data_dir / SESSIONS_FILE
         self._bootstrap_token = bootstrap_token
         self._clock = clock
         self._lock = threading.RLock()
@@ -135,8 +146,14 @@ class WebAuth:
                         'payload': _protect(self._dump(record).decode('utf-8'))}
         else:
             envelope = {'version': 1, 'protection': 'scrypt-verifier', 'record': record}
-        raw = self._dump(envelope)
-        descriptor, name = tempfile.mkstemp(prefix='.password-', dir=self.path.parent)
+        self._atomic_write(self.path, self._dump(envelope), '.password-')
+        self._sessions.clear()
+        self._discard_remembered()
+        self._fingerprint = None
+
+    @staticmethod
+    def _atomic_write(path: Path, raw: bytes, prefix: str):
+        descriptor, name = tempfile.mkstemp(prefix=prefix, dir=path.parent)
         temporary = Path(name)
         try:
             with os.fdopen(descriptor, 'wb') as stream:
@@ -145,11 +162,67 @@ class WebAuth:
                 stream.write(raw)
                 stream.flush()
                 os.fsync(stream.fileno())
-            os.replace(temporary, self.path)
+            os.replace(temporary, path)
         finally:
             temporary.unlink(missing_ok=True)
-        self._sessions.clear()
-        self._fingerprint = None
+
+    def _discard_remembered(self):
+        try:
+            if not self.sessions_path.is_symlink():
+                self.sessions_path.unlink(missing_ok=True)
+        except OSError:
+            pass  # Stale entries are bound to the old generation and ignored.
+
+    def _save_remembered(self):
+        """Persist only kept sessions, as token digests, for this password."""
+        now = self._clock()
+        kept = {key: {field: item[field] for field in ('expires_at', 'lifetime', 'renewed_at')}
+                for key, item in self._sessions.items() if item.get('remember') and item['expires_at'] > now}
+        if not kept or self._record.get('mode') != 'password':
+            self._discard_remembered()
+            return
+        record = {'generation': self._record['generation'], 'sessions': kept}
+        if os.name == 'nt':
+            envelope = {'version': 1, 'protection': 'windows-dpapi', 'payload': _protect(self._dump(record).decode('utf-8'))}
+        else:
+            envelope = {'version': 1, 'protection': 'plain', 'record': record}
+        try:
+            if self.sessions_path.parent.is_symlink() or self.sessions_path.is_symlink():
+                return
+            self._atomic_write(self.sessions_path, self._dump(envelope), '.sessions-')
+        except OSError:
+            pass  # The session still works until this process restarts.
+
+    def _load_remembered(self):
+        """Restore kept sessions that belong to the current password."""
+        if self._record.get('mode') != 'password':
+            return
+        try:
+            if self.sessions_path.is_symlink():
+                return
+            raw = self.sessions_path.read_bytes()
+            if len(raw) > 256 * 1024:
+                return
+            envelope = json.loads(raw)
+            if envelope.get('version') != 1:
+                return
+            if envelope.get('protection') == 'windows-dpapi' and os.name == 'nt':
+                record = json.loads(_unprotect(envelope['payload']))
+            elif envelope.get('protection') == 'plain' and os.name != 'nt':
+                record = envelope['record']
+            else:
+                return
+            if not isinstance(record, dict) or record.get('generation') != self._record['generation']:
+                return
+            now = self._clock()
+            for key, item in list((record.get('sessions') or {}).items())[:32]:
+                if (isinstance(key, str) and len(key) == 64 and isinstance(item, dict)
+                        and all(type(item.get(field)) in (int, float) for field in ('expires_at', 'lifetime', 'renewed_at'))
+                        and now < item['expires_at'] <= now + MAX_REMEMBER_DAYS * 86400):
+                    self._sessions[key] = {'expires_at': item['expires_at'], 'remember': True,
+                                           'lifetime': item['lifetime'], 'renewed_at': item['renewed_at']}
+        except (OSError, ValueError, TypeError, KeyError, UnicodeError, AttributeError):
+            pass  # An unreadable file only means signing in again.
 
     def _refresh(self):
         """Observe external changes before every auth operation, including delete."""
@@ -166,7 +239,8 @@ class WebAuth:
             self._record = self._decode(raw)
             self._fingerprint = fingerprint
             self._error = ''
-        except (OSError, ValueError, TypeError, KeyError, UnicodeError) as exc:
+            self._load_remembered()
+        except (OSError, ValueError, TypeError, KeyError, UnicodeError):
             self._sessions.clear()
             self._record = {}
             self._fingerprint = None
@@ -221,15 +295,34 @@ class WebAuth:
                                 maxmem=64 * 1024 * 1024, **_SCRYPT)
         return hmac.compare_digest(digest, base64.b64decode(credential['digest']))
 
-    def _session(self) -> dict:
+    def _session(self, remember_seconds: int = 0) -> dict:
         now = self._clock()
         self._sessions = {key: item for key, item in self._sessions.items() if item['expires_at'] > now}
         while len(self._sessions) >= 32:
             self._sessions.pop(next(iter(self._sessions)))
         token = secrets.token_urlsafe(48)
-        result = {'token': token, 'expires_at': now + SESSION_SECONDS}
-        self._sessions[hashlib.sha256(token.encode()).hexdigest()] = {'expires_at': result['expires_at']}
+        remember = bool(remember_seconds) and remember_seconds > 0
+        lifetime = int(min(remember_seconds, MAX_REMEMBER_DAYS * 86400)) if remember else SESSION_SECONDS
+        result = {'token': token, 'expires_at': now + lifetime, 'max_age': lifetime, 'remember': remember}
+        self._sessions[hashlib.sha256(token.encode()).hexdigest()] = {
+            'expires_at': result['expires_at'], 'remember': remember, 'lifetime': lifetime, 'renewed_at': now}
+        if remember or any(item.get('remember') for item in self._sessions.values()):
+            self._save_remembered()
         return result
+
+    def renew(self, token: str) -> dict | None:
+        """Extend a kept session that is still in use; None when not due."""
+        with self._lock:
+            self._refresh()
+            if self._error or self._record.get('mode') != 'password':
+                return None
+            item = self._session_current(token)
+            now = self._clock()
+            if not item or not item.get('remember') or now - item['renewed_at'] < RENEW_AFTER_SECONDS:
+                return None
+            item.update(expires_at=now + item['lifetime'], renewed_at=now)
+            self._save_remembered()
+            return {'token': token, 'expires_at': item['expires_at'], 'max_age': item['lifetime'], 'remember': True}
 
     def _session_current(self, token: str) -> dict | None:
         if not isinstance(token, str) or len(token) > 256:
@@ -263,7 +356,8 @@ class WebAuth:
                       'password_set': mode == 'password', 'password_configured': mode == 'password',
                       'authenticated': bool(session or (mode == 'local_only' and is_local)),
                       'local_only': mode == 'local_only', 'storage_protection': self.storage_protection,
-                      'session_expires_at': session['expires_at'] if session else None}
+                      'session_expires_at': session['expires_at'] if session else None,
+                      'session_remembered': bool(session and session.get('remember'))}
             if self._error:
                 result['error'] = self._error
             if is_local:
@@ -306,7 +400,7 @@ class WebAuth:
             raise AuthError('登录失败次数过多，请在一分钟后重试', 429, 'rate_limited')
         return key
 
-    def login(self, password: str, *, peer: str = '') -> dict:
+    def login(self, password: str, *, peer: str = '', remember_seconds: int = 0) -> dict:
         with self._lock:
             self._require_healthy()
             if self._record['mode'] != 'password':
@@ -318,23 +412,41 @@ class WebAuth:
                 self._global_failures.append(now)
                 raise AuthError('密码不正确', 401, 'invalid_credentials')
             self._failures.pop(key, None)
-            return self._session()
+            return self._session(remember_seconds)
 
     def logout(self, token: str):
         with self._lock:
             self._refresh()
             if isinstance(token, str) and len(token) <= 256:
                 try:
-                    self._sessions.pop(hashlib.sha256(token.encode()).hexdigest(), None)
+                    removed = self._sessions.pop(hashlib.sha256(token.encode()).hexdigest(), None)
                 except UnicodeError:
-                    pass
+                    removed = None
+                if removed and removed.get('remember'):
+                    self._save_remembered()
+
+    def logout_everywhere(self, token: str):
+        """End every session, including kept ones, except the caller's."""
+        with self._lock:
+            self._require_healthy()
+            current = self._session_current(token)
+            if self._record.get('mode') != 'password' or current is None:
+                raise AuthError('登录已失效，请重新登录', 401, 'authentication_required')
+            key = hashlib.sha256(token.encode()).hexdigest()
+            removed = len(self._sessions) - 1
+            self._sessions = {key: current}
+            self._save_remembered()
+            return removed
 
     def change_password(self, current_password: str, new_password: str, *, token: str,
                         is_local: bool = False) -> dict:
         with self._lock:
             self._require_healthy()
-            if self._record['mode'] != 'password' or self._session_current(token) is None:
+            current = self._session_current(token) if self._record['mode'] == 'password' else None
+            if current is None:
                 raise AuthError('登录已失效，请重新登录', 401, 'authentication_required')
+            # The device changing the password stays signed in the way it was.
+            kept = current['lifetime'] if current.get('remember') else 0
             key = self._check_rate('change:' + hashlib.sha256(token.encode()).hexdigest())
             if not self._verify(current_password):
                 now = self._clock()
@@ -347,7 +459,7 @@ class WebAuth:
             self._require_healthy()
             self._failures.clear()
             self._global_failures.clear()
-            return self._session()
+            return self._session(kept)
 
 
 # A descriptive alias for integration code preferring the generic manager name.

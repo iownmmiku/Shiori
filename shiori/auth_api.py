@@ -147,6 +147,7 @@ class AuthHTTP:
         reveal = local_peer(request) and (self.proof(request) or value['authenticated'] or self.internal(request))
         value.pop('password_file', None)
         value.update(local_setup_allowed=bool(reveal), remote_enabled=self.settings.get()['webui']['remote_enabled'],
+                     remember_days=self.settings.get()['webui']['remember_days'],
                      actual_remote_enabled=self.remote_ready(), host=self.settings.get()['webui']['host'],
                      port=self.settings.get()['webui']['port'])
         if reveal:
@@ -165,10 +166,13 @@ def install_auth(app, settings, data_dir, *, allow_remote=False):
     async def auth_error(request, exc):
         return JSONResponse({'detail': str(exc), 'code': exc.code}, status_code=exc.status_code)
 
-    def session_response(request, value):
-        response = JSONResponse({'ok': True, 'expires_at': value['expires_at']})
+    def session_cookie(request, response, value):
         response.set_cookie(COOKIE_NAME, value['token'], httponly=True, samesite='strict',
-                            secure=http.secure_transport(request), max_age=SESSION_SECONDS)
+                            secure=http.secure_transport(request), max_age=value.get('max_age', SESSION_SECONDS))
+
+    def session_response(request, value):
+        response = JSONResponse({'ok': True, 'expires_at': value['expires_at'], 'remembered': value.get('remember', False)})
+        session_cookie(request, response, value)
         response.delete_cookie('qunyu_session')
         response.delete_cookie('mikubot_session')
         response.delete_cookie('mikubot_bootstrap')
@@ -176,7 +180,15 @@ def install_auth(app, settings, data_dir, *, allow_remote=False):
 
     @app.get('/api/auth/status')
     async def status(request: Request):
-        return http.status(request)
+        # Opening the page renews a kept session that is still in use, so a
+        # device used at least once per period never has to sign in again.
+        renewed = http.auth.renew(request.cookies.get(COOKIE_NAME, ''))
+        value = http.status(request)
+        if not renewed:
+            return value
+        response = JSONResponse(value)
+        session_cookie(request, response, renewed)
+        return response
 
     @app.post('/api/auth/bootstrap')
     async def bootstrap(request: Request, payload: dict = Body(...)):
@@ -207,8 +219,18 @@ def install_auth(app, settings, data_dir, *, allow_remote=False):
 
     @app.post('/api/auth/login')
     async def login(request: Request, payload: dict = Body(...)):
-        value = await asyncio.to_thread(http.auth.login, payload.get('password'), peer=request.client.host if request.client else 'unknown')
+        remember = payload.get('remember', False)
+        if type(remember) is not bool:
+            raise AuthError('保持登录选项格式无效')
+        days = settings.get()['webui']['remember_days']
+        value = await asyncio.to_thread(http.auth.login, payload.get('password'), peer=request.client.host if request.client else 'unknown',
+                                        remember_seconds=days * 86400 if remember else 0)
         return session_response(request, value)
+
+    @app.post('/api/auth/logout-others')
+    async def logout_others(request: Request):
+        removed = http.auth.logout_everywhere(request.cookies.get(COOKIE_NAME, ''))
+        return {'ok': True, 'signed_out': removed}
 
     @app.post('/api/auth/logout')
     async def logout(request: Request):
@@ -238,7 +260,7 @@ def install_auth(app, settings, data_dir, *, allow_remote=False):
     async def set_access(request: Request, payload: dict = Body(...)):
         if payload.get('remote_enabled') is True and http.auth.status()['mode'] != 'password':
             raise AuthError('开启远程访问前，请先在本机设置密码')
-        settings.update({'webui': {key: value for key, value in payload.items() if key in ('remote_enabled', 'host', 'port', 'allowed_hosts', 'public_url','require_https','trusted_proxy_ips')}})
+        settings.update({'webui': {key: value for key, value in payload.items() if key in ('remote_enabled', 'host', 'port', 'allowed_hosts', 'public_url','require_https','trusted_proxy_ips','remember_days')}})
         http.access_saved = True
         if payload.get('remote_enabled') is False:
             # Rebinding waits for restart; access is revoked immediately.

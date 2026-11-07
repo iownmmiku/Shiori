@@ -25,7 +25,10 @@ window.ShioriPages = (() => {
     return candidates.map((model,index)=>({model,index,score:score(model)}))
       .sort((a,b)=>b.score-a.score || a.index-b.index)[0]?.model || "";
   }
-  let logLines = [], logCursor = "", logLevel = "", logQuery = "", logPaused = false, logTimer, logGeneration = 0, logQueryTimer;
+  let logLines = [], logCursor = "", logLevel = "", logQuery = "", logCategory = "", logPaused = false, logTimer, logGeneration = 0, logQueryTimer;
+  const logOpen = new Set();
+  const logCategories = [["","全部类别"],["qq","QQ 收发"],["planner","回复判断"],["reply","回复生成"],["model","模型调用"],["memory","记忆"],["learning","黑话与表达"],["stickers","表情包"],["schedule","角色日程"],["knowledge","人格知识"],["system","系统"]];
+  const logTime = value => { const date=new Date(value); if(Number.isNaN(date.getTime()))return String(value || ""); const pad=n=>String(n).padStart(2,"0"); return `${pad(date.getMonth()+1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`; };
   const key = value => encodeURIComponent(value);
   const routeId = value => value === "default" ? "" : value;
   const sourceModels = source => catalog.models.filter(item => item.provider_id === source);
@@ -89,9 +92,18 @@ window.ShioriPages = (() => {
     const guide=last.code === "group_not_allowed" || last.code === "private_not_allowed" ? "检查下面聊天是否被黑名单拦截，或尚未加入白名单，再发送新消息。聊天权限不会授予管理员身份。" : !status.message_events_received ? "用自己的账号私聊机器人，或在允许接收的群中 @ 它；若计数不增加，请开启连接器的消息上报。" : last.code === "sent" ? "收发链路已完成。群聊仍会按当前会话规则判断是否回复。" : "已收到消息。按上方原因检查接收规则、模型与默认回应规则，再发送一条新消息验证。";
     return `<section class="qq-ingress-summary"><strong>消息接收与回复</strong><p>${e(diagnostic || last.reason || "等待第一条 QQ 消息；连接在线不代表已收到消息上报。")}</p><small>收到消息 ${number(status.message_events_received)} 条 · 心跳 ${number(status.heartbeat_events_received)} 次${status.last_message_at ? " · 最近消息 " + e(fmt(status.last_message_at)) : ""}${last.stage ? " · " + e(stages[last.stage] || last.stage) : ""}</small>${last.user_id || last.scope_id ? `<small>${last.user_id ? "最近发送人：" + e(last.user_id) : ""}${last.scope_id ? " · 会话：" + e(last.scope_id) : ""}</small>` : ""}<p>${e(guide)}</p>${button("刷新接收状态","quick-diagnose","ghost small","refresh")}${button("查看运行日志","go-runtime-logs","ghost small","file")}</section>`;
   }
-  function logMarkup() { return logLines.map(item=>`<div class="runtime-log-line level-${e(String(item.level || "INFO").toLowerCase())}" data-log-id="${e(item.id || "")}"><time>${e(item.time || "")}</time><span class="log-level">${e(item.level || "INFO")}</span><span class="log-message">${e(item.message || "")}</span></div>`).join("") || '<p class="runtime-log-empty">暂无匹配的运行日志。启动、错误与任务运行记录会显示在这里。</p>'; }
+  // One row per entry: when, how serious, what happened (event name and chat),
+  // a readable summary, and the raw details or traceback on demand.
+  function logRow(item) {
+    const level=String(item.level || "INFO"), id=String(item.id || ""), detail=item.detail || "";
+    const head=`<time title="${e(item.time || "")}">${e(logTime(item.time))}</time><span class="log-level">${e(level)}</span>${item.label ? `<span class="log-kind cat-${e(item.category || "system")}" title="${e(item.category_label || "")}">${e(item.label)}</span>` : ""}${item.scope ? `<span class="log-scope">${e(item.scope)}</span>` : ""}<span class="log-message">${e(item.text || item.message || "")}</span>${item.summary ? `<span class="log-summary">${e(item.summary)}</span>` : ""}`;
+    const cls=`runtime-log-line level-${e(level.toLowerCase())}`;
+    if(!detail)return `<div class="${cls}" data-log-id="${e(id)}">${head}</div>`;
+    return `<details class="${cls}" data-log-id="${e(id)}" ${logOpen.has(id) ? "open" : ""}><summary>${head}</summary><pre class="log-detail">${e(detail)}</pre></details>`;
+  }
+  function logMarkup() { return logLines.map(logRow).join("") || '<p class="runtime-log-empty">暂无匹配的运行日志。启动、错误、QQ 收发、回复判断和模型调用记录会显示在这里。</p>'; }
   async function fetchLogs(initial = false) {
-    const generation=logGeneration, params={limit:200,level:logLevel,q:logQuery,...(!initial && logCursor ? {after:logCursor} : {})};
+    const generation=logGeneration, params={limit:200,level:logLevel,q:logQuery,...(logCategory ? {category:logCategory} : {}),...(!initial && logCursor ? {after:logCursor} : {})};
     const result=await api(`/api/logs?${query(params)}`); if(generation!==logGeneration)return;
     const items=result.lines || [], seen=new Set(logLines.map(item=>String(item.id)));
     logLines=initial ? items : [...logLines,...items.filter(item=>!seen.has(String(item.id)))];logLines=logLines.slice(-1000);logCursor=result.cursor ?? logCursor;
@@ -100,8 +112,14 @@ window.ShioriPages = (() => {
   }
   async function renderLogs() {
     logGeneration++; logLines=[];logCursor="";await fetchLogs(true);
-    return heading("","运行日志","本机启动、连接和任务错误。日志已做基础脱敏，分享前请再检查一遍。",button(logPaused ? "继续更新" : "暂停更新","toggle-log-tail","",logPaused ? "refresh" : "stop") + button("复制当前日志","copy-runtime-logs","","file") + `<a class="btn" href="/api/logs/export?${e(query({level:logLevel,q:logQuery}))}" download>下载日志</a>`) + `<section class="panel runtime-logs"><div class="runtime-log-toolbar"><label>级别<select id="runtime-log-level" aria-label="日志级别">${[["","全部"],["DEBUG","DEBUG"],["INFO","INFO"],["WARNING","WARNING"],["ERROR","ERROR"],["CRITICAL","CRITICAL"]].map(([value,title])=>`<option value="${value}" ${logLevel===value ? "selected" : ""}>${title}</option>`).join("")}</select></label><label class="search-field">${icon("search")}<input type="search" id="runtime-log-query" maxlength="256" aria-label="搜索运行日志" placeholder="搜索错误、连接或任务" value="${e(logQuery)}"></label><span id="runtime-log-status">${logPaused ? "已暂停更新" : `正在更新 · 显示 ${logLines.length} 条`}</span></div><div id="runtime-log-feed" class="runtime-log-feed" role="log" aria-live="off" tabindex="0">${logMarkup()}</div></section><p class="help-caption">仅在此页面每 2 秒读取新增日志，最多展示最近 1000 条。暂停只停止页面更新，不停止机器人。</p>`;
+    return heading("","运行日志","启动、连接和错误，以及 QQ 收发、回复判断、记忆整理和每次模型调用。点开带详情的行可以看完整信息。日志已做基础脱敏，分享前请再检查一遍。",button(logPaused ? "继续更新" : "暂停更新","toggle-log-tail","",logPaused ? "refresh" : "stop") + button("复制当前日志","copy-runtime-logs","","file") + `<a class="btn" href="/api/logs/export?${e(query({level:logLevel,q:logQuery,...(logCategory ? {category:logCategory} : {})}))}" download>下载日志</a>`) + `<section class="panel runtime-logs"><div class="runtime-log-toolbar"><label>级别<select id="runtime-log-level" aria-label="日志级别">${[["","全部"],["DEBUG","DEBUG"],["INFO","INFO"],["WARNING","WARNING"],["ERROR","ERROR"],["CRITICAL","CRITICAL"]].map(([value,title])=>`<option value="${value}" ${logLevel===value ? "selected" : ""}>${title}</option>`).join("")}</select></label><label>类别<select id="runtime-log-category" aria-label="日志类别">${logCategories.map(([value,title])=>`<option value="${value}" ${logCategory===value ? "selected" : ""}>${title}</option>`).join("")}</select></label><label class="search-field">${icon("search")}<input type="search" id="runtime-log-query" maxlength="256" aria-label="搜索运行日志" placeholder="搜索错误、群名、事件或模型" value="${e(logQuery)}"></label><span id="runtime-log-status">${logPaused ? "已暂停更新" : `正在更新 · 显示 ${logLines.length} 条`}</span></div><div id="runtime-log-feed" class="runtime-log-feed" role="log" aria-live="off" tabindex="0">${logMarkup()}</div></section><p class="help-caption">仅在此页面每 2 秒读取新增日志，最多展示最近 1000 条。暂停只停止页面更新，不停止机器人。</p>`;
   }
+  globalThis.document?.addEventListener?.("toggle", event => {
+    const row=event.target;
+    if(!row?.classList?.contains("runtime-log-line") || !row.dataset?.logId)return;
+    if(row.open)logOpen.add(row.dataset.logId); else logOpen.delete(row.dataset.logId);
+    if(logOpen.size>200)logOpen.delete(logOpen.values().next().value);
+  }, true);
   function stopLogs() { clearTimeout(logTimer); logTimer=null; }
   function scheduleLogs() { stopLogs();if(state.page !== "logs" || logPaused || !state.authenticated)return;logTimer=setTimeout(async()=>{try{if(!document.hidden)await fetchLogs();}catch(error){const status=$("#runtime-log-status");if(status)status.textContent=`读取失败：${error.message}`;}finally{scheduleLogs();}},2000); }
   async function handleAction(action,target) {
@@ -129,7 +147,7 @@ window.ShioriPages = (() => {
     else if(action === "route-chat-model"){await api("/api/model-catalog/routing",{method:"PUT",body:{chat:routeId(id)}});toast("已设为全局聊天模型；单独设置的会话保持其选择。");await bootstrap();}
     else if(action === "edit-catalog-model"){const item=catalog.models.find(item=>item.id===id);openModal("调整模型参数","图片与工具能力请按服务商实际支持填写，模型目录不会自动证明兼容性。",`${typeof modelTransportFields === "function" ? modelTransportFields(item) : ""}<input type="hidden" name="id" value="${e(id)}"><div class="form-grid">${field("name","显示名称",item.name || item.model,"text","","required data-full")}${field("timeout_seconds","模型等待超时（秒）",item.timeout_seconds ?? 90,"number","默认90秒，可设5—600秒；较慢的模型或图片任务可适当增大。","min=\"5\" max=\"600\" step=\"1\"")}${field("input_price","输入价格 / 百万 Token",item.input_price || 0,"number","人民币，未知保持0。","min=\"0\" step=\"0.01\"")}${field("output_price","输出价格 / 百万 Token",item.output_price || 0,"number","","min=\"0\" step=\"0.01\"")}</div>${typeof advancedModelFields === "function" ? advancedModelFields(item) : ""}${toggle("vision","支持图片输入","按服务商实际能力配置。",item.vision)}${toggle("tools","支持工具调用","电脑任务与使用工具需要模型支持。",item.tools !== false)}`,"catalog-model",item);}
     else if(action === "toggle-log-tail"){logPaused=!logPaused;target.textContent=logPaused ? "继续更新" : "暂停更新";const status=$("#runtime-log-status");if(status)status.textContent=logPaused ? "已暂停更新" : "正在更新";scheduleLogs();}
-    else if(action === "copy-runtime-logs"){const text=logLines.map(item=>`${item.time || ""} ${item.level || "INFO"} ${item.message || ""}`).join("\n");try{await navigator.clipboard.writeText(text);toast("已复制当前显示的日志。");}catch{openModal("复制日志","选择下面内容，按 Ctrl+C 复制。",textarea("logs","当前日志",text,"","readonly rows=\"12\""));}}
+    else if(action === "copy-runtime-logs"){const text=logLines.map(item=>`${item.time || ""} ${item.level || "INFO"} ${item.message || ""}${item.summary ? "\n    " + item.summary : ""}${item.source === "runtime" && item.detail ? "\n" + item.detail.split("\n").map(line=>"    " + line).join("\n") : ""}`).join("\n");try{await navigator.clipboard.writeText(text);toast("已复制当前显示的日志。");}catch{openModal("复制日志","选择下面内容，按 Ctrl+C 复制。",textarea("logs","当前日志",text,"","readonly rows=\"12\""));}}
     else return false;return true;
   }
   async function handleSubmit(kind,form) {
@@ -162,7 +180,8 @@ window.ShioriPages = (() => {
   }
   async function handleChange(target) {
     if(target.id === "chat-model-id"){if(state.sending)return true;await api(`/api/scopes/${key(state.scope)}`,{method:"PUT",body:{model_id:target.value}});toast(target.value ? "本会话已切换模型。" : "本会话继承全局聊天模型。");await bootstrap();return true;}
-    if(target.id === "runtime-log-level"){logLevel=target.value;await renderPage();return true;}return false;
+    if(target.id === "runtime-log-level"){logLevel=target.value;await renderPage();return true;}
+    if(target.id === "runtime-log-category"){logCategory=target.value;await renderPage();return true;}return false;
   }
   function handleInput(target) {
     if(target.id === "catalog-model-query" || target.id === "catalog-source-query"){const value=target.value,position=target.selectionStart;clearTimeout(discoverTimer);discoverTimer=setTimeout(async()=>{if(target.id === "catalog-model-query")modelQuery=value;else sourceQuery=value;await renderPage();const input=$("#"+target.id);input?.focus();input?.setSelectionRange(position,position);},250);}

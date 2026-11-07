@@ -54,7 +54,7 @@ DEFAULTS = {
               'timeout_fallback':False, 'max_tokens':0, 'reasoning_effort':'', 'custom_params':{}},
     'onebot': {'enabled': False, 'adapter': 'napcat', 'ws_url': '', 'access_token': '',
                'owner_ids': [], 'allowed_users': [], 'allowed_groups': [], 'chat_policy': 'blacklist',
-               'blocked_users': [], 'blocked_groups': [], 'max_message_chars': 0},
+               'blocked_users': [], 'blocked_groups': [], 'max_message_chars': 0, 'bot_accounts': []},
     'qq_official': {'enabled': False, 'app_id': '', 'app_secret': '', 'allowed_groups': [], 'allowed_users': [],
                     'chat_policy': 'blacklist', 'blocked_users': [], 'blocked_groups': [], 'max_message_chars': 0},
     'budget': {'daily_tokens': 100000, 'daily_cost': 0.0},
@@ -69,6 +69,7 @@ DEFAULTS = {
                'review_mode':'automatic','extraction_messages':6,'extraction_idle_seconds':180,'daily_extractions':60},
     'planner': {'min_interval_ms':1200, 'daily_calls':300, 'daily_tokens':12000, 'max_age_ms':15000,
                 'group_batch_ms':1500,'group_batch_messages':4,
+                'proactive_max_replies':3,'proactive_window_seconds':600,'eagerness':50,
                 'structured_output':'auto','format_retry_enabled':False},
     'stickers': {'enabled':True,'collect_enabled':True,'collect_probability':0.1,'send_enabled':True,
                  'send_probability':0.1,'model_id':'','min_confidence':0.85,'daily_recognitions':30,'daily_model_calls':60,'max_items':1000},
@@ -77,7 +78,8 @@ DEFAULTS = {
                   'request_concurrency':8,'request_queue_limit':16,'request_max_mb':32,
                   'parsing_concurrency':1,'parsing_queue_limit':4},
     'access': {'administrators': []},
-    'webui': {'remote_enabled': False, 'host': '0.0.0.0', 'port': 8765, 'allowed_hosts': [], 'public_url': '', 'require_https':True, 'trusted_proxy_ips':[]},
+    'webui': {'remote_enabled': False, 'host': '0.0.0.0', 'port': 8765, 'allowed_hosts': [], 'public_url': '', 'require_https':True, 'trusted_proxy_ips':[],
+              'remember_days': 30},
     'computer': {'enabled':False, 'runtime':'docker', 'workspace':'', 'max_steps':12, 'timeout_seconds':60, 'max_output_chars':16000, 'approval_mode':'automatic', 'allow_external_tools':False},
     'providers': [],
     'provider_sources': [],
@@ -702,7 +704,8 @@ class Settings:
             identity['aliases']=list(dict.fromkeys(x.strip() for x in identity['aliases']))
             for key in ('respond_to_at','respond_to_reply','respond_to_name','planner_enabled','proactive_enabled'):
                 if type(identity[key]) is not bool: raise ValueError('身份与触发开关须为布尔值')
-            for key, minimum, maximum in (('min_interval_ms',0,60000),('daily_calls',0,100000),('daily_tokens',0,10000000),('max_age_ms',1000,120000),('group_batch_ms',0,10000),('group_batch_messages',2,20)):
+            for key, minimum, maximum in (('min_interval_ms',0,60000),('daily_calls',0,100000),('daily_tokens',0,10000000),('max_age_ms',1000,120000),('group_batch_ms',0,10000),('group_batch_messages',2,20),
+                                          ('proactive_max_replies',0,30),('proactive_window_seconds',60,3600),('eagerness',0,100)):
                 value=updated['planner'][key]
                 if type(value) is not int or not minimum <= value <= maximum:
                     raise ValueError(f'Planner {key}须为{minimum}—{maximum}的整数')
@@ -794,6 +797,15 @@ class Settings:
                 qq[key] = list(dict.fromkeys(str(x).strip() for x in vals if str(x).strip()))
                 if any(not x.isdigit() for x in qq[key]):
                     raise ValueError('QQ 号与群号只能使用数字')
+            bots = qq['bot_accounts']
+            if isinstance(bots, str):
+                bots = bots.replace('，', ',').replace('\n', ',').split(',')
+            if not isinstance(bots, list) or len(bots) > 50:
+                raise ValueError('其他机器人账号最多 50 个')
+            bots = list(dict.fromkeys(str(x).strip() for x in bots if str(x).strip()))
+            if any(not re.fullmatch(r'\d{5,12}', x) for x in bots):
+                raise ValueError('其他机器人账号须为 QQ 号')
+            qq['bot_accounts'] = bots
             qq['enabled'] = bool(qq['enabled'])
             if qq.get('adapter') not in ('napcat', 'snowluma', 'official'):
                 raise ValueError('未知 QQ 接入方式')
@@ -810,6 +822,8 @@ class Settings:
             webui = updated['webui']
             if type(webui['remote_enabled']) is not bool or type(webui['require_https']) is not bool or type(webui['port']) is not int or not 1 <= webui['port'] <= 65535:
                 raise ValueError('WebUI远程开关须为布尔值，端口须为1—65535的整数')
+            if type(webui['remember_days']) is not int or not 1 <= webui['remember_days'] <= 365:
+                raise ValueError('保持登录天数须为1—365的整数')
             if not isinstance(webui['host'], str):
                 raise ValueError('WebUI监听地址须为本机IP或localhost')
             webui['host'] = webui['host'].strip().lower()

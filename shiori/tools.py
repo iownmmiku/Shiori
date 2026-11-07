@@ -367,10 +367,14 @@ def _search_result_url(value):
 async def search_public(query, *, fetch=None):
     if not query.strip() or len(query) > 300:
         raise ValueError('搜索内容需为 1—300 个字符')
+    # Without a market, a server abroad can get English pages that share no
+    # words with a Chinese query. Ask for Chinese results when it is Chinese.
+    chinese = bool(re.search(r'[㐀-鿿]', query))
+    bing = '&setlang=zh-Hans&mkt=zh-CN&cc=CN' if chinese else ''
     channels = [
-        ('bing_html', 'https://www.bing.com/search?q=' + quote(query)),
-        ('bing_rss', 'https://www.bing.com/search?format=rss&q=' + quote(query)),
-        ('duckduckgo_html', 'https://html.duckduckgo.com/html/?q=' + quote(query)),
+        ('bing_html', 'https://www.bing.com/search?q=' + quote(query) + bing),
+        ('bing_rss', 'https://www.bing.com/search?format=rss&q=' + quote(query) + bing),
+        ('duckduckgo_html', 'https://html.duckduckgo.com/html/?q=' + quote(query) + ('&kl=cn-zh' if chinese else '')),
     ]
     failures = []
     fetch = fetch or read_public

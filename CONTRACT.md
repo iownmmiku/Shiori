@@ -21,6 +21,7 @@ Python 3.11–3.13（推荐3.12），FastAPI、SQLite；正式入口为 `python 
 - `GET /api/auth/status`：公开登录状态、设密状态；实际数据和密码文件路径只在经过初始化证明或已认证的本机请求返回。
 - `POST /api/auth/setup {mode,password}`：`password` 或 `local_only`，首次或删文件后只能由本机初始化证明创建；`local_only` 同步关闭远程入口。
 - `POST /api/auth/login {password}`：验证后设置 HttpOnly、SameSite 会话 Cookie；HTTPS 请求附 Secure。没有默认密码。
+- `POST /api/auth/login {password, remember?}`：`remember: true` 时会话按 `webui.remember_days`（默认30，1—365）保留并跨重启有效，`security/webui-sessions.json` 只存令牌 SHA-256 摘要并绑定当前密码版本；`GET /api/auth/status` 对使用满一天的保持登录会话续期并重发 Cookie。`POST /api/auth/logout-others`：结束当前会话以外的全部会话。
 - `POST /api/auth/logout`：注销当前会话；`POST /api/auth/password {current_password,new_password}`：改密并使旧会话失效，仅本机免密首次设密使用本机授权流程。
 - `GET/PUT /api/auth/access`：已认证读取或保存 `remote_enabled/host/port`；保存与实际监听分别返回，网络重绑定需要重启。关闭远程访问立即停止接受远程管理请求。
 

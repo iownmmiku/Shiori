@@ -493,7 +493,7 @@ class Store:
                       "always_reply": False, "expression_learn": False, "expression_use": False, "context_compress": False,
                       "memory_space": "", "use_persona_knowledge": True,
                       "planner_min_interval_ms": None, "planner_daily_calls": None,
-                      "planner_daily_tokens": None, "planner_max_age_ms": None,
+                      "planner_daily_tokens": None, "planner_max_age_ms": None, "planner_eagerness": None,
                       "settings": {}, **previous, **incoming}
             record["id"] = scope_id
             if "settings" in incoming:
@@ -531,6 +531,7 @@ class Store:
                 for field, (lower, upper) in {
                     'planner_min_interval_ms': (0, 60000), 'planner_daily_calls': (0, 100000),
                     'planner_daily_tokens': (0, 10000000), 'planner_max_age_ms': (1000, 120000),
+                    'planner_eagerness': (0, 100),
                 }.items():
                     value = container.get(field)
                     if value is not None and (type(value) is not int or not lower <= value <= upper):
