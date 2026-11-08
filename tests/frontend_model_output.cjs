@@ -2,7 +2,7 @@
 const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 const escape=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const calls=[];
-const sandbox={window:{},state:{scope:'web:default',settings:{output:{}},personas:[]},e:escape,scope:()=>({persona_id:'default'}),personaName:()=> '初音未来',fmt:()=>'',imageURL:x=>x,
+const sandbox={window:{},state:{scope:'web:default',settings:{output:{}},personas:[]},e:escape,scope:()=>({persona_id:'default'}),personaName:()=> '林星遥',fmt:()=>'',imageURL:x=>x,
   icon:()=>'',tag:escape,getForm:form=>form.values,toast:()=>{},bootstrap:async()=>{},
   api:async(url,options)=>{calls.push([url,options]);return {};},
   field:(name,title,value,type,hint)=>`<input name="${name}" value="${escape(value)}">${escape(title)}${escape(hint)}`,

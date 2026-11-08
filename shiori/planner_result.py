@@ -53,6 +53,48 @@ def _constant(_):
     raise PlanValidationError('invalid_json')
 
 
+def _decode(text):
+    try:
+        return json.loads(text, object_pairs_hook=_object, parse_constant=_constant)
+    except json.JSONDecodeError as exc:
+        raise PlanValidationError('invalid_json', line=exc.lineno, column=exc.colno) from None
+    except RecursionError:
+        raise PlanValidationError('excessive_depth') from None
+    except ValueError as exc:
+        if isinstance(exc, PlanValidationError):
+            raise
+        raise PlanValidationError('invalid_json') from None
+
+
+def _escape_inner_quotes(text):
+    """Escape double quotes inside a string that cannot be where it ends.
+
+    Models quote chat lines with ASCII quotes inside a value, e.g.
+    "在回应你说的"七个站"". A quote that ends a string is followed by , : } ]
+    or the end; any other is taken as content. Only escaping changes, so the
+    decision is still the model's own fields under the same validation.
+    Linear: each lookahead skips only the whitespace right after one quote.
+    """
+    out, quoted, escaped, length = [], False, False, len(text)
+    for index, char in enumerate(text):
+        if not quoted:
+            quoted = char == '"'
+        elif escaped:
+            escaped = False
+        elif char == '\\':
+            escaped = True
+        elif char == '"':
+            ahead = index + 1
+            while ahead < length and text[ahead] in ' \t\r\n':
+                ahead += 1
+            if ahead < length and text[ahead] not in ',:}]':
+                out.append('\\"')
+                continue
+            quoted = False
+        out.append(char)
+    return ''.join(out)
+
+
 def parse_plan(text, *, message_id, user_id):
     if not isinstance(text, str):
         raise PlanValidationError('invalid_type')
@@ -89,15 +131,15 @@ def parse_plan(text, *, message_id, user_id):
         elif char in '}]':
             depth -= 1
     try:
-        choice = json.loads(text, object_pairs_hook=_object, parse_constant=_constant)
-    except json.JSONDecodeError as exc:
-        raise PlanValidationError('invalid_json', line=exc.lineno, column=exc.colno) from None
-    except RecursionError:
-        raise PlanValidationError('excessive_depth') from None
-    except ValueError as exc:
-        if isinstance(exc, PlanValidationError):
+        choice = _decode(text)
+    except PlanValidationError as exc:
+        repaired = _escape_inner_quotes(text) if exc.code == 'invalid_json' else text
+        if repaired == text:
             raise
-        raise PlanValidationError('invalid_json') from None
+        try:
+            choice = _decode(repaired)
+        except PlanValidationError:
+            raise exc from None
     if not isinstance(choice, dict):
         raise PlanValidationError('invalid_shape')
     for field in ('action', 'target_message_id', 'target_user_id', 'addressed_to_bot', 'intent', 'reason'):

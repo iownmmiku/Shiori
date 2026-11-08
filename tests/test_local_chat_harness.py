@@ -63,7 +63,7 @@ def test_unified_chat_exceeds_three_tool_steps_and_keeps_persona_and_receipts(tm
         assert len(messages[-1]['metadata']['job_ids']) == 5
         assert '本地 Chat 工作台' in snapshots[0][0]['content']
         assert '群消息可能只是旁听背景' not in snapshots[0][0]['content']
-        assert '初音未来' in snapshots[0][0]['content']
+        assert '林星遥' in snapshots[0][0]['content']
         assert any('本轮已执行工具的压缩回执' in str(item.get('content')) for item in snapshots[-1])
 
 

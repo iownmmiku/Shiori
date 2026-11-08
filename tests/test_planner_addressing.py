@@ -2,6 +2,7 @@
 its stated audience, other bots, and the hints passed on to the reply."""
 import json
 from copy import deepcopy
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -84,6 +85,8 @@ async def test_planner_sees_the_conversation_in_order_with_its_own_lines(setup):
 async def test_stated_audience_decides_whether_it_was_said_to_the_bot(setup):
     store, settings, planner, social = setup
     settings.config['planner']['eagerness'] = 0  # threshold 95: only speech to the bot passes
+    asked = say(store, '303', '这关好难')
+    store.add_message(GROUP, 'assistant', 'assistant', '多练练就好', source_ids=[asked['id']])
     planner.plan = {'audience': 'bot', 'addressed_to_bot': False, 'speaker_intent': '在回应机器人刚才的话'}
     result = await social.plan(store.get_scope(GROUP), say(store, '303', '别这么说嘛'))
     assert result['reply'] and result['addressed_to_bot'] and result['speaker_intent'] == '在回应机器人刚才的话'
@@ -153,3 +156,95 @@ async def test_reply_prompt_carries_who_the_message_was_for(tmp_path):
     finally:
         await chat.close()
         store.close()
+
+
+def gate(store):
+    return next(item for item in store.list_events(20) if item['kind'] == 'planner_timing')['details']['gate']
+
+
+@pytest.mark.anyio
+async def test_a_bystander_right_after_the_bots_line_is_not_taken_as_talking_to_it(setup):
+    """Replays a real misfire: the bot teased a member who took the wrong
+    train; another member's advice to him came right after the bot's line,
+    the Planner called the bot its audience, and the bot answered "少管我"."""
+    store, settings, planner, social = setup
+    settings.config['planner']['eagerness'] = 25  # threshold 82.5
+    wrong = say(store, '94354530', '导致非常丝滑的坐反了', name='虚勢丶')
+    store.add_message(GROUP, 'assistant', 'assistant', '行吧行吧，总算还知道换乘', source_ids=[wrong['id']])
+    seven = say(store, '94354530', '这次坐了七个站才发觉', name='虚勢丶')
+    store.add_message(GROUP, 'assistant', 'assistant', '……七个站？你是和地铁杠上了吗？', source_ids=[seven['id']])
+    planner.plan = {'audience': 'bot', 'addressed_to_bot': True, 'value': 85, 'speaker_intent': '劝你走路别玩手机'}
+    result = await social.plan(store.get_scope(GROUP), say(store, '2631101581', '走路少玩手机吧', name='四川莫'))
+    payload = planner.payload()
+    assert payload['current_follows'] == '你' and payload['your_partners'] == ['虚勢丶(94354530)']
+    assert not result['reply'] and not result['addressed_to_bot'] and '近期没有和你对话' in result['reason']
+    assert 'speaker_intent' not in result and 'audience' not in result
+    assert gate(store) == {'value': 69, 'planner_value': 85, 'implicit_audience': True, 'threshold': 82.5,
+                           'eagerness': 25, 'scored': True, 'audience': 'bot', 'result': 'below_threshold'}
+    prompt = planner.calls[-1][0][0]['content']
+    assert '紧跟在你发言后不等于对你说' in prompt and 'your_partners' in prompt and '看不到图片内容' in prompt
+    # The member it was talking with is still answered without @ or a quote.
+    planner.plan = {'audience': 'bot', 'addressed_to_bot': True, 'value': 85, 'speaker_intent': '在向你辩解'}
+    result = await social.plan(store.get_scope(GROUP), say(store, '94354530', '我也不想啊', name='虚勢丶'))
+    assert result['reply'] and result['addressed_to_bot'] and result['speaker_intent'] == '在向你辩解'
+    assert gate(store)['result'] == 'addressed' and 'implicit_audience' not in gate(store)
+
+
+@pytest.mark.anyio
+async def test_a_picture_from_a_bystander_is_not_taken_as_said_to_the_bot(setup):
+    store, settings, planner, social = setup
+    settings.config['planner']['eagerness'] = 25
+    seven = say(store, '94354530', '这次坐了七个站才发觉', name='虚勢丶')
+    store.add_message(GROUP, 'assistant', 'assistant', '你是和地铁杠上了吗', source_ids=[seven['id']])
+    planner.plan = {'audience': 'bot', 'addressed_to_bot': True, 'value': 90, 'speaker_intent': '发图吓唬你'}
+    picture = say(store, '189927747', '[图片]', name='大小姐', images=[{'file': 'meme.jpg'}])
+    result = await social.plan(store.get_scope(GROUP), picture)
+    assert planner.payload()['signals']['has_images']
+    assert not result['reply'] and gate(store)['value'] == 69 and gate(store)['implicit_audience']
+
+
+@pytest.mark.anyio
+async def test_talking_with_the_bot_lapses_after_ten_minutes(setup):
+    store, settings, planner, social = setup
+    settings.config['planner']['eagerness'] = 0
+    old = (datetime.now(timezone.utc) - timedelta(minutes=11)).isoformat()
+    asked = say(store, '303', '这关好难', sent_at=old)
+    store.add_message(GROUP, 'assistant', 'assistant', '多练练就好', source_ids=[asked['id']], sent_at=old)
+    planner.plan = {'audience': 'bot', 'addressed_to_bot': True, 'value': 95}
+    result = await social.plan(store.get_scope(GROUP), say(store, '303', '还是不会'))
+    assert planner.payload()['your_partners'] == [] and not result['reply'] and gate(store)['implicit_audience']
+    # Quoting or @-ing the bot makes a member a partner too.
+    say(store, '404', '那你说怎么办', at_bot=True)
+    result = await social.plan(store.get_scope(GROUP), say(store, '404', '快说嘛'))
+    assert planner.payload()['your_partners'] == ['404'] and result['reply'] and result['addressed_to_bot']
+
+
+def test_ascii_quotes_inside_a_value_no_longer_fail_the_plan():
+    """Seen in production: speaker_intent quoting a chat line with ASCII quotes
+    made 13 of 812 plans invalid JSON. Escaping them keeps the model's own
+    decision; anything still broken stays invalid."""
+    def plan(intent):
+        return ('{"audience":"bot","speaker_intent":"' + intent + '","addressed_to_bot":true,"action":"reply",'
+                '"target_message_id":"m","target_user_id":"u","intent":"回应","reason":"在问你","needed_info":[],"value":90}')
+    result = parse_plan(plan('在回应你说的"七个站"'), message_id='m', user_id='u')
+    assert result['speaker_intent'] == '在回应你说的"七个站"' and result['action'] == 'reply'
+    assert parse_plan(plan('问"这个"和"那个" 的区别'), message_id='m', user_id='u')['speaker_intent'] == '问"这个"和"那个" 的区别'
+    with pytest.raises(Exception) as caught:
+        parse_plan(plan('他说"好",然后走了'), message_id='m', user_id='u')  # quote before a comma: ambiguous
+    assert getattr(caught.value, 'code', '') == 'invalid_json'
+    with pytest.raises(Exception) as caught:
+        parse_plan('{"action":"reply"', message_id='m', user_id='u')
+    assert caught.value.code == 'invalid_json'
+
+
+@pytest.mark.anyio
+async def test_bot_lines_are_sent_once_and_quotes_are_asked_as_brackets(setup):
+    store, _, planner, social = setup
+    social.history_fn = lambda scope_id, user_id: store.list_messages(scope_id, limit=14)
+    asked = say(store, '303', '这关好难', name='阿九')
+    store.add_message(GROUP, 'assistant', 'assistant', '多练练就好', source_ids=[asked['id']])
+    await social.plan(store.get_scope(GROUP), say(store, '303', '还是不会', name='阿九'))
+    payload = planner.payload()
+    assert 'recent_bot_replies' not in payload
+    assert [line['text'] for line in payload['history'] if line['from'] == '你'] == ['多练练就好']
+    assert '引用别人的话用「」' in planner.calls[-1][0][0]['content']

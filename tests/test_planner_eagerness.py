@@ -130,6 +130,7 @@ async def test_speech_to_the_bot_ignores_the_threshold(setup):
     store, settings, planner, social = setup
     settings.config['planner']['eagerness'] = 0
     planner.value, planner.addressed = 20, True
+    social.note_reply(GROUP, '303')  # without @/quote, only a partner can be talking to it
     result = await plan(store, social)
     assert result['reply'] and result['addressed_to_bot']
 

@@ -1,12 +1,12 @@
 [
-  {"id":"direct-name","text":"初音未来，你喜欢什么音乐？","user_id":"alice","expected":{"reply":true,"target_user_id":"alice"},"scripted_decision":{"action":"reply","intent":"交流音乐","needed_info":[],"reason":"明确问机器人","confidence":0.99}},
-  {"id":"disabled-name-proactive","text":"初音未来这首歌大家觉得怎样，想听听不同看法","scope":{"trigger_name":false,"proactive_reply":true},"expected":{"reply":true},"scripted_decision":{"action":"reply","intent":"参与音乐讨论","reason":"开放邀请且符合兴趣","confidence":0.9}},
+  {"id":"direct-name","text":"林星遥，你喜欢什么音乐？","user_id":"alice","expected":{"reply":true,"target_user_id":"alice"},"scripted_decision":{"action":"reply","intent":"交流音乐","needed_info":[],"reason":"明确问机器人","confidence":0.99}},
+  {"id":"disabled-name-proactive","text":"林星遥这首歌大家觉得怎样，想听听不同看法","scope":{"trigger_name":false,"proactive_reply":true},"expected":{"reply":true},"scripted_decision":{"action":"reply","intent":"参与音乐讨论","reason":"开放邀请且符合兴趣","confidence":0.9}},
   {"id":"quiet-group","text":"大家在看什么番？","scope":{"activity":"quiet"},"expected":{"reply":false}},
   {"id":"private-always","scope_kind":"private","text":"今天有点累","scope":{"always_reply":true},"expected":{"reply":true}},
   {"id":"private-planner-off","scope_kind":"private","text":"你好","scope":{"plan_enabled":false},"expected":{"reply":true}},
-  {"id":"local-command","text":"初音未来，计算：12*8","expected":{"reply":true}},
-  {"id":"no-proactive","text":"初音未来这张插画真好看","scope":{"trigger_name":false,"proactive_reply":false},"expected":{"reply":false}},
+  {"id":"local-command","text":"林星遥，计算：12*8","expected":{"reply":true}},
+  {"id":"no-proactive","text":"林星遥这张插画真好看","scope":{"trigger_name":false,"proactive_reply":false},"expected":{"reply":false}},
   {"id":"others-conversation","text":"小明，这道题你会吗","expected":{"reply":false},"scripted_decision":{"action":"skip","reason":"对话对象是小明","confidence":0.98}},
   {"id":"low-value","text":"嗯嗯","expected":{"reply":false},"scripted_decision":{"action":"skip","reason":"没有补充价值","confidence":0.9}},
-  {"id":"group-open-question","text":"最近有什么好听的动画歌曲推荐吗？","expected":{"reply":true},"scripted_decision":{"action":"reply","intent":"推荐音乐","needed_info":["动画歌曲"],"reason":"公开提问且有相关兴趣","confidence":0.95}}
+  {"id":"group-open-question","text":"最近有什么好听的动画歌曲推荐吗？","expected":{"reply":true},"scripted_decision":{"action":"reply","audience":"group","addressed_to_bot":false,"value":80,"intent":"推荐音乐","needed_info":["动画歌曲"],"reason":"公开提问且有相关兴趣","confidence":0.95}}
 ]

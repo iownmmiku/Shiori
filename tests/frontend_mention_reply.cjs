@@ -60,7 +60,7 @@ async function main(){
   form.get('respond_to_reply').checked=false;
   await sandbox.saveSettings('identity',form);
   assert.equal(calls.at(-1)[0],'/api/settings');
-  assert.deepEqual(payload().identity,{name:'初音未来',aliases:[],respond_to_at:false,respond_to_reply:false,respond_to_name:false,planner_enabled:true,proactive_enabled:true});
+  assert.deepEqual(payload().identity,{name:'林星遥',aliases:[],respond_to_at:false,respond_to_reply:false,respond_to_name:false,planner_enabled:true,proactive_enabled:true});
   state.settings.identity=payload().identity;
   form=formFrom(ui.identitySection());
   assert.equal(form.get('respond_to_at').checked,false);

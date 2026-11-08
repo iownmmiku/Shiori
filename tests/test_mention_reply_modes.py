@@ -38,7 +38,7 @@ async def test_enabled_mandatory_mention_bypasses_planner_even_when_it_would_ski
     _, _, chat, flow = configure(setup, mandatory=True, debounce=False, plan_enabled=False)
     choose(chat, 'skip')
     try:
-        result = await send(flow, '你好' if kind == 'at' else '初音，你好',
+        result = await send(flow, '你好' if kind == 'at' else '星遥，你好',
                             direct=kind == 'at', wait=True)
         assert result['accepted'] and len(chat.calls) == 1
         assert not chat.provider.calls
@@ -56,7 +56,7 @@ async def test_disabled_mandatory_mention_runs_planner_in_quiet_nonproactive_sco
     chat.social._last_reply['qq:group:202'] = time.monotonic()
     choose(chat, action)
     try:
-        result = await asyncio.wait_for(send(flow, '你好' if kind == 'at' else '初音，你好',
+        result = await asyncio.wait_for(send(flow, '你好' if kind == 'at' else '星遥，你好',
                                              direct=kind == 'at', wait=True), 1)
         assert result['accepted'] is (action == 'reply')
         assert len(chat.provider.calls) == 1
@@ -143,7 +143,7 @@ async def test_optional_mentions_never_fall_back_to_reply_without_planner(setup,
     else:
         chat.social.provider = None
     try:
-        result = await send(flow, '你好' if kind == 'at' else '初音，你好',
+        result = await send(flow, '你好' if kind == 'at' else '星遥，你好',
                             direct=kind == 'at', wait=True)
         assert not result['accepted'] and not chat.provider.calls and not chat.calls
         assert not setup[4]
@@ -164,7 +164,7 @@ async def test_optional_mention_cannot_borrow_another_triggers_unavailable_plann
         config.config['model'].update(base_url='', model='')
     text = '更正一下，改成另一首旋律' if other_trigger == 'replacement' else '继续聊这首旋律'
     if kind == 'name':
-        text += '，初音'
+        text += '，星遥'
     if other_trigger == 'replacement':
         chat.social._open_requests.add(('qq:group:202', '303'))
     item = store.add_message('qq:group:202', '303', 'user', text,
@@ -209,7 +209,7 @@ async def test_group_presets_choose_semantic_or_mandatory_mention_mode(setup, ki
     store.upsert_scope({'id': 'qq:group:202', **patch})
     choose(chat, 'skip')
     try:
-        result = await send(flow, '你好' if kind == 'at' else '初音，你好',
+        result = await send(flow, '你好' if kind == 'at' else '星遥，你好',
                             direct=kind == 'at', wait=True)
         assert result['accepted'] is mandatory
         assert len(chat.provider.calls) == (0 if mandatory else 1)
@@ -338,7 +338,7 @@ async def send_real_group(runtime, user, text, kind, *, addressed=True):
     _, _, _, access, _, flow, _ = runtime
     identity = access.identity('onebot', user, '999')
     if addressed and kind == 'name':
-        text = '初音，' + text
+        text = '星遥，' + text
     at_bot = addressed and kind == 'at'
     metadata = {'at_bot': at_bot, 'trusted_identity': identity,
                 'is_admin': access.is_admin(identity), 'is_owner': access.is_admin(identity)}

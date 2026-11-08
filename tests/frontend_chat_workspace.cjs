@@ -22,7 +22,7 @@ function fixture(){
     $:selector=>nodes.get(selector),e,scope:()=>state.scopes.find(item=>item.id===state.scope)||{},
     rows:value=>Array.isArray(value)?value:value?.items||[],query:value=>new URLSearchParams(value).toString(),icon:name=>`<svg data-icon="${e(name)}"></svg>`,
     button:(text,action,style="",glyph="",extra="")=>`<button data-action="${e(action)}" ${extra}>${e(text)}</button>`,
-    notice:()=>"",heading:()=>"",personaName:()=>"初音未来",renderMessage:item=>`<p>${e(item.body)}</p>`,toolRunCard:()=>"",
+    notice:()=>"",heading:()=>"",personaName:()=>"林星遥",renderMessage:item=>`<p>${e(item.body)}</p>`,toolRunCard:()=>"",
     field:(name,label,value)=>`<input name="${e(name)}" value="${e(value)}">`,textarea:(name,label,value)=>`<textarea name="${e(name)}">${e(value)}</textarea>`,select:()=>"",
     openModal:(...args)=>{config.modal=args;state.modalKind=args[3]||"";nodes.set("#modal",{open:true});nodes.set("#modal-content",{firstElementChild:{}});},
     closeModal:()=>{config.closes++;config.modal=null;state.modalKind=null;if(nodes.has("#modal"))nodes.get("#modal").open=false;},getForm:form=>form,

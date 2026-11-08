@@ -304,7 +304,7 @@ def test_old_templates_migrate_once_and_rebind_references(store):
     legacy_seed(store)
     store._seed()
     assert [record["id"] for record in store.list_personas()] == ["default"]
-    assert store.get_persona("default")["name"] == "初音未来"
+    assert store.get_persona("default")["name"] == "林星遥"
     assert store.get_scope("qq:group:1")["persona_id"] == "default"
     store._seed()
     assert len([e for e in store.list_events() if e["kind"] == "shiori_persona_seed_v1"]) == 1
@@ -341,7 +341,7 @@ def test_schema1_backup_without_new_fields_restores_isolated_and_migrates_person
     backup = store.backup(tmp_path / "old-schema1.db")
     store.restore_from(backup)
     assert store._conn.execute("PRAGMA user_version").fetchone()[0] == 1
-    assert store.get_persona("default")["name"] == "初音未来"
+    assert store.get_persona("default")["name"] == "林星遥"
     assert not store.get_memory(fact["id"]).get("shareable", False)
     store.upsert_scope({"id": "qq:group:1", "memory_space": "shared"})
     store.upsert_scope({"id": "qq:group:2", "memory_space": "shared"})

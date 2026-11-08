@@ -16,6 +16,8 @@ def anyio_backend():
 @pytest.fixture
 def store(tmp_path):
     instance = Store(tmp_path / 'knowledge')
+    # Only the persona under test explores; the seeded default would join any scheduled run.
+    instance.save_persona({**instance.get_persona('default'), 'exploration_enabled': False})
     instance.save_persona({'id': 'interested', 'name': '兴趣伙伴', 'system_prompt': '温暖自然',
                            'interests': ['动画', '音乐'], 'exploration_enabled': True})
     yield instance

@@ -61,9 +61,9 @@ def persona(c):
 def test_identity_defaults_scope_inheritance_and_explicit_override(client):
     c, app = client
     cfg = c.get('/api/settings').json()
-    assert cfg['identity']['name'] == '初音未来'
-    assert [item['name'] for item in c.get('/api/personas').json()] == ['初音未来']
-    result = c.put('/api/settings', json={'identity': {'name': 'Miku', 'aliases': ['初音', '39'], 'respond_to_name': False}})
+    assert cfg['identity']['name'] == '林星遥'
+    assert [item['name'] for item in c.get('/api/personas').json()] == ['林星遥']
+    result = c.put('/api/settings', json={'identity': {'name': 'Miku', 'aliases': ['星遥', '39'], 'respond_to_name': False}})
     assert result.status_code == 200, result.text
     scope = c.put('/api/scopes/web:default', json={'trigger_at': None, 'trigger_name': True, 'plan_enabled': False,
                                                 'always_reply': True, 'bot_name': '', 'bot_aliases': []}).json()

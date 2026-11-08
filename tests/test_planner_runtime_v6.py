@@ -67,7 +67,7 @@ def message(store, text='今天重听了电子音乐专辑', scope='qq:group:202
 @pytest.mark.parametrize('field,metadata,text', [
     ('trigger_at', {'at_bot': True}, '今天重听了电子音乐专辑'),
     ('trigger_reply', {'reply_to_bot': True}, '刚才说的电子音乐很有意思'),
-    ('trigger_name', {}, '初音未来的电子音乐很有意思'),
+    ('trigger_name', {}, '林星遥的电子音乐很有意思'),
 ])
 async def test_disabled_mandatory_reply_preserves_mention_signals_for_planner(setup, field, metadata, text):
     store, _, planner, social = setup
@@ -114,7 +114,7 @@ async def test_proactive_planner_rate_drops_new_decisions_but_direct_trigger_byp
     assert (await social.plan(scope, message(store)))['reply']
     assert '间隔' in (await social.plan(scope, message(store)))['reason']
     assert len(planner.calls) == 1
-    assert (await social.plan(scope, message(store, '初音未来，帮我想想电子音乐')))['reply']
+    assert (await social.plan(scope, message(store, '林星遥，帮我想想电子音乐')))['reply']
     assert len(planner.calls) == 2
 
 
@@ -124,7 +124,7 @@ async def test_local_command_does_not_depend_on_broken_planner_but_still_require
     planner.error = RuntimeError('broken')
     social.local_command_fn = lambda scope_id, text: '记住' in text
     scope = store.get_scope('qq:group:202')
-    assert (await social.plan(scope, message(store, '初音未来，记住我喜欢音乐')))['reply']
+    assert (await social.plan(scope, message(store, '林星遥，记住我喜欢音乐')))['reply']
     assert not planner.calls
     scope = store.upsert_scope({'id': scope['id'], 'trigger_name': False, 'proactive_reply': False})
     assert not (await social.plan(scope, message(store, '记住我喜欢音乐')))['reply']
@@ -143,14 +143,14 @@ async def test_planner_sees_bounded_knowledge_and_rechecks_its_dependencies(setu
     current = [True]
     social.knowledge_current_fn = lambda scope, user, data: current[0]
     scope = store.get_scope('qq:group:202')
-    assert (await social.plan(scope, message(store, '初音未来，聊聊音乐')))['reply']
+    assert (await social.plan(scope, message(store, '林星遥，聊聊音乐')))['reply']
     payload = json.loads(planner.calls[-1][0][-1]['content'])
     index = payload['available_knowledge']
     assert len(json.dumps(index, ensure_ascii=False)) <= 2500
     assert len(index['memories']) <= 4 and len(index['persona_knowledge']) <= 3
     assert 'memory_versions' not in index
     current[0] = False
-    result = await social.plan(scope, message(store, '初音未来，接着聊音乐'))
+    result = await social.plan(scope, message(store, '林星遥，接着聊音乐'))
     assert not result['reply'] and not result.get('error_feedback')
     assert len(planner.calls) == 1  # Guard fails before dispatch.
 
@@ -171,7 +171,7 @@ async def test_expired_queued_planner_is_not_dispatched_and_direct_user_gets_fee
             dispatched.append(messages)
             return {'content': '{}'}
     social.provider = Queued()
-    result = await social.plan(scope, message(store, '初音未来，聊聊音乐'))
+    result = await social.plan(scope, message(store, '林星遥，聊聊音乐'))
     assert not dispatched and not result['reply'] and result['error_feedback']
 
 
@@ -194,7 +194,7 @@ async def test_saved_plan_dependencies_can_invalidate_reply_before_chat_generati
     chat.respond = AsyncMock(side_effect=AssertionError('stale plan must not generate a reply'))
     bridge = OneBotBridge(store, settings, chat)
     bridge.send = AsyncMock(return_value=True)
-    await bridge._flow.handle('qq:group:202', '303', '初音未来，聊聊音乐', [], {})
+    await bridge._flow.handle('qq:group:202', '303', '林星遥，聊聊音乐', [], {})
     assert not chat.respond.called and not bridge.send.called
     await bridge._flow.close()
 
@@ -234,7 +234,7 @@ async def test_direct_qq_failure_has_one_safe_feedback_without_model_fallback(se
         else:
             settings.config['output']['platform_max_chars'] = 80
             chat.reply = '```python\n' + 'print(1)\n' * 30 + '```'
-    await bridge._flow.handle('qq:group:202', '303', '初音未来，你好', [], {})
+    await bridge._flow.handle('qq:group:202', '303', '林星遥，你好', [], {})
     assert bridge.send.await_count == 1
     sent = bridge.send.call_args.args[1]
     assert len(sent) < 100 and 'private-api-key' not in sent and 'secret.invalid' not in sent
@@ -272,7 +272,7 @@ async def test_unsolicited_failure_or_revoked_request_never_pushes_error_to_grou
         settings.config['onebot']['allowed_groups'] = []
         raise RuntimeError('broken')
     planner.complete = revoked
-    await bridge._flow.handle('qq:group:202', '303', '初音未来，你好', [], {})
+    await bridge._flow.handle('qq:group:202', '303', '林星遥，你好', [], {})
     assert not bridge.send.called
     await bridge._flow.close()
 

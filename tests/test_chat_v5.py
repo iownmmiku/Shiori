@@ -156,11 +156,11 @@ def test_named_direct_command_preserves_original_source(tmp_path):
     store, model = Store(tmp_path), Model()
     chat = ChatService(store, Config(), model)
     async def run():
-        result = await chat.respond('web:default', 'owner', '初音未来，记住：我喜欢音乐')
+        result = await chat.respond('web:default', 'owner', '林星遥，记住：我喜欢音乐')
         assert '已记住' in result['reply'] and not model.inputs
         memory = store.list_memories()[0]
         assert memory['content'] == '我喜欢音乐'
-        assert store.get_message(memory['source_ids'][0])['content'] == '初音未来，记住：我喜欢音乐'
+        assert store.get_message(memory['source_ids'][0])['content'] == '林星遥，记住：我喜欢音乐'
         await chat.close()
     asyncio.run(run())
 

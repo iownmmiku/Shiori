@@ -115,7 +115,7 @@ async def test_local_planner_two_actions_diagnostics_and_answered_messages_are_f
     settings.config['model'].update(base_url='', model='')
     scope = store.upsert_scope({'id': 'qq:group:202', 'plan_enabled': True})
     casual, fragment = raw(store, '准备下楼吃饭'), raw(store, '因为')
-    question = raw(store, '初音未来，电脑怎么修？')
+    question = raw(store, '林星遥，电脑怎么修？')
     assert (await chat.social.plan(scope, casual))['action'] == 'skip'
     assert (await chat.social.plan(scope, fragment))['action'] == 'skip'
     decision = await chat.social.should_reply(scope, question)
@@ -146,7 +146,7 @@ async def test_plan_off_keeps_direct_requests_without_extra_model(setup):
     store, _, provider, chat, _ = setup
     disabled = store.upsert_scope({'id': 'qq:group:202', 'plan_enabled': False})
     assert (await chat.social.plan(disabled, raw(store, '大家觉得怎么样？')))['action'] == 'skip'
-    assert (await chat.social.plan(disabled, raw(store, '初音，给个建议')))['action'] == 'reply'
+    assert (await chat.social.plan(disabled, raw(store, '星遥，给个建议')))['action'] == 'reply'
     assert not provider.calls
 
 

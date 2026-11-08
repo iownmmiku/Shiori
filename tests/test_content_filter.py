@@ -363,7 +363,7 @@ def test_qq_sends_one_safe_filter_feedback_without_tools_or_raw_model_body(setup
     bridge.send = AsyncMock(return_value=True)
     async def scenario():
         try:
-            await bridge._flow.handle('qq:group:202', '303', '初音未来，你好', [], {})
+            await bridge._flow.handle('qq:group:202', '303', '林星遥，你好', [], {})
         finally:
             await bridge._flow.close()
             await chat.close()

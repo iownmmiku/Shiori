@@ -23,7 +23,7 @@ async def test_isolated_replay_supports_original_official_adapter_configuration(
     config = deepcopy(DEFAULTS)
     config['onebot']['adapter'] = 'official'
     config['qq_official']['enabled'] = True
-    cases = [{'id': 'official-config', 'text': '初音未来，聊聊音乐', 'expected': {'reply': True},
+    cases = [{'id': 'official-config', 'text': '林星遥，聊聊音乐', 'expected': {'reply': True},
               'scripted_decision': {'action': 'reply', 'reason': '明确向机器人分享音乐', 'intent': '聊音乐'}}]
     report = await replay(cases, config=config)
     assert report['summary']['errors'] == 0
@@ -67,7 +67,7 @@ async def test_offline_reminder_reschedule_survives_configured_but_broken_planne
     bridge = OneBotBridge(store, settings, chat)
     bridge.send = AsyncMock(return_value=True)
     try:
-        await bridge._flow.handle('qq:group:202', '101', '初音未来，把喝水提醒改到明晚八点', [], {'is_owner': True})
+        await bridge._flow.handle('qq:group:202', '101', '林星遥，把喝水提醒改到明晚八点', [], {'is_owner': True})
         assert not provider.complete.called
         assert store.get_task(task['id'])['due_at'] != task['due_at']
         assert '已改期' in bridge.send.call_args.args[1]

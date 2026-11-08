@@ -186,7 +186,7 @@ def test_partial_persona_nested_edits_preserve_existing_overrides_and_allow_inhe
     edited = connection.put("/api/personas/default", json={"exploration": {"interval_hours": 24}})
     assert edited.status_code == 200, edited.text
     data = edited.json()
-    assert data["name"] == "初音未来" and data["system_prompt"] == "自定义人格需要保留"
+    assert data["name"] == "林星遥" and data["system_prompt"] == "自定义人格需要保留"
     assert data["interests"] == ["合成音乐"] and data["excluded_topics"] == ["剧情剧透"]
     assert data["exploration"] == {"interval_hours": 24, "daily_searches": 0, "valid_days": 7}
     inherited = connection.put("/api/personas/default", json={"exploration": {"daily_searches": None}})

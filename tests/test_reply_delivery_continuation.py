@@ -37,7 +37,7 @@ class Model:
 @pytest.mark.anyio
 @pytest.mark.parametrize('kind', ['private', 'group'])
 @pytest.mark.parametrize('followup,expected_old', [
-    ('初音未来，另外一个新问题，请再说明一下', 3),
+    ('林星遥，另外一个新问题，请再说明一下', 3),
     ('停止回复', 1),
     ('换个问题，我想问新的问题', 1),
 ])
@@ -57,7 +57,7 @@ async def test_new_ordinary_request_does_not_cut_off_reply_already_being_sent(tm
         return True
 
     bridge.send = send
-    task = asyncio.create_task(bridge._flow.handle(scope, '303', '初音未来，原问题请详细回答', [], {'at_bot': True}, direct=True))
+    task = asyncio.create_task(bridge._flow.handle(scope, '303', '林星遥，原问题请详细回答', [], {'at_bot': True}, direct=True))
     try:
         await asyncio.wait_for(first_dispatched.wait(), 5)
         await bridge._flow.handle(scope, '303', followup, [], {'at_bot': followup != '停止回复'}, direct=True, wait=False)
@@ -94,10 +94,10 @@ async def test_busy_followup_does_not_cancel_an_answer_already_on_the_wire(tmp_p
         return True
 
     bridge.send = send
-    first = asyncio.create_task(bridge._flow.handle(scope, '303', '初音未来，原问题请回答', [], {'at_bot': True}, direct=True))
+    first = asyncio.create_task(bridge._flow.handle(scope, '303', '林星遥，原问题请回答', [], {'at_bot': True}, direct=True))
     try:
         await asyncio.wait_for(dispatched.wait(), 5)
-        second = asyncio.create_task(bridge._flow.handle(scope, '303', '初音未来，另一个问题', [], {'at_bot': True}, direct=True, wait=False))
+        second = asyncio.create_task(bridge._flow.handle(scope, '303', '林星遥，另一个问题', [], {'at_bot': True}, direct=True, wait=False))
         for _ in range(100):
             if chat.social._generations[(scope, '303')] == 2:
                 break

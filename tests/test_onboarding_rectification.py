@@ -158,7 +158,7 @@ def test_blacklist_revocation_stops_remaining_chunks_and_memory_access(tmp_path)
             settings.update({'onebot': {'blocked_groups': ['456']}})
             return True
         bridge.send = AsyncMock(side_effect=send)
-        await bridge._flow.handle(scope, '123', '初音未来你好', [], {})
+        await bridge._flow.handle(scope, '123', '林星遥你好', [], {})
         assert bridge.send.await_count == 1
         assert not MemoryEngine(store, settings)._permission(scope, settings.get())
         assert not ContextEngine(store, settings, None)._permission(scope, '123')

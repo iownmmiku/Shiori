@@ -24,7 +24,7 @@ window.ShioriExperienceHelp={create(runtime,helpers){
     async function renderOverview() {
       const diagnostics = await api(`/api/diagnostics?${query({scope_id:state.scope})}`), model = configuredModel(), qq = diagnostics.qq || state.boot?.qq || {};
       const connected = qq.status?.connected || qq.connected;
-      return heading("","机器人管理","",button("开始聊天","go-chat","primary","chat")) + `<section class="home-intro"><div class="home-identity"><div class="shiori-mark" aria-hidden="true">m<span>♪</span></div><div><h2>${e(state.settings.identity?.name || "初音未来")} 已就绪</h2><p>可以聊天、记住重要的信息，也能在授权后执行电脑任务。默认人格为初音未来，可以随时更换。</p></div></div>${button("使用指南","go-help","","arrow")}</section><div class="status-cards">${[
+      return heading("","机器人管理","",button("开始聊天","go-chat","primary","chat")) + `<section class="home-intro"><div class="home-identity"><div class="shiori-mark" aria-hidden="true">m<span>♪</span></div><div><h2>${e(state.settings.identity?.name || "林星遥")} 已就绪</h2><p>可以聊天、记住重要的信息，也能在授权后执行电脑任务。默认人格是林星遥，一个爱看星星、拍照和烘焙的高二学生，可以随时更换。</p></div></div>${button("使用指南","go-help","","arrow")}</section><div class="status-cards">${[
         ["spark","语言模型",diagnostics.model?.configured ? "已配置" : "等待连接",model.model || "填写服务地址和密钥后即可聊天。","quick-model","配置模型"],
         ["groups","QQ 连接",connected ? "已连接" : qq.enabled ? "正在等待连接" : "尚未启用","本机 NapCat、SnowLuma 支持自动配对，也可以使用 QQ 官方机器人。","local-qq","连接 QQ"],
         ["tools","电脑任务",state.settings.computer?.enabled ? "已开启" : "尚未开启","仅限已认证的本地账户和指定的 QQ 管理员使用。","computer-settings","管理权限"]

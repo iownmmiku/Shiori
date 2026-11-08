@@ -90,7 +90,7 @@ async function asynchronousRegressions(){
   // A late exact lookup must not overwrite the next persona/date selection.
   let resolveDiary;deferDiary=new Promise(resolve=>{resolveDiary=resolve;});
   const oldDiary=ui.render();await tick();
-  result={...result,persona_id:"other",persona_key:"other-key",personas:[{id:"miku",name:"初音"},{id:"other",name:"另一个角色"}]};
+  result={...result,persona_id:"other",persona_key:"other-key",personas:[{id:"miku",name:"星遥"},{id:"other",name:"另一个角色"}]};
   diaryResponse={diary:{date:result.date,persona_key:"other-key",title:"另一个角色的日记",content:"新结果"}};
   await ui.handleChange({id:"life-persona",value:"other"});
   resolveDiary({diary:{date:"2026-08-02",title:"过期异步正文",content:"旧结果"}});

@@ -111,7 +111,7 @@ async def test_allowed_group_observation_is_free_and_never_duplicated(setup):
 @pytest.mark.anyio
 async def test_names_reply_proof_and_followup_preserve_actor(setup):
     store, _, provider, chat, bridge = setup
-    await bridge.handle_event(event(1, '初音，你怎么看'))
+    await bridge.handle_event(event(1, '星遥，你怎么看'))
     await bridge.handle_event(event(2, '那为什么呢？'))
     await bridge.handle_event(event(3, '继续', user=404))
     bridge._outgoing['confirmed-own'] = 'qq:group:202'
@@ -127,14 +127,14 @@ async def test_names_reply_proof_and_followup_preserve_actor(setup):
 @pytest.mark.anyio
 async def test_short_messages_merge_only_same_requester_with_real_source_ids(setup):
     store, _, _, chat, bridge = setup
-    first = asyncio.create_task(bridge.handle_event(event(1, '初音未来，帮我', user=101)))
+    first = asyncio.create_task(bridge.handle_event(event(1, '林星遥，帮我', user=101)))
     await asyncio.sleep(.002)
     second = asyncio.create_task(bridge.handle_event(event(2, '5分钟后提醒我喝水', user=101)))
     stranger = asyncio.create_task(bridge.handle_event(event(3, '继续', user=303)))
     await asyncio.gather(first, second, stranger)
     assert len(chat.calls) == 1
     call = chat.calls[0]
-    assert call[1] == '101' and call[2] == '初音未来，帮我\n5分钟后提醒我喝水'
+    assert call[1] == '101' and call[2] == '林星遥，帮我\n5分钟后提醒我喝水'
     assert call[4]['is_owner'] is True and len(call[4]['source_ids']) == 2
     assert len([x for x in store.list_messages('qq:group:202') if x['role'] == 'user']) == 3
 

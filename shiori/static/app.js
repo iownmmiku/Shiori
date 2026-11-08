@@ -556,7 +556,7 @@ document.addEventListener("click",async event => {
     else if (action === "new-persona") personaModal();
     else if (action === "edit-persona") personaModal(state.personas.find(p => p.id === id));
     else if (action === "use-persona") { await api(`/api/scopes/${encodeURIComponent(state.scope)}`,{method:"PUT",body:{persona_id:id}}); toast("当前会话已切换人格"); await bootstrap(); }
-    else if (action === "delete-persona") await confirmAction("删除这个人格？","使用它的配置与聊天将切换到其余人格；没有其他人格时使用普通助手。记忆与词典保留，初音未来不会在重启后自动恢复。",async () => { await api(`/api/personas/${encodeURIComponent(id)}`,{method:"DELETE"}); },"删除人格");
+    else if (action === "delete-persona") await confirmAction("删除这个人格？","使用它的配置与聊天将切换到其余人格；没有其他人格时使用普通助手。记忆与词典保留，删除的默认人格不会在重启后自动恢复。",async () => { await api(`/api/personas/${encodeURIComponent(id)}`,{method:"DELETE"}); },"删除人格");
     else if (action === "new-scope") scopeModal();
     else if (action === "edit-scope") scopeModal(state.scopes.find(s => s.id === id));
     else if (action === "toggle-scope") { const group = state.scopes.find(s => s.id === id); await api(`/api/scopes/${encodeURIComponent(id)}`,{method:"PUT",body:{enabled:!group.enabled}}); toast(group.enabled ? "会话已暂停" : "会话已启用"); await bootstrap(); }

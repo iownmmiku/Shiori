@@ -111,7 +111,7 @@ async def test_planner_budget_veto_is_not_misreported_as_semantic_skip(monkeypat
     cfg['identity']['respond_to_name'] = False
     cfg['budget']['daily_tokens'] = 1
     sent = mock_transport(monkeypatch)
-    dataset = [{'id': 'planner', 'text': '初音未来，聊聊音乐', 'expected': {'reply': True}}]
+    dataset = [{'id': 'planner', 'text': '林星遥，聊聊音乐', 'expected': {'reply': True}}]
     report = await replay(dataset, config=cfg, live=True)
     assert not sent
     assert report['records'][0]['error'] == 'ReplayBudgetLimit'

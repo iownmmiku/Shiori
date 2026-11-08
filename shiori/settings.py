@@ -87,7 +87,7 @@ DEFAULTS = {
                'max_results': 5, 'daily_calls': 100, 'fallback_public': False},
     'search_providers': [],
     'mcp_servers': [],
-    'identity': {'name':'初音未来','aliases':['初音','miku'], 'respond_to_at':True,'respond_to_reply':True,'respond_to_name':True,
+    'identity': {'name':'林星遥','aliases':['星遥','阿遥'], 'respond_to_at':True,'respond_to_reply':True,'respond_to_name':True,
                  'planner_enabled':True,'proactive_enabled':True},
     'output': {'enabled':True,'mode':'model','target_chars':160,'max_chars':320,'interval_ms':600,'max_parts':8,'platform_max_chars':1800,
                'reply_max_chars':0,'message_max_chars':0,'remove_parentheses':False},

@@ -112,7 +112,7 @@ def bridge_setup(tmp_path):
 async def test_unknown_send_stops_remaining_parts_without_retry(bridge_setup):
     store, _, _, bridge = bridge_setup
     bridge.send = AsyncMock(side_effect=[True, False])
-    await bridge._flow.handle('qq:group:202', '303', '初音未来你好', [], {}, direct=False)
+    await bridge._flow.handle('qq:group:202', '303', '林星遥你好', [], {}, direct=False)
     assert bridge.send.await_count == 2
     first, second = bridge.send.call_args_list
     assert first.kwargs['metadata']['output_part']['index'] == 1
@@ -134,7 +134,7 @@ async def test_between_parts_new_permission_or_source_change_stops_unsent_parts(
             store.clear_messages(scope_id)
         return True
     bridge.send = AsyncMock(side_effect=send)
-    await bridge._flow.handle('qq:group:202', '303', '初音未来你好', [], {}, direct=False)
+    await bridge._flow.handle('qq:group:202', '303', '林星遥你好', [], {}, direct=False)
     assert bridge.send.await_count == 1
 
 
@@ -148,7 +148,7 @@ async def test_all_confirmed_parts_are_identifiable_as_bot_replies(bridge_setup)
             counter += 1
             bridge._pending[request['echo']][1].set_result({'status': 'ok', 'retcode': 0, 'data': {'message_id': counter}})
     bridge._socket = Socket()
-    await bridge._flow.handle('qq:group:202', '303', '初音未来你好', [], {})
+    await bridge._flow.handle('qq:group:202', '303', '林星遥你好', [], {})
     assert counter >= 2
     for index in range(1, counter + 1):
         assert bridge._reply_context('qq:group:202', str(index))['reply_to_bot']
@@ -172,7 +172,7 @@ async def test_official_parts_use_unique_passive_sequence_and_store_receipts(tmp
         return {'id': str(counter)}
     api = SimpleNamespace(post_group_message=AsyncMock(side_effect=post))
     bridge._client = SimpleNamespace(api=api)
-    await bridge._flow.handle('qqofficial:group:gid', 'uid', '初音未来你好', [], {'platform_message_id': 'source'})
+    await bridge._flow.handle('qqofficial:group:gid', 'uid', '林星遥你好', [], {'platform_message_id': 'source'})
     assert counter >= 2
     assert [x.kwargs['msg_seq'] for x in api.post_group_message.call_args_list] == list(range(1, counter + 1))
     assert all(x.kwargs['msg_id'] == 'source' for x in api.post_group_message.call_args_list)
@@ -252,7 +252,7 @@ async def test_each_output_part_checks_knowledge_fingerprint_and_links_logical_r
         changed = True
         return True
     bridge.send = AsyncMock(side_effect=send)
-    await bridge._flow.handle('qq:group:202', '303', '初音未来你好', [], {})
+    await bridge._flow.handle('qq:group:202', '303', '林星遥你好', [], {})
     assert bridge.send.await_count == 1
     logical_id = bridge.send.call_args.kwargs['metadata']['assistant_message_id']
     assert store.get_message(logical_id)['role'] == 'assistant'

@@ -23,9 +23,29 @@ def memory(store, **changes):
 def test_empty_store_has_only_config_seeds_and_wal(store):
     assert store.stats()["messages"] == store.stats()["memories"] == 0
     assert {p["id"] for p in store.list_personas()} == {"default"}
-    assert store.get_persona("default")["name"] == "初音未来"
+    assert store.get_persona("default")["name"] == "林星遥"
     with sqlite3.connect(store.path) as conn:
         assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+
+
+def test_default_persona_is_a_complete_character_and_never_replaces_an_existing_one(tmp_path):
+    data = tmp_path / "data"
+    store = Store(data)
+    try:
+        persona = store.get_persona("default")
+        assert persona["interests"] and persona["exploration_enabled"] is True
+        assert set(persona["profile"]) == {"residence", "occupation", "age", "birthday", "routine",
+                                           "background", "relationship"}
+        assert len(persona["system_prompt"]) <= 6000 and sum(map(len, persona["profile"].values())) <= 2000
+        assert "未成年" in persona["system_prompt"]  # a minor: no romance or sexual roleplay
+        store.save_persona({**persona, "name": "初音未来", "profile": {}})
+    finally:
+        store.close()
+    reopened = Store(data)
+    try:
+        assert reopened.get_persona("default")["name"] == "初音未来"
+    finally:
+        reopened.close()
 
 
 def test_scope_lazy_defaults_preserve_extensions(store):

@@ -35,7 +35,7 @@ const plain = value => JSON.parse(JSON.stringify(value));
 
 async function main() {
   const before = JSON.stringify(sandbox.state.settings);
-  assert.deepEqual(plain(quick.buildPatch(0,{name:" 初音未来 ",aliases:"初音,Miku，初音"},sandbox.state.settings)),{identity:{name:"初音未来",aliases:["初音","Miku"]}});
+  assert.deepEqual(plain(quick.buildPatch(0,{name:" 林星遥 ",aliases:"星遥,Miku，星遥"},sandbox.state.settings)),{identity:{name:"林星遥",aliases:["星遥","Miku"]}});
   assert.equal(JSON.stringify(sandbox.state.settings),before,"identity patch must not alter existing settings");
 
   const settings = {routing:{chat:"custom",memory:"other"},providers:[{id:"custom",name:"聊天",enabled:true,model:"old",api_key_set:true,temperature:.5},{id:"other",model:"keep",enabled:false,api_key_set:true}]};

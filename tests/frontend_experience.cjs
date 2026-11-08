@@ -11,7 +11,7 @@ const sandbox={window:{ShioriQuickStart:{diagnosticsPanel:()=>"",modelSelection:
   e:escaped,configuredModel:()=>state.settings.model,query:params=>new URLSearchParams(params).toString(),rows:value=>Array.isArray(value)?value:value.items||[],
   heading:(...args)=>args.join(""),button:(text,action,style,symbol,attrs="")=>`<button data-action="${action}" ${attrs}>${escaped(text)}</button>`,
   icon:()=>"<svg></svg>",tag:value=>`<span>${escaped(value)}</span>`,notice:value=>`<p>${escaped(value)}</p>`,fmt:value=>String(value),empty:()=>"empty",renderMessage:()=>"",toolJSON:value=>JSON.stringify(value),
-  scope:()=>state.scopes.find(item=>item.id===state.scope)||{},personaName:()=>"初音未来",toolRunCard:()=>"",
+  scope:()=>state.scopes.find(item=>item.id===state.scope)||{},personaName:()=>"林星遥",toolRunCard:()=>"",
   field:(name,title,value)=>`<input name="${name}" value="${escaped(value)}">`,select:(name,title,options)=>`<select name="${name}">${options.map(([id,label])=>`<option value="${escaped(id)}">${escaped(label)}</option>`).join("")}</select>`,toggle:(name,title,hint,checked)=>`<input name="${name}" type="checkbox" ${checked?"checked":""}>`,textarea:(name,title,value)=>`<textarea name="${name}">${escaped(value)}</textarea>`,
   $:(selector)=>nodes.get(selector)||null,$$:()=>[],getForm:form=>form.values,modelPayload:form=>({...form.values}),
   api:async(path,options)=>{calls.push([path,options]);return responder(path,options);},toast:()=>{},
@@ -133,7 +133,7 @@ async function fullScriptIntegration(){
       classList:{add(){},remove(){},toggle(){}},close(){},setAttribute(){},addEventListener(){},focus(){},querySelector(){return null;},querySelectorAll(){return[];}});
     return elements.get(selector);
   };
-  const settings={model:{},onebot:{},qq_official:{},memory:{},computer:{},identity:{name:"初音未来"}}, scopes=[{id:"web:default",name:"本地聊天"}];
+  const settings={model:{},onebot:{},qq_official:{},memory:{},computer:{},identity:{name:"林星遥"}}, scopes=[{id:"web:default",name:"本地聊天"}];
   const browser={console,URL,URLSearchParams,AbortController,FormData,setTimeout,clearTimeout,EventSource:class{close(){}addEventListener(){}},
     location:{protocol:"http:",host:"127.0.0.1:18765",hash:"",pathname:"/",search:""},history:{replaceState(){}},
     localStorage:{getItem:key=>storage.get(key)||null,setItem:(key,value)=>storage.set(key,value)},sessionStorage:{getItem(){return"1";},setItem(){}},

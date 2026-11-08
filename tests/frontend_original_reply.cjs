@@ -1,7 +1,7 @@
 "use strict";
 const assert = require("node:assert/strict"), fs = require("node:fs"), path = require("node:path"), vm = require("node:vm");
 const escape = value => String(value ?? "").replace(/[&<>"']/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
-const sandbox = {state:{scope:"web:default"},e:escape,scope:()=>({persona_id:"default"}),personaName:()=>"初音未来",fmt:()=>"",icon:()=>"",imageURL:value=>value,button:(text,action,style,icon,attrs)=>`<button data-action="${action}" ${attrs}>${escape(text)}</button>`};
+const sandbox = {state:{scope:"web:default"},e:escape,scope:()=>({persona_id:"default"}),personaName:()=>"林星遥",fmt:()=>"",icon:()=>"",imageURL:value=>value,button:(text,action,style,icon,attrs)=>`<button data-action="${action}" ${attrs}>${escape(text)}</button>`};
 vm.createContext(sandbox);
 vm.runInContext(fs.readFileSync(path.join(__dirname,"../shiori/static/chat-page.js"),"utf8"),sandbox,{filename:"chat-page.js"});
 const record = {id:"reply-1",role:"assistant",content:"保留第一段。\n\n保留第二段。",metadata:{reply_parts:["保留第一段。","保留第二段。"],

@@ -21,7 +21,7 @@ async def test_onebot_emits_the_saved_limited_parts_without_redistribution(bridg
     chat.respond = AsyncMock(return_value=dict(result, message_id='fixture'))
     bridge.send = AsyncMock(return_value=True)
     try:
-        await bridge._flow.handle('qq:group:202', '303', '初音未来你好', [], {}, direct=True)
+        await bridge._flow.handle('qq:group:202', '303', '林星遥你好', [], {}, direct=True)
         sent = [call.args[1] for call in bridge.send.call_args_list]
         assert sent == result['reply_parts']
         assert all(reply_char_count(part) <= 24 for part in sent)
@@ -37,7 +37,7 @@ async def test_bracket_only_reply_does_not_trigger_false_qq_failure_notice(bridg
     chat.respond = AsyncMock(return_value=dict(prepare_reply('（微笑）', settings.get()), message_id='fixture'))
     bridge.send = AsyncMock(return_value=True)
     try:
-        await bridge._flow.handle('qq:group:202', '303', '初音未来你好', [], {}, direct=True)
+        await bridge._flow.handle('qq:group:202', '303', '林星遥你好', [], {}, direct=True)
         assert chat.respond.await_count == 1
         assert bridge.send.await_count == 0
     finally:

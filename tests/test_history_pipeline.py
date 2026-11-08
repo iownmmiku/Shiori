@@ -56,6 +56,8 @@ class Model:
 async def service(tmp_path):
     store, settings = Store(tmp_path), Settings()
     store.upsert_scope({'id': 'web:default', 'auto_memory': False, 'allow_tools': False})
+    # Budgets below are sized for history and summaries, not for the seeded persona's profile.
+    store.save_persona({**store.get_persona('default'), 'system_prompt': '温暖自然的聊天伙伴。', 'profile': {}})
     model = Model(settings)
     chat = ChatService(store, settings, model)
     try:

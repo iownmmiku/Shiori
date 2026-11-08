@@ -93,7 +93,7 @@ window.ShioriQuickStart = (() => {
     const identity = {...(state.settings.identity || {}),...(drafts[0] || {})};
     let body, footer;
     if (current === 0) {
-      body = `<h3>怎么称呼它？</h3><p class="quick-intro">默认人格是初音未来。聊天时的名字和别名可以单独修改，其他触发规则会沿用现有设置。</p><div class="form-grid">${field("name","机器人名称",identity.name || "初音未来","text","提及名称或别名可以触发回应；是否回复仍遵守会话规则。","required data-full maxlength=\"40\"")}${field("aliases","别名",typeof identity.aliases === "string" ? identity.aliases : (identity.aliases || []).join("，"),"text","多个别名用逗号隔开，例如 初音、Miku。","data-full maxlength=\"1000\"")}</div>`;
+      body = `<h3>怎么称呼它？</h3><p class="quick-intro">默认人格是林星遥：一个爱看星星、拍照和烘焙的高二学生。聊天时的名字和别名可以单独修改，其他触发规则会沿用现有设置。</p><div class="form-grid">${field("name","机器人名称",identity.name || "林星遥","text","提及名称或别名可以触发回应；是否回复仍遵守会话规则。","required data-full maxlength=\"40\"")}${field("aliases","别名",typeof identity.aliases === "string" ? identity.aliases : (identity.aliases || []).join("，"),"text","多个别名用逗号隔开，例如 星遥、阿遥。","data-full maxlength=\"1000\"")}</div>`;
       footer = button("沿用当前称呼","quick-skip","ghost") + '<button type="submit" class="btn primary">保存，下一步 →</button>';
     } else if (current === 1) {
       const selected = modelSelection(state.settings), model = {...selected,...(drafts[1] || {})};

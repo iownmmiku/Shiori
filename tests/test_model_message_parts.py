@@ -103,7 +103,7 @@ async def test_onebot_sends_chosen_messages_and_keeps_mid_reply_guards(bridge_se
         if failure=='source':store.clear_messages(scope_id)
         return not (failure=='send' and len(sent)==2)
     bridge.send=AsyncMock(side_effect=send)
-    await bridge._flow.handle('qq:group:202','303','初音未来你好',[],{})
+    await bridge._flow.handle('qq:group:202','303','林星遥你好',[],{})
     count=3 if failure=='none' else 2 if failure=='send' else 1
     assert [item[0] for item in sent]==parts[:count]
     assert [item[1]['output_part'] for item in sent]==[{'index':n+1,'total':3} for n in range(count)]
@@ -126,7 +126,7 @@ async def test_official_model_parts_preserve_code_and_unique_sequence(tmp_path):
     sent=[]
     async def post(**kwargs):sent.append(kwargs);return {'id':str(len(sent))}
     bridge._client=SimpleNamespace(api=SimpleNamespace(post_group_message=post))
-    await bridge._flow.handle('qqofficial:group:gid','uid','初音未来你好',[],{'platform_message_id':'source'})
+    await bridge._flow.handle('qqofficial:group:gid','uid','林星遥你好',[],{'platform_message_id':'source'})
     assert [item['content'] for item in sent]==parts
     assert [item['msg_seq'] for item in sent]==[1,2,3]
     await bridge.stop();store.close()

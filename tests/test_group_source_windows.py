@@ -45,7 +45,7 @@ class Planner:
         self.entered.set()
         await self.release.wait()
         return {'content': json.dumps({'action': 'reply', 'target_message_id': payload['current_message_id'],
-            'target_user_id': payload['current_user_id'], 'addressed_to_bot': True,
+            'target_user_id': payload['current_user_id'], 'addressed_to_bot': payload['signals']['explicit'], 'value': 100,
             'intent': 'Answer the current request', 'reason': 'A direct request', 'needed_info': []})}
 
 

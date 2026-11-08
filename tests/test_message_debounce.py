@@ -39,7 +39,7 @@ class Planner:
         payload = json.loads(messages[-1]['content'])
         self.calls.append(payload)
         return {'content': json.dumps({'action': 'reply', 'target_message_id': payload['current_message_id'],
-            'target_user_id': payload['current_user_id'], 'addressed_to_bot': True,
+            'target_user_id': payload['current_user_id'], 'addressed_to_bot': payload['signals']['explicit'], 'value': 100,
             'intent': '回应合并消息', 'reason': '测试合并后只判断一次', 'needed_info': []})}
 
 

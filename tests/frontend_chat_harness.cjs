@@ -16,7 +16,7 @@ class Source{constructor(url){this.url=url;this.closed=false;sources.push(this);
 const sandbox={window:{},state,TextDecoder,AbortController,URLSearchParams,EventSource:Source,setTimeout,clearTimeout,
   e,$:selector=>nodes.get(selector)||null,$$:()=>[],rows:value=>Array.isArray(value)?value:value?.items||[],query:params=>new URLSearchParams(params).toString(),
   button:(text,action,style,icon,attrs="")=>`<button data-action="${e(action)}" ${attrs}>${e(text)}</button>`,
-  icon:()=>"",tag:e,notice:e,fmt:e,toolJSON:JSON.stringify,heading:()=>"",empty:()=>"",renderMessage:item=>`<p class="final-reply">${e(item.content)}</p>`,toolRunCard:()=>"",personaName:()=>"初音未来",scope:()=>state.scopes[0],
+  icon:()=>"",tag:e,notice:e,fmt:e,toolJSON:JSON.stringify,heading:()=>"",empty:()=>"",renderMessage:item=>`<p class="final-reply">${e(item.content)}</p>`,toolRunCard:()=>"",personaName:()=>"林星遥",scope:()=>state.scopes[0],
   getForm:form=>form.values,closeModal(){},openModal(){},toast:(...args)=>notices.push(args),renderPage:async()=>{},bootstrap:async()=>{bootstraps++;},
   api:async(url,options={})=>{calls.push([url,options]);if(url==="/api/chat")return response;
     if(url.startsWith("/api/messages?"))return messages;if(url.startsWith("/api/jobs?"))return records;
