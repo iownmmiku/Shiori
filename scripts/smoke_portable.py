@@ -254,7 +254,7 @@ def main():
         boot = request('/api/bootstrap')
         assert boot['setup_required'] and boot['stats']['messages'] == 0
         if version >= (0, 5):
-            assert boot['name'] == 'Shiori' and boot['personas'][0]['name'] == '初音未来' and len(boot['personas']) == 1
+            assert boot['name'] == 'Shiori' and boot['personas'][0]['name'] == '林星遥' and len(boot['personas']) == 1
             assert b'personaKnowledge' in request('/static/workspace-features.js')
         fixture_key = 'qa-disposable-model-key'
         result = request('/api/settings', {'model': {'api_key': fixture_key}}, 'PUT')
