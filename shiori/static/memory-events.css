@@ -39,3 +39,7 @@
   .memory-source-pagination>span{width:100%;margin-bottom:3px}
   .memory-event-detail>.memory-event-summary{padding:11px 12px}
 }
+.record-card .memory-title{font-size:15px;line-height:1.6;margin-bottom:4px;overflow-wrap:anywhere}
+.record-card .memory-who{font-size:12px;color:var(--muted);margin:0 0 8px;overflow-wrap:anywhere}
+.record-card .memory-topics{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 0;font-size:11px;color:var(--muted)}
+.record-card .memory-topics>span{padding:1px 8px;border-radius:999px;background:var(--surface-2,rgba(127,127,127,.12))}

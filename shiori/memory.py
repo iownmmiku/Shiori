@@ -28,6 +28,7 @@ from .db import message_fingerprint, utc_now
 from .timezones import reference_time
 from .timing import measure, timed_lock
 from .memory_events import episode_prompt_text
+from .memory_quality import half_life_days
 
 
 HK = timezone(timedelta(hours=8))
@@ -187,7 +188,7 @@ class _Document:
 
     @property
     def embedding_text(self) -> str:
-        header = " ".join(str(self.record.get(key) or "")[:80] for key in ("subject", "property", "title", "filename"))
+        header = " ".join(str(self.record.get(key) or "")[:80] for key in ("subject", "subject_name", "property", "title", "filename"))
         return (header + "\n" + self.excerpt).strip()
 
 
@@ -235,7 +236,7 @@ def _documents(records: list[dict], terms_fn=tokenize) -> list[_Document]:
     docs = []
     for record in records:
         text = str(record.get("content", ""))
-        header = " ".join(str(record.get(key) or "")[:160] for key in ("subject", "property", "title", "filename"))
+        header = " ".join(str(record.get(key) or "")[:160] for key in ("subject", "subject_name", "property", "title", "filename"))
         for index, start, end, excerpt in _chunks(text):
             docs.append(_Document(record, index, start, end, excerpt, terms_fn(header + " " + excerpt)))
     return docs
@@ -261,7 +262,7 @@ def _rank_lexical(docs: list[_Document], query: str, user_id: str, zone=None) ->
     now = datetime.now(UTC)
     window = _time_window(query, reference_time(now),zone)
     temporal_query = bool(window and _time_only_query(query))
-    known_subjects = {normalized(doc.record.get("subject") or "") for doc in docs}
+    known_subjects = {normalized(doc.record.get(key) or "") for doc in docs for key in ("subject", "subject_name")}
     requested_subjects = {subject for subject in known_subjects if subject and _phrase_match(subject, query)}
     for doc in docs:
         length = sum(doc.terms.values())
@@ -276,13 +277,14 @@ def _rank_lexical(docs: list[_Document], query: str, user_id: str, zone=None) ->
         if doc.phrase:
             doc.bm25 += 1.5
         record = doc.record
-        doc.importance = float(record.get("importance", 0.5)) * 0.08 + (0.08 if record.get("pinned") else 0.0)
+        doc.importance = float(record.get("importance", 0.5)) * 0.12 + (0.08 if record.get("pinned") else 0.0)
         recorded = _date(record.get("updated_at")) or now
         age = max(0.0, (now - recorded).total_seconds() / 86400)
-        doc.recency = 0.04 * 2 ** (-age / 60)
-        subject = normalized(record.get("subject") or record.get("user_id", ""))
+        # A passing remark fades within days; a lasting fact stays current.
+        doc.recency = 0.04 * 2 ** (-age / half_life_days(record))
+        names = {normalized(record.get("subject") or record.get("user_id", "")), normalized(record.get("subject_name") or "")} - {""}
         if requested_subjects:
-            doc.person = 0.12 if subject in requested_subjects else -0.08
+            doc.person = 0.12 if names & requested_subjects else -0.08
         elif re.search(r"我|本人|自己|\bmy\b|\bme\b", query):
             doc.person = 0.08 if str(record.get("user_id")) == user_id else -0.04
         if window:

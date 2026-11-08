@@ -20,6 +20,11 @@ async function main(){
   await actions.handleAction('sticker-page',{dataset:{offset:'50'}});assert.equal(sandbox.state.stickerOffset,50);
   await actions.handleSubmit('sticker-filter',{values:{q:'谢谢',category:'感谢',all:false}});await ui.render();assert.match(calls.at(-1)[0],/offset=0/);
   await actions.handleAction('sticker-delete',{dataset:{id:'aabb'}});assert.equal(calls.at(-1)[1].method,'DELETE');
-  console.log('sticker defaults, safe previews, editing, probabilities and filter pagination passed');
+  await actions.handleAction('sticker-lock',{dataset:{id:'aabb'}});
+  assert.equal(calls.at(-1)[0],'/api/stickers/aabb');assert.deepEqual(JSON.parse(JSON.stringify(calls.at(-1)[1].body)),{locked:true});
+  await actions.handleAction('sticker-prune',{dataset:{}});
+  assert.equal(calls.at(-1)[0],'/api/stickers/prune');assert.equal(calls.at(-1)[1].body.dry_run,true);
+  html=await ui.render();assert.match(html,/语义匹配度/);assert.match(html,/data-action="sticker-lock"/);
+  console.log('sticker defaults, safe previews, editing, locking, pruning, probabilities and filter pagination passed');
 }
 main().catch(error=>{console.error(error);process.exitCode=1;});

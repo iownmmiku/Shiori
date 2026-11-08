@@ -8,8 +8,9 @@ function fixture(){
     episode:{title:"一起完成 <计划>",summary:"先讨论，然后做出决定。",narrative:"完整经过的唯一标识\n<script>never execute</script>",participants:["我","朋友 <A>"],location:"<工作室>",outcome:"按约定完成 <交付>"}};
   const legacy={id:"legacy",kind:"fact",scope_id:"web:a",user_id:"owner",visibility:"private",status:"active",content:"旧事实 <原文>",source_ids:[]};
   const oldEvent={...legacy,id:"old-event",kind:"event",content:"旧事件保留的原文"};
+  const titled={...legacy,id:"titled",kind:"preference",title:"想吃家乡擀面皮 <x>",subject:"555",subject_name:"阿明",topics:["美食","<家乡>"],importance:.2,durability:"days",valid_to:"2000-01-01T00:00:00Z",content:"阿明想念家乡的擀面皮"};
   const state={authenticated:true,authGeneration:0,renderId:1,page:"memory",scope:"web:a",scopes:[{id:"web:a",name:"本地A"},{id:"web:b",name:"本地B"}],settings:{},filters:{},records:[]};
-  const config={records:[record,legacy,oldEvent],record,conflicts:[],modal:null,opens:0,closes:0,renders:0,boots:0};
+  const config={records:[record,legacy,oldEvent,titled],record,conflicts:[],modal:null,opens:0,closes:0,renders:0,boots:0};
   const modal={open:false},content={firstElementChild:null},body={innerHTML:""},sources={innerHTML:""};
   nodes.set("#modal",modal);nodes.set("#modal-content",content);nodes.set("#modal .modal-body",body);nodes.set("#memory-sources",sources);
   const escape=value=>String(value??"").replace(/[&<>"']/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
@@ -48,7 +49,7 @@ async function main(){
     assert.ok(html.includes("一起完成 &lt;计划&gt;"));assert.ok(html.includes("先讨论，然后做出决定。"));assert.ok(html.includes("朋友 &lt;A&gt;"));assert.ok(html.includes("&lt;工作室&gt;"));
     assert.ok(html.includes("发生时间未知"));assert.ok(!html.includes("2026-11-03T10:00:00Z"),"record creation must not masquerade as event time");
     assert.ok(!html.includes("完整经过的唯一标识"),"list cards do not duplicate long event narrative in the DOM");
-    assert.ok(html.includes("旧事实 &lt;原文&gt;"));assert.ok(html.includes("旧事件保留的原文"));assert.ok(html.includes("旧版原文"));assert.ok(!html.includes("<script>"));
+    assert.ok(html.includes("旧事实 &lt;原文&gt;"));assert.ok(html.includes("旧事件保留的原文"));assert.ok(html.includes("旧版原文"));assert.ok(html.includes("想吃家乡擀面皮 &lt;x&gt;"));assert.ok(html.includes("阿明 · 555"));assert.ok(html.includes("#&lt;家乡&gt;"));assert.ok(html.includes("已过期"));assert.ok(html.includes("重要度 20%"));assert.ok(!html.includes("<script>"));
     f.state.memoryPage.offset=50;await f.ui.handleAction("memory-kind-filter",{dataset:{kind:"event"}});await f.sandbox.renderMemoryRecords();
     const params=new URL(f.calls.at(-1)[0],"http://local").searchParams;assert.equal(params.get("kind"),"event");assert.equal(params.get("offset"),"0");
     f.state.filters.status="pending";await f.sandbox.renderMemoryRecords();assert.ok(f.calls.at(-1)[0].startsWith("/api/memory/candidates?"));assert.ok(f.calls.at(-1)[0].includes("kind=event"));

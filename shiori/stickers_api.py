@@ -10,9 +10,17 @@ from fastapi.responses import Response
 
 def install_stickers(app, chat):
     @app.get('/api/stickers')
-    async def stickers(scope_id: str = '', category: str = '', q: str = '', offset: int = 0, limit: int = 50):
+    async def stickers(scope_id: str = '', category: str = '', q: str = '', offset: int = 0, limit: int = 50, locked: str = ''):
         if len(q) > 240 or len(category) > 20: raise ValueError('表情包筛选过长')
-        return await asyncio.to_thread(chat.stickers.page,scope_id,category,q,offset,limit)
+        if locked not in ('', 'true', 'false'): raise ValueError('锁定筛选无效')
+        return await asyncio.to_thread(chat.stickers.page,scope_id,category,q,offset,limit,
+                                       locked=None if not locked else locked == 'true')
+
+    @app.post('/api/stickers/prune')
+    async def prune_stickers(payload: dict = Body(default={})):
+        dry_run = payload.get('dry_run', False)
+        if set(payload) - {'dry_run'} or type(dry_run) is not bool: raise ValueError('整理参数无效')
+        return await asyncio.to_thread(chat.stickers.prune, dry_run=dry_run)
 
     @app.get('/api/stickers/backup')
     async def backup_stickers():

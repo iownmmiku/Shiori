@@ -72,7 +72,8 @@ DEFAULTS = {
                 'proactive_max_replies':3,'proactive_window_seconds':600,'eagerness':50,
                 'structured_output':'auto','format_retry_enabled':False},
     'stickers': {'enabled':True,'collect_enabled':True,'collect_probability':0.1,'send_enabled':True,
-                 'send_probability':0.1,'model_id':'','min_confidence':0.85,'daily_recognitions':30,'daily_model_calls':60,'max_items':1000},
+                 'send_probability':0.1,'model_id':'','min_confidence':0.85,'daily_recognitions':30,'daily_model_calls':60,'max_items':1000,
+                 'auto_prune':True},
     'scheduler': {'model_concurrency':1,'model_queue_limit':32,'background_queue_limit':16,'scope_queue_limit':8,
                   'global_model_concurrency':2,'global_model_queue_limit':32,
                   'request_concurrency':8,'request_queue_limit':16,'request_max_mb':32,
@@ -723,7 +724,7 @@ class Settings:
             if debounce['max_wait_seconds'] < debounce['seconds']:
                 raise ValueError('消息防抖最长等待时间不能少于等待秒数')
             stickers=updated['stickers']
-            for key in ('enabled','collect_enabled','send_enabled'):
+            for key in ('enabled','collect_enabled','send_enabled','auto_prune'):
                 if type(stickers[key]) is not bool: raise ValueError('表情包开关须为布尔值')
             for key in ('collect_probability','send_probability','min_confidence'):
                 if isinstance(stickers[key],bool) or not isinstance(stickers[key],(int,float)) or not math.isfinite(stickers[key]) or not 0<=stickers[key]<=1:

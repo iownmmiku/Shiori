@@ -205,6 +205,100 @@ def test_vision_race_and_daily_quota_do_not_save_stale_images(library):
     asyncio.run(collect(store,engine));assert len(model.calls)==1
 
 
+def colored(color):
+    result=io.BytesIO()
+    Image.new('RGB',(16,16),color).save(result,format='PNG')
+    return 'data:image/png;base64,'+base64.b64encode(result.getvalue()).decode()
+
+
+async def collect_image(store,engine,color,scope='qq:group:1'):
+    message=store.add_message(scope,'123','user','',images=[colored(color)])
+    engine.observe(message)
+    if engine._jobs:await asyncio.gather(*engine._jobs)
+
+
+def age(engine,key,days):
+    from datetime import datetime,timedelta,timezone
+    with engine._lock,engine._conn:
+        item=engine.get(key)
+        item['created_at']=(datetime.now(timezone.utc)-timedelta(days=days)).isoformat().replace('+00:00','Z')
+        engine._conn.execute('UPDATE stickers SET data=? WHERE id=?',(json.dumps(item,ensure_ascii=False),key))
+
+
+def ids(engine):
+    return {item['meaning']:item['id'] for item in engine.page()['items']}
+
+
+def test_full_library_prunes_unclear_then_low_match_and_never_locked(library):
+    store,cfg,model,engine=library
+    cfg.update({'stickers':{'max_items':2}})
+    model.description.update(clear=False,meaning='看不出含义')
+    asyncio.run(collect_image(store,engine,'red'))
+    model.description.update(clear=True,meaning='开心地感谢对方')
+    asyncio.run(collect_image(store,engine,'green'))
+    model.description.update(meaning='无语地叹气')
+    asyncio.run(collect_image(store,engine,'blue'))
+    # Full at two: the unclear sticker made room for the new one.
+    assert set(ids(engine))=={'开心地感谢对方','无语地叹气'}
+    event=next(e for e in store.list_events() if e['kind']=='stickers_pruned')
+    assert event['details']['removed']==1 and event['details']['reason']=='collect'
+    thanks,sigh=ids(engine)['开心地感谢对方'],ids(engine)['无语地叹气']
+    for key in (thanks,sigh):age(engine,key,10)
+    # The sigh often fits nothing that is said and is never picked.
+    engine._note_selection([engine.get(sigh),engine.get(thanks)],{'谢谢'})
+    with engine._lock,engine._conn:
+        engine._conn.execute('UPDATE sticker_stats SET seen=20,matched=0,offered=8 WHERE id=?',(sigh,))
+        engine._conn.execute('UPDATE sticker_stats SET seen=20,matched=12,offered=8,chosen=4 WHERE id=?',(thanks,))
+    page=engine.page()
+    assert page['capacity']['next']==[sigh] and next(x for x in page['items'] if x['id']==sigh)['prune_next']
+    model.description.update(meaning='惊讶地睁大眼睛')
+    asyncio.run(collect_image(store,engine,'yellow'))
+    assert set(ids(engine))=={'开心地感谢对方','惊讶地睁大眼睛'}
+    # Locked stickers stay even when they rank lowest; with everything locked
+    # nothing new is recognized or billed.
+    for key in ids(engine).values():engine.update(key,{'locked':True})
+    calls=len(model.calls)
+    asyncio.run(collect_image(store,engine,'purple'))
+    assert len(model.calls)==calls and engine.page()['capacity']['locked']==2
+    assert any(e['kind']=='stickers_skipped' and e['details']['reason']=='library_full_locked' for e in store.list_events())
+    # A pruned picture is not collected again.
+    model.description.update(meaning='看不出含义')
+    for key in ids(engine).values():engine.update(key,{'locked':False})
+    asyncio.run(collect_image(store,engine,'red'))
+    assert len(model.calls)==calls
+    with pytest.raises(ValueError):engine.update(thanks,{'locked':'yes'})
+
+
+def test_lowering_the_cap_prunes_on_request_and_auto_prune_can_be_off(library):
+    store,cfg,model,engine=library
+    for index,color in enumerate(('red','green','blue')):
+        model.description.update(meaning=f'第{index}种开心的表情')
+        asyncio.run(collect_image(store,engine,color))
+    first=ids(engine)['第0种开心的表情']
+    engine.update(first,{'locked':True})
+    cfg.update({'stickers':{'max_items':1,'auto_prune':False}})
+    assert engine.page()['capacity']['over']==2
+    calls=len(model.calls)
+    asyncio.run(collect_image(store,engine,'yellow'))
+    assert len(model.calls)==calls and engine.page()['total']==3
+    preview=engine.prune(dry_run=True)
+    assert preview['removed']==2 and engine.page()['total']==3
+    result=engine.prune()
+    assert result['removed']==2 and set(ids(engine).values())=={first} and not result['blocked']
+    with pytest.raises(ValueError):cfg.update({'stickers':{'auto_prune':'on'}})
+
+
+def test_selection_records_semantic_match_statistics(library):
+    store,cfg,model,engine=library
+    asyncio.run(collect(store,engine))
+    key=engine.page()['items'][0]['id']
+    assert asyncio.run(engine.choose('qq:group:1','123','谢谢你帮忙','不客气，开心能帮上忙',lambda:True))['id']==key
+    match=engine.page()['items'][0]['match']
+    assert (match['seen'],match['matched'],match['offered'],match['chosen'])==(1,1,1,1) and match['score']>.5
+    engine.delete(key)
+    assert engine._stats()=={}
+
+
 def test_image_validation_rejects_bad_data_and_internal_network():
     for url in ['data:image/svg+xml;base64,PHN2Zz4=','data:image/png;base64,not-valid', 'data:image/png;base64,'+'a'*(MAX_IMAGE*2),'http://127.0.0.1/a.png']:
         with pytest.raises(ValueError):download_image(url)
@@ -232,6 +326,11 @@ def test_authenticated_library_edit_preview_filter_and_backup(tmp_path):
         assert edited['version']==2
         page=client.get('/api/stickers?scope_id=qq:group:1&q=谢谢&category=感谢').json()
         assert page['total']==1 and len(page['items'])==1
+        assert client.put(f'/api/stickers/{key}',json={'locked':True}).json()['locked'] is True
+        assert client.get('/api/stickers?locked=true').json()['total']==1
+        assert client.get('/api/stickers?locked=false').json()['total']==0
+        assert client.post('/api/stickers/prune',json={'dry_run':True}).json()['removed']==0
+        assert client.post('/api/stickers/prune',json={'dry_run':'yes'}).status_code==400
         snapshot=tmp_path/'sticker-backup.sqlite3';snapshot.write_bytes(client.get('/api/stickers/backup').content)
         conn=sqlite3.connect(snapshot)
         try: assert conn.execute('SELECT length(image) FROM stickers').fetchone()[0]>0

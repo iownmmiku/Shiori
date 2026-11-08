@@ -97,7 +97,8 @@ async def test_uncontracted_model_fields_cannot_break_or_elevate_candidates(runt
     e.model.answer = lambda records: [{**candidate(records), **extras}]
     assert not (await e.chat._extract('web:default', 'owner'))['skipped']
     saved = e.store.list_memories('web:default')[0]
-    assert saved['importance'] == .5 and saved['pinned'] is False
+    # Importance is a bounded hint: never the extreme reserved for pins.
+    assert saved['importance'] == (.9 if extras.get('importance') == 1. else .5) and saved['pinned'] is False
     assert saved['shareable'] is False and saved['status'] == 'pending'
     assert saved['dependencies'] == {} and saved['id'] != 'invented'
     assert saved['valid_to'] is None

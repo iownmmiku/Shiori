@@ -23,6 +23,7 @@ from typing import Any
 from uuid import uuid4
 from .timezones import config_zone, ingress_times
 from .memory_events import normalize_episode, episode_content
+from .memory_quality import NEAR_DUPLICATE, similarity
 
 
 UTC = timezone.utc
@@ -739,6 +740,19 @@ class Store:
         for field in ("scope_id", "user_id", "content"):
             record[field] = _text(record.get(field), field)
         record["subject"] = _text(record.get("subject", ""), "subject", required=False)
+        for field in ("title", "subject_name"):
+            if field in record:
+                record[field] = _text(record[field] or "", field, required=False)
+                if len(record[field]) > 40:
+                    raise ValueError(f"{field} 最多 40 字")
+                if not record[field]:
+                    record.pop(field)
+        if "topics" in record:
+            record["topics"] = _strings(record["topics"] or [], "topics")
+            if len(record["topics"]) > 8 or any(len(item) > 20 for item in record["topics"]):
+                raise ValueError("topics 最多 8 个，每个最多 20 字")
+        if record.get("durability") is not None:
+            _choice(record["durability"], {"days", "weeks", "months", "lasting"}, "durability")
         if "property" in record:
             record["property"] = _text(record["property"], "property", required=False)
         property_name = _memory_property(record)
@@ -1741,6 +1755,13 @@ class Store:
                 check()
                 duplicate = next((old for old in existing if old["content"] == item["content"]
                                   and old["source_ids"] == item["source_ids"] and old.get("property", "") == item.get("property", "")), None)
+                if duplicate is None and item.get("automatic"):
+                    # The same thing said again on another day is one memory,
+                    # not a growing pile of rewordings.
+                    duplicate = next((old for old in existing if old.get("status") in ("active", "pending")
+                                      and old.get("user_id") == user_id and old.get("kind") == item["kind"]
+                                      and old.get("property", "") == item.get("property", "")
+                                      and similarity(old["content"], item["content"]) >= NEAR_DUPLICATE), None)
                 if duplicate:
                     deduplicated += 1
                     result.append(duplicate)
