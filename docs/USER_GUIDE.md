@@ -1,20 +1,20 @@
-> 当前版本为 **Shiori 0.2.2-beta**（预发布），在 0.2.1 的基础上新增群发言限速、接话积极度、对话对象判断、WebUI 保持登录、表情包全库通用，并修复兴趣探索与人格蒸馏、扩充运行日志。主仓库为 `iownmmiku/Shiori`。旧 `mikubot` 地址是没有安装文件的迁移说明占位仓库，不再跳转。0.1.6 及更早版本需要手动获取新版，继续使用原数据目录。
+> 当前版本为 **Shiori 0.2.2**（正式版），在 0.2.1 的基础上新增群发言限速、接话积极度、对话对象判断、WebUI 保持登录、表情包全库通用与上限锁定、更完整的长期记忆和原创默认人格林星遥，并修复兴趣探索与人格蒸馏、扩充运行日志。主仓库为 `iownmmiku/Shiori`。旧 `mikubot` 地址是没有安装文件的迁移说明占位仓库，不再跳转。0.1.6 及更早版本需要手动获取新版，继续使用原数据目录。
 
 > 连续消息、时间来源、模型入口和插件包的操作与兼容说明见[配置与消息处理](CONFIGURATION_WORKFLOWS.md)。
 
 > 对话衔接、时间回忆和摘要的当前规则见[历史与上下文说明](HISTORY_PIPELINE_AUDIT.md)。近期对话默认按24个用户轮次选择；受历史消息数和文字上限约束，不代表无限历史。
 
-# Shiori 0.2.2-beta 使用指南
+# Shiori 0.2.2 使用指南
 
-本文描述 Shiori 0.2.2-beta 的聊天、模型、QQ、人格、记忆、电脑任务与角色日程流程。[更新日志](../RELEASE_NOTES.md)与[测试报告](../TEST_REPORT.md)说明变化和实际验收范围，升级前保留完整数据副本。
+本文描述 Shiori 0.2.2 的聊天、模型、QQ、人格、记忆、电脑任务与角色日程流程。[更新日志](../RELEASE_NOTES.md)与[测试报告](../TEST_REPORT.md)说明变化和实际验收范围，升级前保留完整数据副本。
 
 Shiori 是本机运行的聊天机器人和任务助手。默认人格是原创角色林星遥（一个爱看星星、拍照和烘焙的高二学生），可以在管理台聊天，也可以接入 NapCat、SnowLuma 或 QQ 官方机器人。电脑任务由管理员发起；普通聊天用户不会因能聊天而获得管理员权限。
 
 第一次使用的最短路径：下载并打开软件 → 设置登录密码 → 快速入门中添加供应商、获取并选择聊天模型 → 打开“Chat 工作台”发消息。默认名称可以直接沿用，QQ 和电脑能力可以稍后开启。
 
-在 [GitHub Releases 0.2.0](https://github.com/iownmmiku/Shiori/releases/tag/v0.2.0) 的 Assets 中下载：`shiori-0.2.0-Windows-Setup.exe` 是推荐安装版；`shiori-0.2.0-Windows-x64.zip` 是完整解压后运行的便携版；`shiori-0.2.0-source.zip` 需要 Python 3.11–3.13（推荐3.12）。安装包未做 Windows 代码签名，运行前核对旁置同名 `.sha256`。安装版与便携版无需 Python 或 Node，也不包含模型密钥、QQ 客户端和连接器。
+在 [GitHub Releases 0.2.2](https://github.com/iownmmiku/Shiori/releases/tag/v0.2.2) 的 Assets 中下载：`shiori-0.2.2-Windows-Setup.exe` 是推荐安装版；`shiori-0.2.2-Windows-x64.zip` 是完整解压后运行的便携版；`shiori-0.2.2-source.zip` 需要 Python 3.11–3.13（推荐3.12）。安装包未做 Windows 代码签名，运行前核对旁置同名 `.sha256`。安装版与便携版无需 Python 或 Node，也不包含模型密钥、QQ 客户端和连接器。
 
-0.2.2-beta 的发行文件为 `shiori-0.2.2-beta-Windows-Setup.exe`、`shiori-0.2.2-beta-Windows-x64.zip` 和 `shiori-0.2.2-beta-source.zip`，随对应的 [GitHub Release](https://github.com/iownmmiku/Shiori/releases/tag/v0.2.2-beta) 提供，下载后请核对同名 `.sha256`。这是预发布版，不替代稳定版 0.2.1：想试用的用户在“版本与更新”打开“显示测试版”，重新检查后选择 `v0.2.2-beta`；没打开的用户不会收到它。升级前另存完整数据目录。
+已经在用 0.2.0、0.2.1 或 0.2.2-beta 的用户，在“版本与更新”重新检查并选择 `v0.2.2` 即可切换，升级前另存完整数据目录。
 
 ## Chat 工作台与 QQ 聊天管理
 
