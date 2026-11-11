@@ -154,7 +154,7 @@ function renderNavigation() {
   $("#sidebar-status-dot").className = `status-dot ${state.settings.paused ? "warning" : modelReady ? "online" : ""}`;
   $("#sidebar-status-text").textContent = state.settings.paused ? "已暂停自动回复" : modelReady ? "本地服务已就绪" : "等待配置模型";
   $("#sidebar-status-sub").textContent = modelReady ? (configuredModel().model || "你的数据，留在你的电脑") : "连接模型即可开始聊天";
-  const versionLabel = (state.boot?.version || "0.2.2").replace(/-beta$/, " beta");
+  const versionLabel = (state.boot?.version || "0.2.3-beta").replace(/-beta$/, " beta");
   $("#version-label").textContent = versionLabel;
   $("#workspace-version").textContent = versionLabel;
   if ($("#header-version")) $("#header-version").textContent = "v" + versionLabel;
