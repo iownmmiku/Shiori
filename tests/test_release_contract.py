@@ -86,6 +86,9 @@ def test_beta_release_source_archive_preserves_version_and_identity(tmp_path, mo
         ]
         manifest = json.loads(packaged.read('shiori-0.2.1-beta-source/SOURCE_MANIFEST.json'))
         assert manifest['version'] == '0.2.1-beta'
+    # The checksum file must be in `sha256sum -c` format with a bare LF, also on Windows.
+    checksum = (source / 'dist' / 'shiori-0.2.1-beta-source.sha256').read_bytes()
+    assert checksum == f"{result['sha256']}  shiori-0.2.1-beta-source.zip\n".encode('ascii')
 
 
 @pytest.mark.parametrize('version', ['0.2.1-', '0.2.1-beta/', '0.2.1-beta\n'])

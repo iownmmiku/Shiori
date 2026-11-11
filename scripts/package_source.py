@@ -136,7 +136,8 @@ def package(root: Path, archive: Path | None = None) -> dict:
     finally:
         temporary.unlink(missing_ok=True)
     digest = hashlib.sha256(archive.read_bytes()).hexdigest()
-    archive.with_suffix('.sha256').write_text(digest + '  ' + archive.name + '\n', 'utf-8')
+    # LF on every platform: with CRLF, `sha256sum -c` reads the file name with a trailing \r and fails.
+    archive.with_suffix('.sha256').write_text(digest + '  ' + archive.name + '\n', 'utf-8', newline='\n')
     return {'archive': str(archive), 'version': version, 'files': len(files) + 1,
             'bytes': archive.stat().st_size, 'sha256': digest}
 
