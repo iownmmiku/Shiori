@@ -67,6 +67,20 @@ class ProviderRateLimitError(ProviderError):
     """An upstream 429 is not proof of a local budget veto."""
 
 
+def service_failure(exc):
+    """A short reason when the model service itself failed; '' for local vetoes and refusals."""
+    if isinstance(exc, ProviderTimeoutError):
+        return '超时'
+    if isinstance(exc, ProviderConnectionError):
+        return '连接失败'
+    if isinstance(exc, ProviderRateLimitError):
+        return '服务限流'
+    if isinstance(exc, ProviderStreamError):
+        return '连接中断'
+    status = getattr(exc, 'status_code', None)
+    return f'服务返回 {status}' if status else ''
+
+
 def is_budget_exceeded(exc):
     if isinstance(exc, (ProviderTimeoutError, ProviderConnectionError, ProviderRateLimitError, ProviderOutputBudgetError, ProviderContentFilterError)):
         return False
@@ -368,6 +382,8 @@ class Provider:
         self._scheduler = _ModelScheduler(self)
         self._reservations = {}
         self._health = {}
+        # alerts.py listens here: (model id, name, succeeded, reason).
+        self.on_model_result = None
         self._planner_format_rejections = OrderedDict()
 
     @staticmethod
@@ -692,6 +708,8 @@ class Provider:
                         raise ProviderError('模型响应已收到，但来源、权限或模型配置已变化，未继续使用其结果。') from exc
             except ProviderError as exc:
                 state['last_error'] = str(exc)
+                if config is None:
+                    self._report_result(key, candidate, exc)
                 # A health failure and permission to repeat an uncertain
                 # generation are separate decisions.
                 if exc.retryable or isinstance(exc, (ProviderTimeoutError, ProviderConnectionError)):
@@ -703,6 +721,8 @@ class Provider:
                     raise
                 continue
             state.update(failures=0, last_error='', last_success_at=datetime.now(timezone.utc).isoformat(), until=0)
+            if config is None:
+                self._report_result(key, candidate, None)
             current_cfg = self.settings.get()
             current = resolve_model(current_cfg, purpose, model_id=key)
             if result.get('tool_calls') and (not current or not tools or not candidate.get('tools', True) or not current.get('tools', True) or not current.get('enabled', True)):
@@ -711,6 +731,18 @@ class Provider:
                 self.store.add_event('model', f'主模型暂不可用，本次使用已配置备用模型：{candidate.get("name", key)}')
             return result
         raise last_error or ProviderError('没有可用的模型，请检查任务路由与模型能力。')
+
+    def _report_result(self, key, candidate, exc):
+        """Tell the listener about a routed call; a local veto or refusal is not a service failure."""
+        if self.on_model_result is None:
+            return
+        reason = service_failure(exc) if exc is not None else ''
+        if exc is not None and not reason:
+            return
+        try:
+            self.on_model_result(key, candidate.get('name') or candidate.get('model') or key, exc is None, reason)
+        except Exception:
+            pass  # Reporting can never change the outcome of a model call.
 
     @staticmethod
     def _max_output_tokens(cfg, purpose, requested):
@@ -910,7 +942,9 @@ class Provider:
                 if response.status_code == 429:
                     raise ProviderRateLimitError('模型服务返回429：服务限流或额度受限，请检查服务商用量或稍后重试。', retryable=True)
                 reason = {401: '密钥无效或未授权', 403: '无访问权限', 404: '地址或模型不存在', 429: '服务限流或额度不足'}.get(response.status_code, '服务请求失败')
-                raise ProviderError(f'模型服务返回 {response.status_code}：{reason}。', retryable=response.status_code == 429 or 500 <= response.status_code <= 599)
+                failure = ProviderError(f'模型服务返回 {response.status_code}：{reason}。', retryable=response.status_code == 429 or 500 <= response.status_code <= 599)
+                failure.status_code = response.status_code
+                raise failure
             try:
                 data = response.json()
                 choice = data['choices'][0]

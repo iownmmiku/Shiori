@@ -17,6 +17,7 @@ from .provider import (ProviderTimeoutError, ProviderConnectionError, ProviderRa
                        model_request_trace, mark_model_stage, model_trace_snapshot)
 from .timezones import local_now, current_time_context, message_anchor, message_time_context
 from .planner_result import PlanValidationError, parse_plan
+from .image_captions import NOTE as IMAGE_NOTE
 
 # A message with only pictures is marked neutrally. Older builds stored a
 # request instead, which read as if the member had asked someone to look.
@@ -35,6 +36,26 @@ UNSCORED_REPLY_VALUE = 75  # a reply from a model that gave no score
 # speech, its score held to the top of the "could join in" band.
 PARTNER_SECONDS = 600.0
 IMPLICIT_VALUE_CAP = 69
+# Automatic jargon analysis looks at a window of recent messages that moves by
+# only a few messages each time. A candidate the model has already judged is
+# sent again only once it has this many uses the model has not seen; the
+# number doubles with every further look, up to the cap. A newly stated
+# explanation is sent at once.
+# Feedback on unprompted replies. When the bot joins in and, within
+# FEEDBACK_SECONDS, a member tells it that nobody asked ("没喊你"), that is
+# recorded and the reply threshold rises by FEEDBACK_BOOST, halving every
+# FEEDBACK_HALF_LIFE seconds: one telling-off keeps it out of the
+# conversation for a while unless it is spoken to.
+FEEDBACK_SECONDS = 120.0
+FEEDBACK_BOOST, FEEDBACK_HALF_LIFE = 40.0, 600.0
+_UNWANTED = re.compile(
+    r'没(?:有)?(?:在)?(?:喊|叫|问|找|说|艾特|@)(?:的)?(?:是)?你|不是(?:在)?(?:喊|叫|问|说|找)你|谁(?:问|叫|喊|理|找)你了?'
+    r'|没人(?:问|叫|喊|找|理)你|没跟你(?:说|讲|聊)|关你(?:什么|啥|屁|毛)事|没你(?:的)?事|(?:别|不要|少)(?:插嘴|插话|接话|多嘴)|闭嘴')
+# Pending jargon nobody reviews: looked at this often while messages arrive.
+JARGON_SWEEP_SECONDS = 3600.0
+JARGON_REASK_USES = 6
+JARGON_REASK_USES_MAX = 96
+JARGON_JUDGED_TERMS = 4000
 
 
 def plain_text(text):
@@ -174,6 +195,14 @@ def _expression_context_safe(text):
         r'你必须|请(?:你|立即|调用|执行|删除|创建)|(?:create_task|remember|cancel_task|read_webpage|system[_ ]?prompt)', str(text), re.I))
 
 
+def _parse_time(value):
+    try:
+        parsed = datetime.fromisoformat(str(value).replace('Z', '+00:00'))
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return None
+
+
 class SocialEngine:
     def __init__(self, store, settings, provider):
         self.store, self.settings, self.provider = store, settings, provider
@@ -181,6 +210,12 @@ class SocialEngine:
         self._expression_counts = defaultdict(int)
         self._last_analysis = {}
         self._last_expression_analysis = {}
+        self._jargon_judged = defaultdict(dict)
+        self._jargon_swept = -float('inf')
+        # chat.py sets this to the ImageCaptions instance (image_captions.py).
+        self.image_captions = None
+        # api.py sets this to a function that privately messages the QQ administrators.
+        self.notify_admins = None
         self._last_gate = {}
         self._planner_failures = {}
         self._last_reply = {}
@@ -188,6 +223,8 @@ class SocialEngine:
         # to make unprompted. The latter are capped per time window.
         self._bot_replies = defaultdict(lambda: deque(maxlen=64))
         self._proactive_replies = defaultdict(lambda: deque(maxlen=64))
+        self._last_unprompted = {}
+        self._rebukes = defaultdict(lambda: deque(maxlen=16))
         self._participants = {}
         self._locks = defaultdict(asyncio.Lock)
         self._jobs = set()
@@ -208,6 +245,8 @@ class SocialEngine:
         self.knowledge_fn = None
         self.knowledge_current_fn = None
         self.schedule_context_fn = None
+        from .prescreen import Prescreen
+        self.prescreen = Prescreen(settings)
 
     def _planner_options(self, scope):
         options = {'min_interval_ms': 1200, 'daily_calls': 300, 'daily_tokens': 12000, 'max_age_ms': 15000,
@@ -282,10 +321,13 @@ class SocialEngine:
             return
         self._seen[scope_id].append(message.get('id'))
         self._traffic[scope_id].append((time.monotonic(), str(message.get('user_id', '')), message.get('id')))
+        self._note_feedback(scope_id, message)
+        if time.monotonic() - self._jargon_swept >= JARGON_SWEEP_SECONDS:
+            self.sweep_pending_jargon()
         scope = self.store.get_scope(scope_id)
         cfg = resolve_model(self.settings.get(), 'memory')
         for enabled, counts, last, lock_key, analyze in (
-            (self._learn_enabled(scope), self._counts, self._last_analysis, scope_id, self.analyze),
+            (self._learn_enabled(scope), self._counts, self._last_analysis, scope_id, self._analyze_new),
             (_value(scope, 'expression_learn', False), self._expression_counts, self._last_expression_analysis, ('expression', scope_id), self.analyze_expressions)):
             if not enabled:
                 continue
@@ -297,6 +339,74 @@ class SocialEngine:
                 task = asyncio.create_task(analyze(scope_id))
                 self._jobs.add(task)
                 task.add_done_callback(self._jobs.discard)
+
+    def sweep_pending_jargon(self, now=None):
+        """Drop jargon candidates nobody reviewed in time, and remind the administrators of the rest."""
+        self._jargon_swept = time.monotonic()
+        try:
+            policy = self.settings.get().get('language', {})
+            expire, remind = int(policy.get('pending_expire_days') or 0), int(policy.get('pending_digest_days') or 0)
+            if not expire and not remind:
+                return {'expired': 0, 'reminded': False}
+            now = now or datetime.now(timezone.utc)
+            pending = [item for item in self.store.list_jargon(status='pending') if item.get('entry_type', 'jargon') == 'jargon']
+            expired = 0
+            for item in list(pending):
+                age = (now - _parse_time(item.get('created_at'))).total_seconds() / 86400 if _parse_time(item.get('created_at')) else 0
+                item['_age_days'] = age
+                if expire and age >= expire:
+                    self.store.update_jargon(item['id'], {'status': 'rejected', 'review_reason': f'超过 {expire} 天未审核，自动作废'})
+                    pending.remove(item)
+                    expired += 1
+            if expired:
+                self.store.add_event('social', f'{expired} 条黑话超过 {expire} 天未审核，已自动作废', expired=expired)
+            reminded = False
+            if remind and pending and self.notify_admins is not None:
+                last = self.store.last_event('jargon_digest')
+                last_at = _parse_time(last['created_at']) if last else None
+                if last_at is None or (now - last_at).total_seconds() >= remind * 86400:
+                    oldest = round(max(item['_age_days'] for item in pending))
+                    text = (f'有 {len(pending)} 条黑话在等审核，最早的一条已经等了 {oldest} 天。'
+                            '私聊我发送“待审黑话”可以逐条通过或拒绝，也可以到管理台的群语言页处理。'
+                            + (f'超过 {expire} 天没有审核的会自动作废。' if expire else ''))
+                    # Recorded only when there was someone to tell, so it is tried again otherwise.
+                    if self.notify_admins(text) is not False:
+                        self.store.add_event('jargon_digest', text, pending=len(pending))
+                        reminded = True
+            return {'expired': expired, 'reminded': reminded}
+        except Exception as exc:
+            try:
+                self.store.add_event('social_error', '待审核黑话的整理未完成', error=type(exc).__name__)
+            except Exception:
+                pass
+            return {'expired': 0, 'reminded': False}
+
+    def _note_feedback(self, scope_id, message):
+        """A member telling the bot that nobody asked it, right after it joined in unprompted."""
+        last = self._last_unprompted.get(scope_id)
+        if last is None:
+            return
+        now = time.monotonic()
+        if now - last['at'] > FEEDBACK_SECONDS:
+            self._last_unprompted.pop(scope_id, None)
+            return
+        last['after'] += 1
+        metadata = message.get('metadata') or {}
+        text = str(message.get('content', '')).strip()
+        from_target = str(message.get('user_id', '')) == last['user_id']
+        # It has to be about the bot's line: a quote or @ of the bot, the
+        # member it answered, or one of the first two messages after it.
+        aimed = metadata.get('reply_to_bot') or metadata.get('at_bot') or from_target or last['after'] <= 2
+        if not aimed or len(text) > 40 or not _UNWANTED.search(text):
+            return
+        self._last_unprompted.pop(scope_id, None)
+        self._rebukes[scope_id].append(now)
+        try:
+            self.store.add_event('planner_feedback', '主动接话后被成员说没有在叫它，接话门槛暂时提高', scope_id=scope_id,
+                                 feedback='unwanted', seconds_after=round(now - last['at'], 1), from_target=from_target,
+                                 source_ids=[message.get('id')])
+        except Exception:
+            pass  # Feedback is a diagnostic; it cannot affect taking the message in.
 
     def match_jargon(self, scope_id, text, limit=6):
         if not self._allowed(scope_id) or not _value(self.store.get_scope(scope_id), 'dictionary_understand', True):
@@ -335,6 +445,8 @@ class SocialEngine:
         now = time.monotonic()
         boost = sum(REFRACTORY_BOOST * 0.5 ** ((now - at) / REFRACTORY_HALF_LIFE)
                     for at in self._proactive_replies[scope_id] if now - at <= 6 * REFRACTORY_HALF_LIFE)
+        boost += sum(FEEDBACK_BOOST * 0.5 ** ((now - at) / FEEDBACK_HALF_LIFE)
+                     for at in self._rebukes[scope_id] if now - at <= 6 * FEEDBACK_HALF_LIFE)
         return round(95 - eagerness * 0.5 + boost, 1)
 
     def _recent_partner(self, scope, user_id):
@@ -359,6 +471,7 @@ class SocialEngine:
         self._bot_replies[scope_id].append(now)
         if proactive:
             self._proactive_replies[scope_id].append(now)
+            self._last_unprompted[scope_id] = {'at': now, 'user_id': str(user_id), 'after': 0}
         self._participants[(scope_id, str(user_id))] = now
         if self.request_current(scope_id, user_id, generation):
             self._open_requests.discard((scope_id, str(user_id)))
@@ -825,6 +938,42 @@ class SocialEngine:
             schedule = self.schedule_context_fn(scope_id, user_id)
             if schedule:
                 payload['character_schedule'] = schedule
+        # Descriptions of images in the group (image_captions.py), when that
+        # is switched on: the current message's, and those already made for
+        # the lines of history shown here.
+        image_note = ''
+        captions = getattr(self, 'image_captions', None)
+        if captions is not None and not private:
+            await captions.wait(message.get('id'))
+            described = captions.get(message.get('id'))
+            if described:
+                payload['current_images'] = described
+            for item in payload['history']:
+                seen = captions.get(item.get('id'))
+                if seen:
+                    item['images'] = seen
+            if described or any('images' in item for item in payload['history']):
+                image_note = IMAGE_NOTE
+        # Optional fast pre-screen (prescreen.py). Only unprompted messages:
+        # @, quotes, names and private chats always reach the Planner.
+        prescreen = getattr(self, 'prescreen', None)
+        prescreen_cfg = (prescreen.config(cfg) if unprompted and prescreen is not None and not prescreen.paused()
+                         else None)
+        prescreen_verdict = prescreen_task = None
+        if prescreen_cfg:
+            from .prescreen import case_from_planner
+            case = case_from_planner(payload)
+            if prescreen_cfg['mode'] == 'screen':
+                prescreen_verdict = await prescreen.judge(case, prescreen_cfg)
+                if prescreen_verdict.get('screened'):
+                    self.store.add_event('planner_prescreen', '快速预筛判断为不用接，未调用 Planner', scope_id=scope_id,
+                                         outcome='skip', prescreen=prescreen_verdict, **self._plan_sources(message))
+                    return decide('skip', '快速预筛：不是对机器人说，也没有值得接的内容', semantic=False,
+                                  prescreen=prescreen_verdict)
+            else:
+                prescreen_task = asyncio.create_task(prescreen.judge(case, prescreen_cfg))
+                self._jobs.add(prescreen_task)
+                prescreen_task.add_done_callback(self._jobs.discard)
         referenced = [x for x in records if x.get('role') in ('assistant', 'user')]
         history_guard = self.history_guard_fn(scope_id, user_id, referenced) if self.history_guard_fn else None
         self._open_requests.add(key)
@@ -896,7 +1045,7 @@ class SocialEngine:
                      '只输出JSON对象，按此顺序：audience(bot|member|group|none),speaker_intent(对方的意图),addressed_to_bot(true或false，不能是字符串),'
                      'action(reply|skip),target_message_id(必须最新消息ID),target_user_id(必须当前发言人ID),'
                      'intent(你准备怎么回应，reply时不能为空),reason(简短真实判断理由),needed_info(最多3个字符串),value(0—100整数)。'
-                     '所有字段都要提供，不要输出Markdown、解释或工具调用。'},
+                     '所有字段都要提供，不要输出Markdown、解释或工具调用。' + image_note},
                     {'role': 'user', 'content': json.dumps(payload, ensure_ascii=False, separators=(',', ':')), '_shiori_clock': 'planner'}]
                     response = await self._call_model(planner_messages,
                         purpose='planner', scope_id=scope_id, max_tokens=PLANNER_MAX_TOKENS, before_send=source_current)
@@ -1010,13 +1159,30 @@ class SocialEngine:
                               explicit=explicit or private or replacement, error_code=code,
                               error_feedback=_failure_feedback(exc, planner=True) if current and (explicit or private or replacement) else '')
             finally:
+                outcome = ('cancelled' if request_trace.get('termination_reason') == 'cancelled' else
+                           'reply' if accepted else 'failed' if request_trace.get('error_code') else 'skip')
+                if prescreen_task is not None:
+                    if prescreen_task.done() and not prescreen_task.cancelled() and prescreen_task.exception() is None:
+                        prescreen_verdict = prescreen_task.result()
+                    elif not prescreen_task.done():
+                        # Shadow answer still in flight: record it on its own when it lands.
+                        def record_late(task, gate=dict(gate or {}), outcome=outcome, sources=self._plan_sources(message)):
+                            if task.cancelled() or task.exception() is not None:
+                                return
+                            try:
+                                self.store.add_event('planner_prescreen', '快速预筛（影子）晚于 Planner 完成', scope_id=scope_id,
+                                                     planner_outcome=outcome, prescreen=task.result(),
+                                                     **({'gate': gate} if gate else {}), **sources)
+                            except Exception:
+                                pass
+                        prescreen_task.add_done_callback(record_late)
                 try:
                     self.store.add_event('planner_timing', 'Planner 判断分阶段耗时', scope_id=scope_id,
-                        outcome='cancelled' if request_trace.get('termination_reason') == 'cancelled' else
-                                'reply' if accepted else 'failed' if request_trace.get('error_code') else 'skip',
+                        outcome=outcome,
                         error_code=request_trace.get('error_code', ''),
                         termination_reason=request_trace.get('termination_reason', ''),
                         **({'gate': gate} if gate else {}),
+                        **({'prescreen': prescreen_verdict} if prescreen_verdict else {}),
                         **self._plan_sources(message),
                         **model_trace_snapshot(request_trace))
                 except Exception:
@@ -1024,7 +1190,7 @@ class SocialEngine:
                 if not accepted and self.request_current(scope_id, user_id, generation):
                     self._open_requests.discard(key)
 
-    def _evidence(self, records):
+    def _evidence(self, records, limit=30):
         by_term = defaultdict(dict)
         explicit = set()
         stop = {'这个', '那个', '我们', '你们', '什么', '怎么', '今天', '明天', '可以', '就是', '不是', '一下', '没有', '一个', '现在', '还是', '已经', 'http', 'https', 'www', 'jpg', 'png'}
@@ -1053,7 +1219,7 @@ class SocialEngine:
             speakers = {item['user_id'] for item in evidence.values()}
             if term in explicit or (len(evidence) >= 3 and len(speakers) >= 2):
                 selected.append({'term': term, 'explicit': term in explicit, 'messages': list(evidence.values())[-8:]})
-        return sorted(selected, key=lambda item: (item['explicit'], len(item['messages']), len(item['term'])), reverse=True)[:30]
+        return sorted(selected, key=lambda item: (item['explicit'], len(item['messages']), len(item['term'])), reverse=True)[:limit]
 
     def _result(self, scope_id, created=None, reason='', skipped=True):
         result = {'created': created or [], 'candidates': created or [], 'reason': reason, 'message': reason, 'skipped': skipped}
@@ -1074,7 +1240,34 @@ class SocialEngine:
                 if x.get('role') == 'user' and x.get('scope_id') == scope_id}
         return set(source_ids) <= live and not set(source_ids) & self._blocked_sources(scope_id)
 
-    async def analyze(self, scope_id):
+    async def _analyze_new(self, scope_id):
+        """The automatic run: only candidates the model has not judged on this evidence."""
+        return await self.analyze(scope_id, new_only=True)
+
+    def _jargon_due(self, scope_id, item, live):
+        """Whether a candidate has something the model has not seen yet."""
+        entry = self._jargon_judged[scope_id].get(item['term'])
+        if entry is None:
+            return True
+        new = {message['id'] for message in item['messages']} - entry['seen']
+        # Messages that left the window cannot be offered as evidence again.
+        entry['seen'] = (entry['seen'] & live) | new
+        entry['new'] += len(new)
+        needed = min(JARGON_REASK_USES_MAX, JARGON_REASK_USES * 2 ** (entry['times'] - 1))
+        return (item['explicit'] and not entry['explicit']) or entry['new'] >= needed
+
+    def _jargon_sent(self, scope_id, items):
+        """The model has judged these candidates on the evidence they have now."""
+        judged = self._jargon_judged[scope_id]
+        for item in items:
+            entry = judged.pop(item['term'], None) or {'times': 0, 'seen': set()}
+            entry.update(times=entry['times'] + 1, new=0, explicit=item['explicit'])
+            entry['seen'] |= {message['id'] for message in item['messages']}
+            judged[item['term']] = entry
+        while len(judged) > JARGON_JUDGED_TERMS:
+            judged.pop(next(iter(judged)))
+
+    async def analyze(self, scope_id, *, new_only=False):
         if not self._allowed(scope_id, learning=True):
             return self._result(scope_id, reason='请先为当前对话开启黑话学习；暂停或禁用时不会分析')
         if self._locks[scope_id].locked():
@@ -1087,11 +1280,20 @@ class SocialEngine:
             catalog = self._catalog(scope_id)
             blocked_sources = {id for item in catalog for id in item.get('blocked_source_ids', [])}
             records = [x for x in self.store.list_messages(scope_id, limit=120) if x.get('role') == 'user' and x['id'] not in blocked_sources and not (x.get('metadata') or {}).get('forwarded')]
-            evidence = self._evidence(records)
+            evidence = self._evidence(records, limit=None)
             blocked = {x['term'].casefold() for x in catalog if x['status'] in ('pending', 'rejected', 'disabled', 'deleted')}
             evidence = [item for item in evidence if item['term'] not in blocked]
             if not evidence:
                 return self._result(scope_id, reason='尚无多人多次用例或明确解释，不调用模型')
+            live = {x['id'] for x in records}
+            due = [item for item in evidence if self._jargon_due(scope_id, item, live)]
+            if new_only:
+                # The window moves by a few messages between automatic runs, so
+                # most candidates are ones the model has just judged.
+                evidence = due
+                if not evidence:
+                    return self._result(scope_id, reason='候选都已分析过，且没有足够的新用例，不调用模型')
+            evidence = evidence[:30]
             payload = []
             for item in evidence[:12]:
                 candidate = {'term': item['term'], 'explicit_explanation': item['explicit'],
@@ -1146,6 +1348,7 @@ class SocialEngine:
                     if automatic:candidate=self.store.update_jargon(candidate['id'],{'status':'approved','review_reason':'高置信度且有明确释义来源，自动确认'})
                     created.append(candidate)
                     catalog.append(candidate)
+                self._jargon_sent(scope_id, [x for x in evidence if x['term'] in allowed_terms])
                 accepted=sum(x['status']=='approved' for x in created)
                 return self._result(scope_id, created, f'发现 {len(created)} 条解释，其中 {accepted} 条已自动确认，其余待审核', False)
             except asyncio.CancelledError:
@@ -1296,6 +1499,8 @@ class SocialEngine:
         if self._jobs:
             await asyncio.gather(*self._jobs, return_exceptions=True)
         self._jobs.clear()
+        if getattr(self, 'prescreen', None) is not None:
+            await self.prescreen.close()
 
 
 class ConversationFlow:

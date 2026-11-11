@@ -21,7 +21,9 @@ from fastapi.staticfiles import StaticFiles
 
 from . import __version__
 from .chat import ChatService
+from .alerts import Alerts
 from .db import Store
+from .loop_watch import LoopWatch
 from .provider import Provider
 from .settings import Settings, resolve_model, DEFAULTS
 from .search import SearchError
@@ -64,9 +66,28 @@ def create_app(data_dir=None, *, start_workers=True, allow_remote=False):
     router = Router()
     scheduler = TaskScheduler(store, settings, router)
 
+    def loop_stalled(seconds, stack):
+        # The first frame in this project says more than a library's own.
+        where = next((line for line in stack if line.startswith('shiori/')), stack[0] if stack else '')
+        store.add_event('loop_stall', '主循环停顿，期间所有对话都在等待', seconds=seconds, where=where, stack=stack)
+        alerts.stalled(seconds)
+    loop_watch = LoopWatch(loop_stalled)
+    alerts = Alerts(settings, store, onebot.send)
+    provider.on_model_result = alerts.model_result
+    onebot.on_link = alerts.link
+    chat.notify_admins = lambda text: alerts.notice('jargon_digest', text)
+    chat.prescreen_result = alerts.prescreen_result
+    from .topic_starter import TopicStarter
+    topic_starter = TopicStarter(store, settings, provider, onebot.send,
+                                 allowed=lambda scope_id: chat.social._allowed(scope_id),
+                                 connected=lambda: bool(onebot.status().get('connected')),
+                                 note_reply=lambda *args, **kwargs: chat.social.note_reply(*args, **kwargs))
+
     @asynccontextmanager
     async def lifespan(app):
         await app.state.updates.reconcile_startup()
+        if start_workers:
+            await loop_watch.start()
         async def start_when_ready():
             while app.state.updates.startup_pending():
                 provider._updating = True
@@ -78,8 +99,12 @@ def create_app(data_dir=None, *, start_workers=True, allow_remote=False):
             await chat.knowledge.start()
             await chat.memory_lifecycle.start()
             await chat.character_schedule.start()
+            await topic_starter.start()
         starter = asyncio.create_task(start_when_ready()) if start_workers else None
         yield
+        await loop_watch.stop()
+        await topic_starter.stop()
+        await alerts.close()
         if starter:
             starter.cancel()
             with contextlib.suppress(asyncio.CancelledError): await starter
@@ -100,6 +125,7 @@ def create_app(data_dir=None, *, start_workers=True, allow_remote=False):
     from .chat_workspace import install_chat_workspace
     install_chat_workspace(app, store)
     app.state.store, app.state.settings, app.state.chat = store, settings, chat
+    app.state.alerts, app.state.topic_starter = alerts, topic_starter
     app.state.search = chat.search
     app.state.provider, app.state.bridge, app.state.scheduler = provider, router, scheduler
     app.state.onebot, app.state.official = onebot, official
@@ -346,6 +372,17 @@ def create_app(data_dir=None, *, start_workers=True, allow_remote=False):
         store.add_event('settings', '设置已保存')
         return result
 
+    @app.get('/api/settings/history')
+    async def settings_history():
+        return {'items': settings.history()}
+
+    @app.post('/api/settings/history/{version}/restore')
+    async def settings_history_restore(version: str):
+        result = settings.restore_history(version)
+        await reconnect()
+        store.add_event('settings', '已恢复到之前保存的一版设置', version=version)
+        return result
+
     @app.get('/api/models')
     async def models(provider_id: str = ''):
         cfg = resolve_model(settings.get(), model_id=provider_id) if provider_id else None
@@ -399,6 +436,16 @@ def create_app(data_dir=None, *, start_workers=True, allow_remote=False):
         from .diagnostics import build_diagnostics
         return {**build_diagnostics(store, settings, provider, router), 'social': chat.social.status(scope_id),
                 'persona_knowledge':chat.knowledge.status(), 'tools':chat.tool_actions.status()}
+
+    @app.post('/api/alerts/test')
+    async def alerts_test():
+        # A fixed sentence to the QQ administrators; nothing from any chat.
+        return await alerts.test()
+
+    @app.post('/api/prescreen/test')
+    async def prescreen_test(payload: dict = Body(default={})):
+        # A made-up conversation only; no chat data is sent.
+        return await chat.social.prescreen.test(payload)
 
     @app.post('/api/model/test')
     async def model_test(payload: dict = Body(default={})):

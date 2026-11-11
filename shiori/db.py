@@ -723,8 +723,13 @@ class Store:
         if not keys:
             return []
         with self._lock:
+            # Lookups of a few known ids go through the primary key. With a plain
+            # `scope_id=?` SQLite (no ANALYZE statistics here) picks a scope index
+            # and walks every message of the chat to find them: 0.1-0.2 s per call
+            # in a group of 40,000 messages, with the event loop waiting. The unary
+            # `+` keeps scope_id out of index choice; it is still checked per row.
             rows = self._conn.execute(
-                "SELECT data FROM messages WHERE scope_id=? AND id IN "
+                "SELECT data FROM messages WHERE +scope_id=? AND id IN "
                 "(SELECT value FROM json_each(?)) ORDER BY created_at,rowid",
                 (scope_id, json.dumps(keys))).fetchall()
         return [json.loads(row[0]) for row in rows]
@@ -850,8 +855,8 @@ class Store:
             page = refs[offset:offset + limit]
             keys = [key for key in page if isinstance(key, str) and key]
             rows = self._conn.execute(
-                "SELECT id,data FROM messages WHERE scope_id=? AND id IN (SELECT value FROM json_each(?))",
-                (record['scope_id'], _json(keys))).fetchall() if keys else []
+                "SELECT id,data FROM messages WHERE +scope_id=? AND id IN (SELECT value FROM json_each(?))",
+                (record['scope_id'], _json(keys))).fetchall() if keys else []   # by primary key, see ordered_messages
             sources = {row['id']: json.loads(row['data']) for row in rows}
             fingerprints = record.get('source_fingerprints')
             fingerprints = fingerprints if isinstance(fingerprints, dict) else {}
@@ -1506,7 +1511,8 @@ class Store:
         with self._lock:
             for start in range(0, len(keys), 400):
                 part = keys[start:start + 400]
-                count = self._conn.execute('SELECT COUNT(*) FROM messages WHERE scope_id=? AND id IN ('
+                # By primary key, see ordered_messages.
+                count = self._conn.execute('SELECT COUNT(*) FROM messages WHERE +scope_id=? AND id IN ('
                                            + ','.join('?' for _ in part) + ')', (scope_id, *part)).fetchone()[0]
                 if count != len(part):
                     return False
@@ -1523,8 +1529,8 @@ class Store:
         if any(not isinstance(key, str) for key in keys):
             return None
         with self._lock:
-            rows = self._conn.execute(
-                'SELECT id,data FROM messages WHERE scope_id=? AND id IN '
+            rows = self._conn.execute(   # by primary key, see ordered_messages
+                'SELECT id,data FROM messages WHERE +scope_id=? AND id IN '
                 '(SELECT value FROM json_each(?))', (scope_id, json.dumps(keys))).fetchall()
         if len(rows) != len(keys):
             return None
@@ -1542,8 +1548,8 @@ class Store:
         if any(not isinstance(key, str) for key in keys):
             return False
         with self._lock:
-            rows = self._conn.execute(
-                'SELECT id,data FROM messages WHERE scope_id=? AND id IN '
+            rows = self._conn.execute(   # by primary key, see ordered_messages
+                'SELECT id,data FROM messages WHERE +scope_id=? AND id IN '
                 '(SELECT value FROM json_each(?))', (scope_id, json.dumps(keys))).fetchall()
         return (len(rows) == len(keys)
                 and all(hashlib.sha256(raw.encode('utf-8')).hexdigest() == snapshot[key]
@@ -2074,6 +2080,13 @@ class Store:
                        error_message=clean(str(exc))[:1000], traceback=trace[-18000:])
         logging.getLogger('shiori.runtime').error('%s [%s]\n%s', message, error_id, trace[-18000:])
         return self.add_event(kind, message, **details)
+
+    def last_event(self, kind: str) -> dict | None:
+        """The most recent event of one kind, however long ago it was."""
+        with self._lock:
+            row = self._conn.execute("SELECT data FROM events WHERE kind=? ORDER BY created_at DESC,rowid DESC LIMIT 1",
+                                     (_text(kind, "kind"),)).fetchone()
+            return json.loads(row[0]) if row else None
 
     def list_events(self, limit: int = 50) -> list[dict]:
         limit = _limit(limit)

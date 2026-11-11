@@ -569,6 +569,9 @@ document.addEventListener("click",async event => {
     else if (action === "clear-messages") await confirmAction("清空当前聊天记录？","同时清除本会话的日记聊天素材、含聊天来源的日记及待回留言。纯日程日记、已提取的记忆、词典和任务会保留；聊天来源可能因此无法展示。",async () => { await api(`/api/messages?${query({scope_id:state.scope})}`,{method:"DELETE"}); },"清空记录");
     else if (action === "message-sources") { const message = state.messages.find(m => m.id === id); if (message) await showSources(message); }
     else if (action === "test-model") await testModel(target);
+    else if (action === "prescreen-test") await testPrescreen(target);
+    else if (action === "alerts-test") await testAlerts(target);
+    else if (action === "settings-restore") await restoreSettings(target);
     else if (action === "model-preset") { const form = target.closest("form"), provider = target.dataset.provider; $('[name="base_url"]',form).value = provider === "openai" ? "https://api.openai.com/v1" : provider === "deepseek" ? "https://api.deepseek.com/v1" : ""; $('[name="model"]',form).value = provider === "deepseek" ? "deepseek-chat" : ""; }
     else if (action === "list-models") { target.disabled = true; try { const result = await api("/api/models"), models = Array.isArray(result) ? result : result.models || result.data || []; $("#model-list").innerHTML = models.map(m => `<option value="${e(typeof m === "string" ? m : m.id)}">`).join(""); toast(`已读取 ${models.length} 个模型，请在模型名称中选择。`); } finally { target.disabled = false; } }
     else if (action === "qq-reconnect") { target.disabled = true; try { await api("/api/qq/reconnect",{method:"POST"}); toast("已请求重新连接"); await bootstrap(); } finally { target.disabled = false; } }
@@ -610,7 +613,7 @@ document.addEventListener("submit",async event => {
     else if (kind === "culture-switches") { await api(`/api/scopes/${encodeURIComponent(state.scope)}`,{method:"PUT",body:getForm(form)}); toast("学习、理解与使用规则已保存"); await bootstrap(); }
     else if (kind === "expression-switches") { await api(`/api/scopes/${encodeURIComponent(state.scope)}`,{method:"PUT",body:getForm(form)}); toast("表达学习与使用规则已保存"); await bootstrap(); }
     else if (kind === "knowledge-search") { const values = getForm(form),searchedScope = state.scope; state.knowledgeQuery = values.q; state.knowledgeUser = values.user_id; const results = await api(`/api/memory/search?${query({scope_id:searchedScope,user_id:values.user_id,q:values.q})}`); state.knowledgeResults = {...results,scope_id:searchedScope}; await renderPage(); }
-    else if (["model","wizard","qq","budget","system","memory-settings","routing","context-settings","identity","output","exploration","planner","resource-settings"].includes(kind)) await saveSettings(kind,form);
+    else if (["model","wizard","qq","budget","system","memory-settings","routing","context-settings","identity","output","exploration","planner","prescreen","alerts","image-captions","topic-starter","resource-settings"].includes(kind)) await saveSettings(kind,form);
     else await saveModal(kind,form);
   } catch (error) { submitFailed = true; if (form.closest("dialog")) modalError(error.message); else toast(error.message,true); }
   finally { window.ShioriFormDrafts?.end(draftTicket,!submitFailed); if (submit) submit.disabled = false; }

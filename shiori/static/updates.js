@@ -36,7 +36,7 @@ window.ShioriUpdates = (() => {
       <div class="section-actions">${!status.switch_supported && status.install_supported && status.local_install_allowed && release.relation!=="older" && release.assets.installer?.verified_download_available ? button("一键更新到 "+release.tag,"update-apply","primary","refresh",disabled) : ''}${status.switch_supported ? `<details class="details"><summary>高级：仅保存发行文件</summary>${select("update-kind","文件类型",Object.keys(release.assets).map(kind=>[kind,labels[kind] || kind]),selectedKind,disabled)}${button("仅保存文件","update-download","ghost","download",disabled)}</details>` : button("仅下载所选文件","update-download","","download",`${disabled}${!asset?.verified_download_available ? " disabled" : ""}`)}</div>` : ""}
       ${status.checked_at ? `<div class="section-actions">${status.page>1 ? button("上一页版本","update-previous","ghost small","",disabled) : ""}${status.has_more ? button("下一页版本","update-next","ghost small","",disabled) : ""}</div>` : ""}
       ${download.status!=="idle" ? `<div class="local-connector-result" aria-live="polite"><strong>${e(download.message || download.status)}</strong><p>${e(download.name || "")}</p>${downloading ? `<progress aria-label="版本下载进度" value="${percent}" max="100"></progress><p>${size(download.received)} / ${size(download.total)}</p>${button("取消下载","update-cancel","ghost small","stop")}` : ""}${download.status==="ready" ? `<a class="btn" href="${e(download.file_url)}" download>保存已校验文件</a> ${download.can_install && status.local_install_allowed ? button("退出并启动安装","update-install","primary","refresh") : `<p class="help-caption">${status.mode==="source" ? "请将源码包解压到新目录，按源码指南部署并继续使用原数据目录；当前源码与未提交改动不会被覆盖。" : status.mode==="portable" ? "请完整退出后将便携包解压到新目录，继续使用原数据目录。" : "请在运行电脑上手动安装；旧版本需先备份数据并检查兼容性。"}</p>`}` : ""}</div>` : ""}
-      ${status.install_result?.message?notice(status.install_result.message,status.install_result.status==='completed'?'':'warning'):''}${error ? notice(error,"warning") : ""}<p class="help-caption">更新文件和阶段记录保存在数据目录的 updates 中。自动切换保留旧程序及数据备份，不改变数据目录和快捷方式；新版本启动检查失败时恢复旧程序。Docker需通过镜像部署更新。</p>`;
+      ${status.install_result?.message?notice(status.install_result.message,status.install_result.status==='completed'?'':'warning'):''}${error ? notice(error,"warning") : ""}${status.switch_supported && status.update_kind==="source" && status.local_install_allowed ? `<details class="details"><summary>高级：从本地安装包更新</summary><p class="help-caption">用于还没有发布到 GitHub 的测试版，或不能联网的机器。只接受带源码清单的源码包（shiori-版本号-source.zip），版本不能低于当前版本；校验通过后和切换版本一样自动备份、替换并重启，新版本起不来会恢复旧程序。</p><div class="form-grid"><label class="field"><span>安装包</span><input type="file" id="update-local-file" accept=".zip"></label><label class="field"><span>SHA-256</span><input type="text" id="update-local-sha" maxlength="64" placeholder="64 位十六进制，由打包的人提供" autocomplete="off"></label></div><div class="section-actions">${button("校验并安装","update-local","","refresh",disabled)}</div></details>` : ""}<p class="help-caption">更新文件和阶段记录保存在数据目录的 updates 中。自动切换保留旧程序及数据备份，不改变数据目录和快捷方式；新版本启动检查失败时恢复旧程序。Docker需通过镜像部署更新。</p>`;
   }
   function paint() { const node=$("#updates-section");if(node)node.innerHTML=markup(); }
   function schedule() {
@@ -99,6 +99,16 @@ window.ShioriUpdates = (() => {
       await confirmAction('切换到 '+release.tag+'？','软件将后台获取并校验程序文件，自动备份当前数据，替换后重启；不需要运行安装器。后台任务完成后才能交接。',async()=>{
         status=await api('/api/updates/switch',{method:'POST',body:{release_id:release.id}});switchRequested=true;error="";paint();schedule();
       },'切换并重启');return true;
+    }
+    if(action==='update-local'){
+      const file=$("#update-local-file")?.files?.[0], sha=String($("#update-local-sha")?.value || "").trim();
+      if(!file)throw new Error('请先选择安装包文件。');
+      if(!/^[a-fA-F0-9]{64}$/.test(sha))throw new Error('请填写安装包的 SHA-256（64 位十六进制）。');
+      if(file.size > 512*1024*1024)throw new Error('安装包不能超过 512 MB。');
+      await confirmAction('安装「'+file.name+'」？','软件会校验安装包，自动备份当前数据，替换程序后重启。只安装你信任来源的安装包。',async()=>{
+        const data=new FormData();data.append('file',file);data.append('sha256',sha);
+        status=await api('/api/updates/local',{method:'POST',body:data});switchRequested=true;error="";paint();schedule();
+      },'安装并重启');return true;
     }
     if(action==='update-apply'){
       const release=selection();

@@ -41,6 +41,67 @@ class ProcessMetrics:
                 'uptime_seconds':max(0,now-self.started)}
 
 
+def _median(values):
+    values = sorted(value for value in values if isinstance(value, (int, float)) and not isinstance(value, bool))
+    if not values:
+        return None
+    middle = len(values) // 2
+    return round(values[middle] if len(values) % 2 else (values[middle - 1] + values[middle]) / 2)
+
+
+def activity(store, params):
+    """What the tokens were spent on, where a reply's time goes, and how reply decisions ended.
+
+    Every purpose usually runs on the same model, so the per-model table
+    cannot answer these. All three read records the service already keeps.
+    """
+    path = "json_extract(data,'$.details.%s')"
+    with store._lock:
+        connection = store._conn
+        purposes = connection.execute(
+            "SELECT COALESCE(json_extract(data,'$.purpose'),'chat'),COUNT(*),COALESCE(SUM(input_tokens),0),COALESCE(SUM(output_tokens),0)"
+            " FROM usage WHERE created_at>=? AND created_at<? GROUP BY 1 ORDER BY 3 DESC LIMIT 40", params).fetchall()
+        replies = connection.execute(
+            'SELECT ' + ','.join(path % key for key in (
+                'ingress_to_complete_ms', 'flow_ms', 'planner_ms', 'chat_timings.memory_recall_ms', 'chat_timings.context_ms',
+                'chat_timings.reply_model_ms', 'text_delivery_ms'))
+            + " FROM events WHERE kind='qq_reply_timing' AND created_at>=? AND created_at<? ORDER BY created_at DESC LIMIT 2000",
+            params).fetchall()
+        decisions = connection.execute(
+            'SELECT kind,' + ','.join(path % key for key in (
+                'outcome', 'gate.result', 'prescreen.mode', 'prescreen.ok', 'prescreen.screened'))
+            + ",COUNT(*) FROM events WHERE kind IN ('planner_timing','planner_prescreen') AND created_at>=? AND created_at<?"
+            " GROUP BY 1,2,3,4,5,6", params).fetchall()
+        unwanted = connection.execute(
+            "SELECT COUNT(*) FROM events WHERE kind='planner_feedback' AND created_at>=? AND created_at<?", params).fetchone()[0]
+    waits = [total - flow for total, flow, *_ in replies if isinstance(total, (int, float)) and isinstance(flow, (int, float))]
+    columns = list(zip(*replies)) if replies else [[]] * 7
+    outcome = {'reply': 0, 'skip': 0, 'failed': 0, 'cancelled': 0}
+    screen = {'mode': 'off', 'judged': 0, 'screened': 0, 'failed': 0}
+    planner_calls = unprompted = 0
+    for kind, result, gate, mode, ok, screened, count in decisions:
+        if kind == 'planner_timing':
+            planner_calls += count
+            outcome[result if result in outcome else 'skip'] += count
+            if gate in ('reply', 'addressed'):
+                unprompted += count
+        if mode in ('shadow', 'screen'):
+            # A screened message in screen mode has only the prescreen event; every other verdict rides on a decision.
+            screen['mode'] = 'screen' if 'screen' in (mode, screen['mode']) else 'shadow'
+            screen['judged'] += count
+            if not ok:
+                screen['failed'] += count
+            elif screened:
+                screen['screened'] += count
+    return {'purposes': [{'purpose': str(row[0]), 'calls': int(row[1]), 'input_tokens': int(row[2]), 'output_tokens': int(row[3])}
+                         for row in purposes],
+            'replies': {'count': len(replies), 'median_ms': {
+                'total': _median(columns[0]), 'wait': _median(waits), 'planner': _median(columns[2]), 'memory': _median(columns[3]),
+                'context': _median(columns[4]), 'model': _median(columns[5]), 'delivery': _median(columns[6])}},
+            'decisions': {'planner_calls': planner_calls, 'outcomes': outcome, 'prescreen': screen,
+                          'unprompted_replies': unprompted, 'unwanted_replies': int(unwanted)}}
+
+
 def snapshot(store,settings,days=1,*,now=None):
     if type(days) is not int or days not in (1,3,7):raise ValueError('统计范围仅支持1、3或7天')
     now=now or datetime.now(timezone.utc)
@@ -75,7 +136,7 @@ def snapshot(store,settings,days=1,*,now=None):
             'usage':{'calls':int(usage[0]),'input_tokens':int(usage[1]),'output_tokens':int(usage[2]),'tokens':int(usage[1]+usage[2]),
                      'estimated_cost':float(usage[3]),'unknown_price_calls':int(usage[4]),'estimated_calls':int(usage[5]),
                      'accounting':accounting,
-                     'average_response_ms':None if usage[6] is None else float(usage[6]),'ttft_ms':None if ttft is None else float(ttft)},'trend':trend}
+                     'average_response_ms':None if usage[6] is None else float(usage[6]),'ttft_ms':None if ttft is None else float(ttft)},'trend':trend,**activity(store,params)}
 
 
 def install_statistics(app,store,settings,onebot,official):

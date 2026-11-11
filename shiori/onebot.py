@@ -60,6 +60,8 @@ class OneBotBridge:
         self.store, self.settings, self.chat = store, settings, chat
         self.access = manager_for(settings, chat)
         self._socket = None
+        # alerts.py listens here: True when the QQ link opens, False when it is lost.
+        self.on_link = None
         self._mode = 'reverse'
         self._running = False
         self._forward_task = None
@@ -90,6 +92,13 @@ class OneBotBridge:
     def _enabled(self):
         cfg = self._config()
         return bool(cfg.get('enabled')) and cfg.get('adapter', 'napcat') in ('napcat', 'snowluma')
+
+    def _report_link(self, up):
+        if self.on_link is not None:
+            try:
+                self.on_link(up)
+            except Exception:
+                pass  # A listener cannot disturb the connection.
 
     def status(self):
         cfg = self._config()
@@ -157,6 +166,7 @@ class OneBotBridge:
             self._mode = mode
             self._last_connected_at = datetime.now(timezone.utc).isoformat()
             self._last_error = ''
+        self._report_link(True)
         if previous is not None and previous is not socket:
             self._fail_pending(previous)
             await self._close(previous)
@@ -202,6 +212,7 @@ class OneBotBridge:
             self._fail_pending(socket)
             if self._socket is socket:
                 self._socket = None
+                self._report_link(False)
 
     async def probe(self):
         """Read-only OneBot API roundtrip; this never sends a chat message."""

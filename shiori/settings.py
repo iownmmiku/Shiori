@@ -11,9 +11,16 @@ import math
 import os
 import re
 import secrets
+import shutil
+import tempfile
 import threading
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
+from .prescreen import DEFAULTS as PRESCREEN_DEFAULTS, validate as validate_prescreen
+from .alerts import DEFAULTS as ALERT_DEFAULTS, validate as validate_alerts
+from .image_captions import DEFAULTS as IMAGE_CAPTION_DEFAULTS, validate as validate_image_captions
+from .topic_starter import DEFAULTS as TOPIC_STARTER_DEFAULTS, validate as validate_topic_starter
 from .profiles import DEFAULT_PROFILES
 from .timezones import config_zone
 
@@ -71,6 +78,10 @@ DEFAULTS = {
                 'group_batch_ms':1500,'group_batch_messages':4,
                 'proactive_max_replies':3,'proactive_window_seconds':600,'eagerness':50,
                 'structured_output':'auto','format_retry_enabled':False},
+    'prescreen': dict(PRESCREEN_DEFAULTS),
+    'alerts': dict(ALERT_DEFAULTS),
+    'image_captions': dict(IMAGE_CAPTION_DEFAULTS),
+    'topic_starter': dict(TOPIC_STARTER_DEFAULTS),
     'stickers': {'enabled':True,'collect_enabled':True,'collect_probability':0.1,'send_enabled':True,
                  'send_probability':0.1,'model_id':'','min_confidence':0.85,'daily_recognitions':30,'daily_model_calls':60,'max_items':1000,
                  'auto_prune':True},
@@ -98,7 +109,10 @@ DEFAULTS = {
                 'max_input_chars':80000, 'max_history_messages':400, 'max_images':3},
     'paused': False,
     'updates': {'allow_remote':False},
-    'language': {'learning_enabled':True,'group_isolation':False,'review_mode':'automatic'},
+    # pending_expire_days: unreviewed jargon candidates are dropped after this many days (0 keeps them).
+    # pending_digest_days: remind the QQ administrators of the backlog this often (0 never).
+    'language': {'learning_enabled':True,'group_isolation':False,'review_mode':'automatic',
+                 'pending_expire_days':0,'pending_digest_days':0},
 }
 
 PROVIDER_DEFAULTS = dict(DEFAULTS['model'], id='', name='', enabled=True, tools=True, source_id='', model_type='')
@@ -223,6 +237,47 @@ def resolve_model(config, purpose='chat', *, model_id=None):
 
 class _Blob(ctypes.Structure):
     _fields_ = [('size', ctypes.c_ulong), ('data', ctypes.POINTER(ctypes.c_ubyte))]
+
+
+# Settings history: the file each save replaces is kept on this machine, so a
+# mistaken change (a supplier pointed somewhere else, a wrong key) can be
+# undone as a whole. Versions hold the keys of their time, like settings.json
+# itself, and live outside the files a backup may contain.
+HISTORY_KEEP = 40
+HISTORY_DIR = 'settings-history'
+_HISTORY_ID = re.compile(r'\d{8}T\d{12}Z')
+_KEPT_ON_RESTORE = ('updates', 'webui')
+SECTION_LABELS = {
+    'model': '默认模型', 'providers': '模型池', 'provider_sources': '供应商连接', 'routing': '任务分工',
+    'search_providers': '网页搜索', 'mcp_servers': 'MCP 服务', 'onebot': 'QQ 连接', 'qq_official': 'QQ 官方机器人',
+    'identity': '名称与触发', 'planner': '回复判断', 'prescreen': '快速预筛', 'alerts': '故障提醒', 'image_captions': '图片理解', 'topic_starter': '主动开话题', 'memory': '记忆',
+    'language': '黑话与表达', 'stickers': '表情包', 'debounce': '消息防抖', 'output': '回复格式', 'scheduler': '并发与排队',
+    'budget': '预算', 'context': '上下文', 'access': '管理员', 'computer': '电脑任务', 'bot_profiles': '机器人配置',
+    'time': '时间', 'exploration': '兴趣探索', 'webui': '管理台入口', 'updates': '更新', 'paused': '暂停开关',
+}
+
+
+def _plain(raw):
+    """A saved settings file with its secrets readable, only to compare two versions."""
+    value = copy.deepcopy(raw)
+    try:
+        for section, key in (('model', 'api_key'), ('onebot', 'access_token'), ('qq_official', 'app_secret')):
+            if isinstance(value.get(section), dict) and isinstance(value[section].get(key), str):
+                value[section][key] = _unprotect(value[section][key])
+        for section, key in (('providers', 'api_key'), ('provider_sources', 'api_key'), ('search_providers', 'api_key'),
+                             ('mcp_servers', 'token')):
+            for item in value.get(section) or []:
+                if isinstance(item, dict) and isinstance(item.get(key), str):
+                    item[key] = _unprotect(item[key])
+    except (ValueError, TypeError, OSError):
+        pass
+    return value
+
+
+def changed_sections(old, new):
+    """Top-level settings sections that differ between two saved files."""
+    old, new = _plain(old), _plain(new)
+    return [key for key in dict.fromkeys([*old, *new]) if old.get(key) != new.get(key)]
 
 
 def _protect(value: str) -> str:
@@ -657,12 +712,19 @@ class Settings:
                         raise ValueError('模型能力开关须为布尔值')
                 if 'name' in candidate:
                     candidate['name'] = str(candidate['name']).strip()[:80] or candidate['id']
+            updated['prescreen'] = validate_prescreen(updated['prescreen'], {x['id'] for x in updated['provider_sources']})
+            updated['alerts'] = validate_alerts(updated['alerts'])
+            updated['image_captions'] = validate_image_captions(updated['image_captions'])
+            updated['topic_starter'] = validate_topic_starter(updated['topic_starter'])
             config_zone(updated)
             memory_policy=updated['memory']
             if memory_policy['review_mode'] not in ('automatic','manual'):raise ValueError('记忆审核模式须为 automatic 或 manual')
             language=updated['language']
             if type(language['learning_enabled']) is not bool or type(language['group_isolation']) is not bool:raise ValueError('黑话学习与隔离开关须为布尔值')
             if language['review_mode'] not in ('automatic','manual'):raise ValueError('黑话审核模式须为 automatic 或 manual')
+            for key,high in (('pending_expire_days',365),('pending_digest_days',90)):
+                if type(language.get(key,0)) is not int or not 0<=language.get(key,0)<=high:
+                    raise ValueError(f'待审核黑话的天数设置须为 0—{high} 的整数')
             for key,low,high in (('extraction_messages',2,50),('extraction_idle_seconds',30,3600),('daily_extractions',0,1000)):
                 if type(memory_policy[key]) is not int or not low<=memory_policy[key]<=high:raise ValueError('自动记忆整理参数无效')
             if type(updated['updates']['allow_remote']) is not bool:
@@ -904,6 +966,81 @@ class Settings:
                 raise
             return self.public()
 
+    def _keep_history(self, new_raw):
+        """Keep the file this save replaces, when the save changes anything."""
+        try:
+            old_text = self.path.read_text('utf-8-sig')
+            old = json.loads(old_text)
+            if not isinstance(old, dict) or not changed_sections(old, new_raw):
+                return
+            folder = self.data_dir / HISTORY_DIR
+            folder.mkdir(exist_ok=True)
+            target = folder / (datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%f') + 'Z.json')
+            target.write_text(old_text, 'utf-8')
+            if os.name != 'nt':
+                folder.chmod(0o700)
+                target.chmod(0o600)
+            for stale in sorted(folder.glob('*.json'))[:-HISTORY_KEEP]:
+                stale.unlink()
+        except (OSError, ValueError):
+            pass  # History is a convenience; a save never fails over it.
+
+    def history(self):
+        """Kept versions, newest first: when each was replaced and what that save changed."""
+        with self._lock:
+            try:
+                current = json.loads(self.path.read_text('utf-8-sig'))
+            except (OSError, ValueError):
+                current = {}
+            items, newer = [], current
+            for path in sorted((self.data_dir / HISTORY_DIR).glob('*.json'), reverse=True):
+                if not _HISTORY_ID.fullmatch(path.stem):
+                    continue
+                try:
+                    raw = json.loads(path.read_text('utf-8-sig'))
+                    replaced = datetime.strptime(path.stem, '%Y%m%dT%H%M%S%fZ').replace(tzinfo=timezone.utc)
+                except (OSError, ValueError):
+                    continue
+                if not isinstance(raw, dict):
+                    continue
+                items.append({'id': path.stem, 'replaced_at': replaced.isoformat().replace('+00:00', 'Z'),
+                              'sections': [SECTION_LABELS.get(key, key) for key in changed_sections(raw, newer)],
+                              'same_as_current': not [key for key in changed_sections(raw, current)
+                                                      if key not in _KEPT_ON_RESTORE]})
+                newer = raw
+            return items
+
+    def restore_history(self, version):
+        """Put a kept version back. The current file goes into the history first.
+
+        How this machine is reached and updated (`webui`, `updates`) stays as
+        it is: a restore must not open or close remote access by surprise.
+        """
+        if not isinstance(version, str) or not _HISTORY_ID.fullmatch(version):
+            raise ValueError('设置版本编号无效')
+        source = self.data_dir / HISTORY_DIR / (version + '.json')
+        if not source.is_file():
+            raise ValueError('这个设置版本已不存在')
+        # Loading it the way a start-up would applies every migration and
+        # default, and fails the same way a broken file would.
+        with tempfile.TemporaryDirectory(dir=self.data_dir, prefix='.settings-restore-') as folder:
+            shutil.copyfile(source, Path(folder) / 'settings.json')
+            loaded = Settings(Path(folder))
+            if loaded.recovery_path is not None or loaded.warning:
+                raise ValueError('这个设置版本无法读取，未做任何改动')
+            candidate = loaded.get()
+        with self._lock:
+            current = self.get()
+            for section in _KEPT_ON_RESTORE:
+                candidate[section] = current[section]
+            previous, self._data = self._data, candidate
+            try:
+                self._save()
+            except Exception:
+                self._data = previous
+                raise
+            return self.public()
+
     def _save(self):
         if self._recovery_pending:
             self._preserve_original()
@@ -918,6 +1055,7 @@ class Settings:
             source['api_key'] = _protect(source['api_key'])
         for server in raw['mcp_servers']:
             server['token'] = _protect(server['token'])
+        self._keep_history(raw)
         tmp = self.path.with_suffix('.tmp')
         tmp.write_text(json.dumps(raw, ensure_ascii=False, indent=2), 'utf-8')
         tmp.replace(self.path)

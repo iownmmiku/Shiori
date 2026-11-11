@@ -7,6 +7,7 @@ import json
 import hashlib
 import math
 import re
+import time
 from functools import partial
 from collections import defaultdict
 from contextvars import ContextVar
@@ -111,6 +112,11 @@ def validate_images(images, *, allow_onebot_refs=False):
     return result
 
 
+# Administrators review pending jargon from a private chat (see ChatService._review_jargon).
+_JARGON_REVIEW = re.compile(r'^/?(?:待审黑话$|(?:通过|拒绝)黑话[：:\s])')
+JARGON_REVIEW_PAGE, JARGON_REVIEW_SECONDS = 12, 1800.0
+
+
 class ChatService:
     def __init__(self, store, settings, provider):
         self.store, self.settings, self.provider = store, settings, provider
@@ -142,6 +148,14 @@ class ChatService:
         from .stickers import StickerLibrary
         self.stickers = StickerLibrary(self.store,self.settings,self.provider,self.social._allowed)
         self.stickers.resolve_image_refs = self._resolve_qq_image_refs
+        from .image_captions import ImageCaptions
+        self.image_captions = ImageCaptions(self.store, self.settings, self.provider,
+                                            resolver=lambda: self._resolve_qq_image_refs)
+        self.social.image_captions = self.image_captions
+        # api.py sets `notify_admins`; routed through here so it survives the engines being rebuilt.
+        self.social.notify_admins = lambda text: (getattr(self, 'notify_admins', None) or (lambda _text: False))(text)
+        self.social.prescreen.on_result = lambda ok, reason='': (
+            getattr(self, 'prescreen_result', None) or (lambda _ok, _reason='': None))(ok, reason)
         self.social.history_fn = lambda scope_id, user_id: self._history(scope_id, limit=14, user_id=user_id)
         self.social.history_current_fn = lambda scope_id, user_id, records: len(
             self.context.reference(scope_id, user_id, records)['messages']) == len(records)
@@ -188,6 +202,7 @@ class ChatService:
             raise ValueError('图片数量超过当前资源设置的上限，请减少图片或调整上下文设置')
         message = self.store.add_message(scope_id, str(user_id), 'user', text, **dict(metadata, images=images, observed=True))
         self.social.observe(scope_id, message)
+        self.image_captions.start(message)
         self.stickers.observe(message)
         self._capture_schedule_material(message)
         self._observed_counts[(scope_id, str(user_id))] += 1
@@ -493,6 +508,7 @@ class ChatService:
                 current_ids = [user_message['id']]
                 originals = [user_message]
                 self.social.observe(scope_id, user_message)
+                self.image_captions.start(user_message)
                 self._capture_schedule_material(user_message)
                 if scope.get('auto_memory',True):self.memory_lifecycle.observe(scope_id,str(user_id))
             metadata = dict(metadata, source_ids=current_ids)
@@ -1298,6 +1314,7 @@ class ChatService:
     def is_local_command(self,scope_id,text):
         text=self._command_text(scope_id,text)
         if text in ('/帮助','/help','你会什么','我的记忆','/记忆','我的待办','/待办','太啰嗦了','说短一点','请简短一点','以后说短一点'): return True
+        if _JARGON_REVIEW.match(text): return True
         return bool(re.match(r'^(?:(?:请)?(?:帮我)?记住[：:，,\s]*|解释黑话[：:]|/黑话\s|(?:更正|纠正|更新)记忆[：:\s]|(?:完成待办|完成任务|待办完成|取消提醒|取消待办|取消任务|忘掉|忘记|删除记忆)[：:\s]|添加待办[：:]|/todo\s|计算[：:]|/calc\s|(?:以后|请|以后请)?(?:叫我|称呼我)|(?:以后)?(?:不要|别)(?:再)?(?:叫我|称呼我)|(?:我们|本|这个)?群(?:里|内)?[，,:：\s]*[“\"「]?.{1,30}?[”\"」]?\s*(?:是指|表示|意思是|指))',text)
                     or ('提醒' in text and task_creation_intent(text) and parse_due(text, settings=self.settings)))
 
@@ -1371,6 +1388,61 @@ class ChatService:
         combined['context_source_ids'] = list(dict.fromkeys(combined['context_source_ids']))
         return combined, remaining
 
+    def _review_jargon(self, scope_id, user_id, text, metadata):
+        """An administrator reviews pending jargon in a private chat: a numbered list, then yes or no by number."""
+        if not (user_id == 'owner' or metadata.get('is_owner') is True):
+            return {'reply': '只有管理员可以审核黑话。'}
+        if ':group:' in scope_id:
+            return {'reply': '请在和我的私聊里审核黑话，免得把各群的待审内容发到群里。'}
+        reviews = self.__dict__.setdefault('_jargon_reviews', {})
+        key = (scope_id, str(user_id))
+        if text.lstrip('/') == '待审黑话':
+            # Oldest first; the store lists newest first, so reversing it keeps entries of the same instant in order.
+            pending = sorted((item for item in reversed(self.store.list_jargon(status='pending'))
+                              if item.get('entry_type', 'jargon') == 'jargon'), key=lambda item: item.get('created_at', ''))
+            if not pending:
+                reviews.pop(key, None)
+                return {'reply': '现在没有待审核的黑话。'}
+            shown = pending[:JARGON_REVIEW_PAGE]
+            reviews[key] = {'ids': [item['id'] for item in shown], 'at': time.monotonic()}
+            lines = []
+            for number, item in enumerate(shown, 1):
+                try:
+                    origin = self.store.get_scope(item['scope_id']).get('name') or item['scope_id']
+                except (KeyError, AttributeError):
+                    origin = item.get('scope_id', '')
+                lines.append(f"{number}. {item['term']}：{str(item.get('meaning', ''))[:60]}（{origin}）")
+            more = f'，先看最早的 {len(shown)} 条' if len(pending) > len(shown) else ''
+            return {'reply': f'待审核的黑话共 {len(pending)} 条{more}：\n' + '\n'.join(lines)
+                             + '\n回复“通过黑话：1 3”或“拒绝黑话：2”，也可以写“全部”。处理完再发“待审黑话”看下一批。'}
+        approve = text.lstrip('/').startswith('通过')
+        listing = reviews.get(key)
+        if not listing or time.monotonic() - listing['at'] > JARGON_REVIEW_SECONDS:
+            return {'reply': '请先发送“待审黑话”查看列表，再按编号审核。'}
+        choice = re.split(r'黑话[：:\s]*', text, maxsplit=1)[-1].strip()
+        if choice in ('全部', '所有', '全都'):
+            numbers = list(range(1, len(listing['ids']) + 1))
+        else:
+            numbers = list(dict.fromkeys(int(value) for value in re.findall(r'\d+', choice)))
+            if not numbers or any(not 1 <= value <= len(listing['ids']) for value in numbers):
+                return {'reply': f'请写列表里的编号（1—{len(listing["ids"])}），例如“通过黑话：1 3”，或写“全部”。'}
+        done, skipped = [], 0
+        for number in numbers:
+            record_id = listing['ids'][number - 1]
+            current = next(iter(self.store.list_jargon(status='pending', record_ids=[record_id])), None) if record_id else None
+            if current is None:
+                skipped += 1          # already handled here, in the web console, or expired
+                continue
+            self.store.update_jargon(record_id, {'status': 'approved' if approve else 'rejected',
+                                                 'review_reason': f"管理员在 QQ 私聊中{'通过' if approve else '拒绝'}"})
+            listing['ids'][number - 1] = None
+            done.append(current['term'])
+        verb = '通过' if approve else '拒绝'
+        reply = f"已{verb} {len(done)} 条：{'、'.join(done)}。" if done else f'没有需要{verb}的条目。'
+        if skipped:
+            reply += f'另有 {skipped} 条此前已经处理过。'
+        return {'reply': reply + '发送“待审黑话”可以继续看剩下的。'}
+
     async def _direct(self, scope_id, user_id, text, source, metadata):
         text=self._command_text(scope_id,text)
         source_ids = metadata.get('source_ids') or [source['id']]
@@ -1410,6 +1482,8 @@ class ChatService:
             term = teach[1].strip(' “"”「」')
             item = self.store.create_jargon({'scope_id': scope_id, 'term': term, 'meaning': teach[2].strip(), 'created_by': user_id, 'source_ids': source_ids, 'status': 'approved' if owner else 'pending', 'use_allowed': False})
             return {'reply': f"已{'确认' if owner else '收到待审核解释'}：{term} → {item['meaning']}。\n仅在当前对话范围生效，默认用于理解；主动使用可在群文化页开启。", 'actions': [{'tool': 'teach_jargon', 'ok': True, 'result': item}]}
+        if _JARGON_REVIEW.match(text):
+            return self._review_jargon(scope_id, user_id, text, metadata)
         if text.startswith(('解释黑话：', '解释黑话:', '/黑话 ')):
             term = re.split(r'[：:]|/黑话\s', text, maxsplit=1)[-1].strip()
             items = self.store.match_jargon(scope_id, term, 10)
@@ -2085,6 +2159,7 @@ class ChatService:
         if pending:
             await asyncio.gather(*pending, return_exceptions=True)
         await self.social.close()
+        await self.image_captions.close()
         await self.stickers.close()
         await self.knowledge.stop()
         self.context.close()

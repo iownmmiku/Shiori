@@ -14,6 +14,9 @@ import platform
 import re
 import secrets
 import shutil
+import zipfile
+
+from fastapi import File, Form, UploadFile
 import subprocess
 import sys
 import time
@@ -31,6 +34,7 @@ RELEASES_URL = f'https://github.com/{REPOSITORY}/releases'
 API_URL = f'https://api.github.com/repos/{REPOSITORY}/releases'
 MAX_DOWNLOAD = 2 * 1024**3
 KINDS = {'installer': 'Windows-Setup.exe', 'portable': 'Windows-x64.zip', 'source': 'source.zip'}
+MAX_LOCAL_PACKAGE = 512 * 1024**2
 CDN_HOSTS = {'github.com', 'release-assets.githubusercontent.com', 'objects.githubusercontent.com', 'github-releases.githubusercontent.com'}
 
 
@@ -285,6 +289,59 @@ class UpdateManager:
             self.releases, self.page, self.has_more, self.checked_at = copy.deepcopy(values), page, has_more, checked
             self.include_prerelease = include_prerelease
             return self.snapshot()
+
+    def stage_local(self, source, expected_sha256):
+        """Take a source package from this machine and leave it ready to install.
+
+        For builds that are not GitHub releases (a test build, an offline
+        machine). The package is held to the same checks as a download: the
+        SHA-256 the operator states must match, it must carry the source
+        manifest, and it may not be older than the running version. From here
+        on the normal switch takes over: backup, replace, restart, roll back
+        when the new version does not come up.
+        """
+        if self.startup_pending(): raise ValueError('上次更新尚未结束或需要恢复，请先核验更新状态')
+        if self._cleaning: raise ValueError('正在清理历史更新，请稍后再试')
+        if self._auto_task and not self._auto_task.done(): raise ValueError('一键更新进行中，请先取消或等待完成')
+        if self._task and not self._task.done(): raise ValueError('已有下载进行中，请先取消或等待完成')
+        if self._launching or self.download.get('status') == 'installing': raise ValueError('正在安装，请等待完成')
+        if not self.runtime.get('switch_supported') or self.runtime.get('update_kind') != 'source':
+            raise ValueError('从本地安装包更新只支持源码部署；安装版请使用发行页的安装包')
+        if not isinstance(expected_sha256, str) or not re.fullmatch(r'[a-fA-F0-9]{64}', expected_sha256.strip()):
+            raise ValueError('请填写安装包的 SHA-256（64 位十六进制）')
+        source = Path(source)
+        size = source.stat().st_size
+        if not 0 < size <= MAX_LOCAL_PACKAGE: raise ValueError('安装包为空或超过 512 MB')
+        with source.open('rb') as stream: digest = hashlib.file_digest(stream, 'sha256').hexdigest()
+        if digest != expected_sha256.strip().lower(): raise ValueError('安装包的 SHA-256 与填写的不一致，未安装')
+        version = self._package_version(source)
+        if version_key(version) < version_key(__version__):
+            raise ValueError(f'安装包版本 {version} 低于当前的 {__version__}，未安装；测试版请使用下一个版本号的预发布号')
+        self.download = {'id': secrets.token_hex(16), 'release_id': 0, 'tag': 'v' + version, 'kind': 'source',
+                         'name': _asset_names(version, 'source')[0], 'status': 'ready', 'received': size, 'total': size,
+                         'sha256': digest, 'local': True, 'message': '本地安装包已校验',
+                         'started_at': _time(), 'completed_at': _time()}
+        path = self._file_path()
+        path.parent.mkdir(exist_ok=True)
+        shutil.copyfile(source, path)
+        self._save()
+        return self.snapshot()
+
+    @staticmethod
+    def _package_version(path):
+        """The version a source package declares in its manifest."""
+        try:
+            with zipfile.ZipFile(path) as archive:
+                names = [item.filename for item in archive.infolist() if not item.is_dir()]
+                prefixes = {name.split('/', 1)[0] for name in names if '/' in name}
+                if len(prefixes) != 1 or any('/' not in name for name in names): raise ValueError()
+                item = archive.getinfo(next(iter(prefixes)) + '/SOURCE_MANIFEST.json')
+                if item.file_size > 8 * 1024**2: raise ValueError()
+                version = json.loads(archive.read(item).decode('utf-8-sig')).get('version')
+            version_key(version)
+            return version.removeprefix('v')
+        except (OSError, KeyError, ValueError, AttributeError, zipfile.BadZipFile) as exc:
+            raise ValueError('这不是 Shiori 的源码安装包（缺少带版本号的源码清单），未安装') from exc
 
     def start_download(self, release_id, kind):
         if self.startup_pending(): raise ValueError('上次更新尚未结束或需要恢复，请先核验更新状态')
@@ -664,6 +721,26 @@ def install_updates(app, data_dir):
         if type(payload.get('enabled')) is not bool:raise ValueError('远程更新开关须为布尔值')
         app.state.settings.update({'updates':{'allow_remote':payload['enabled']}})
         return snapshot(request)
+
+    @app.post('/api/updates/local')
+    async def local_package(request: Request, file: UploadFile = File(...), sha256: str = Form(...)):
+        # Installing arbitrary code is for whoever sits at the machine: remote update rights cover GitHub releases only.
+        if not local_peer(request): raise HTTPException(403, '请在运行 Shiori 的电脑上安装本地安装包')
+        if not callable(app.state.shutdown): raise ValueError('当前启动方式不能安全退出，请手动部署')
+        check_idle()
+        upload = manager._safe_folder() / ('local-' + secrets.token_hex(8) + '.part')
+        try:
+            received = 0
+            with upload.open('xb') as output:
+                while chunk := await file.read(1024 * 1024):
+                    received += len(chunk)
+                    if received > MAX_LOCAL_PACKAGE: raise ValueError('安装包超过 512 MB')
+                    output.write(chunk)
+            await asyncio.to_thread(manager.stage_local, upload, sha256)
+        finally:
+            upload.unlink(missing_ok=True)
+        result = await handoff(manager.download['id'], replacement=True)
+        return {**snapshot(request), 'handoff': result}
 
     @app.post('/api/updates/apply')
     async def apply(request: Request, payload: dict = Body(...)):

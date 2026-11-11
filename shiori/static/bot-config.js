@@ -21,7 +21,7 @@
   experience.renderSettings=async()=>{
     const template=document.createElement('template');template.innerHTML=await settingsPage();
     template.content.querySelector('.settings-aside')?.remove();
-    for(const id of ['model-section','providers-section','routing-section','updates-section','qq-section','identity-section','computer-section','admins-section','output-section','planner-budget-section','memory-settings-section','context-section','exploration-section'])template.content.querySelector('#'+id)?.remove();
+    for(const id of ['model-section','providers-section','routing-section','updates-section','qq-section','identity-section','computer-section','admins-section','output-section','planner-budget-section','memory-settings-section','context-section','exploration-section','prescreen-section','image-captions-section','topic-starter-section'])template.content.querySelector('#'+id)?.remove();
     template.content.querySelectorAll('section').forEach(node=>{if(node.querySelector('[data-form="routing"],[data-form="provider"]'))node.remove();});
     template.content.querySelectorAll('.settings-foldout').forEach(node=>{if(!node.querySelector('section,form'))node.remove();});
     return template.innerHTML.replace('<h1>设置与连接</h1>','<h1>系统设置</h1>').replace('<p>模型、QQ、预算和本地数据。</p>','<p>登录与远程入口、预算和本地数据。</p>').replace('<div class="settings-main">','<div class="settings-main"><section class="panel settings-section"><h2>机器人配置已集中到一页</h2><p>名称、人格、回复、QQ 接入和电脑权限都在这里调整。</p>'+button('打开机器人配置','go-persona','primary','settings')+'</section>');

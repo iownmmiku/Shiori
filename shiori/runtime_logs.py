@@ -16,13 +16,14 @@ KIND_LABELS = {
     'qq_sent': '已发送', 'qq_delivery': '送达问题', 'qq_output': '分段发送', 'qq_outbox': '分段记录', 'qq_ingress': '收到消息',
     'qq_debounce': '消息合并', 'qq_suppressed': '停止发送', 'qq_reply_timing': '回复耗时', 'qq_rate_limited': '群限速',
     'qq_feedback': '失败提示', 'qq_image_error': '图片读取', 'qq_error': 'QQ 错误', 'qq_protocol_error': '协议错误',
-    'planner_timing': '回复判断', 'planner_error': '判断失败', 'planner_format_retry': '格式重试', 'planner_batch_error': '集中判断失败',
+    'planner_timing': '回复判断', 'planner_prescreen': '快速预筛', 'planner_feedback': '接话反馈', 'jargon_digest': '待审提醒', 'topic_starter': '主动开话题', 'topic_starter_error': '开话题失败', 'planner_error': '判断失败', 'planner_format_retry': '格式重试', 'planner_batch_error': '集中判断失败',
     'chat_timing': '生成回复', 'model': '备用模型', 'model_output_budget': '输出额度', 'model_stream_incomplete': '流中断',
     'model_call': '模型调用', 'memory_use': '使用记忆', 'memory_cursor': '整理进度', 'memory_extract_attempt': '开始整理',
     'memory_extract_result': '整理结果', 'memory_error': '整理失败', 'social': '黑话学习', 'social_error': '学习失败',
     'stickers': '收集表情', 'stickers_error': '收集失败', 'stickers_skipped': '未收集', 'stickers_retry': '识图重试',
     'sticker_timeout': '选图超时', 'sticker_send_error': '发送失败', 'knowledge_exploration': '兴趣探索',
     'distillation_discovery': '蒸馏检索', 'settings': '设置变更', 'search_attempt': '联网搜索', 'admin_pairing': '管理员配对',
+    'loop_stall': '主循环停顿', 'alert': '故障提醒',
 }
 PREFIXES = (('qq', 'qq'), ('planner', 'planner'), ('chat', 'reply'), ('model', 'model'), ('memory', 'memory'),
             ('social', 'learning'), ('jargon', 'learning'), ('expression', 'learning'), ('sticker', 'stickers'),
@@ -42,6 +43,19 @@ def _ms(value):
     return f'{value / 1000:.1f}s' if isinstance(value, (int, float)) and value >= 1000 else f'{value:.0f}ms' if isinstance(value, (int, float)) else ''
 
 
+def _prescreen(verdict):
+    """One line for a Jev pre-screen verdict (prescreen.py)."""
+    if not isinstance(verdict, dict):
+        return ''
+    if not verdict.get('ok'):
+        paused = f"，连续失败，暂停 {verdict['paused_seconds']:.0f} 秒" if verdict.get('paused_seconds') else ''
+        return f"Jev 未完成：{verdict.get('error') or '未知错误'} {_ms(verdict.get('latency_ms'))}".strip() + paused
+    shadow = verdict.get('mode') == 'shadow'
+    decision = ('会筛掉' if shadow else '筛掉') if verdict.get('screened') else ('会放行' if shadow else '放行')
+    return (f"Jev{'（影子）' if shadow else ''} 对它说 {verdict.get('p_bot', 0):.2f} · 值得接 {verdict.get('p_join', 0):.2f} · "
+            f"{AUDIENCES.get(verdict.get('audience'), verdict.get('audience') or '')} · {decision} · {_ms(verdict.get('latency_ms'))}")
+
+
 def summary(kind, details):
     """One readable line of the details that matter for this kind of event."""
     d = details or {}
@@ -57,6 +71,22 @@ def summary(kind, details):
         if d.get('error_code'):
             parts.append('错误 ' + str(d['error_code']))
         parts.append('用时 ' + _ms(d.get('elapsed_ms')) if d.get('elapsed_ms') else '')
+        parts.append(_prescreen(d.get('prescreen')))
+    elif kind == 'planner_prescreen':
+        if d.get('planner_outcome'):
+            gate = d.get('gate') or {}
+            parts.append('Planner ' + OUTCOMES.get(d['planner_outcome'], d['planner_outcome'])
+                         + (f"（价值 {gate.get('value')} / 门槛 {gate.get('threshold')}）" if gate else ''))
+        else:
+            parts.append('未调用 Planner')
+        parts.append(_prescreen(d.get('prescreen')))
+    elif kind == 'planner_feedback':
+        parts += [f"接话 {d.get('seconds_after')} 秒后" if d.get('seconds_after') is not None else '',
+                  '来自它回应的那位成员' if d.get('from_target') else '来自其他成员']
+    elif kind == 'alert':
+        parts.append(f"已发给 {d.get('recipients')} 位管理员" if d.get('recipients') else '没有可送达的管理员 QQ')
+    elif kind == 'loop_stall':
+        parts += ['停顿 ' + _ms((d.get('seconds') or 0) * 1000), str(d.get('where') or '位置未知')]
     elif kind == 'planner_error':
         parts += [str(d.get('code') or ''), '阶段 ' + str(d.get('stage')) if d.get('stage') else '',
                   str(d.get('termination_reason') or '')]
@@ -105,7 +135,7 @@ def severity(kind, details):
     code = str((details or {}).get('reason') or (details or {}).get('code') or (details or {}).get('status') or '').lower()
     if kind.endswith('_error') or 'traceback' in (details or {}) or any(x in code for x in ('error', 'failed')):
         return 'ERROR'
-    if (kind in ('qq_rate_limited', 'model_output_budget', 'model_stream_incomplete', 'qq_suppressed')
+    if (kind in ('qq_rate_limited', 'model_output_budget', 'model_stream_incomplete', 'qq_suppressed', 'loop_stall', 'alert')
             or (details or {}).get('delivery_status') in ('not_sent', 'unknown')
             or any(x in code for x in ('blocked', 'denied', 'not_allowed', 'missing', 'unconfirmed'))):
         return 'WARNING'

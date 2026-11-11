@@ -298,3 +298,85 @@ async def test_official_nonmention_events_observed_only_with_platform_allowlist(
     await bridge.handle_event(payload)
     assert len(chat.calls) == 1 and len([x for x in store.list_messages('qqofficial:group:gid') if x['role'] == 'user']) == 2
     assert not provider.calls
+
+
+GROUP = 'qq:group:202'
+
+
+def jargon_calls(provider):
+    """What each jargon request sent: [(term, has an explicit explanation), ...]."""
+    return [[(item['term'], item['explicit_explanation']) for item in json.loads(messages[-1]['content'])]
+            for messages, kwargs in provider.calls if kwargs['purpose'] == 'jargon_learning']
+
+
+async def chatter(chat, texts):
+    """One automatic batch: twelve messages from two members, then let the analysis finish."""
+    assert len(texts) == 12
+    chat.social._last_analysis.clear()  # the 180-second spacing is not what these tests are about
+    for index, text in enumerate(texts):
+        await chat.observe(GROUP, str(300 + index % 2), text)
+    if chat.social._jobs:
+        await asyncio.gather(*list(chat.social._jobs))
+
+
+def numbers(start, count=12):
+    return [str(start + index) for index in range(count)]  # digits alone are never a candidate
+
+
+@pytest.mark.anyio
+async def test_automatic_analysis_does_not_resend_what_the_model_already_judged(setup):
+    store, _, provider, chat, _ = setup
+    store.upsert_scope({'id': GROUP, 'dictionary_learn': True})
+    provider.reply = []  # the model finds no jargon in anything it is shown
+    await chatter(chat, [f'yyds 这波建议很不错 {index}' for index in range(12)])
+    await chatter(chat, numbers(1000))
+    settled = len(jargon_calls(provider))
+    sent = [term for call in jargon_calls(provider) for term, _ in call]
+    # More candidates than fit in one request are worked through, each once.
+    assert settled >= 1 and 'yyds' in sent and len(sent) == len(set(sent))
+    await chatter(chat, numbers(2000))
+    await chatter(chat, numbers(3000))
+    assert len(jargon_calls(provider)) == settled
+    assert '没有足够的新用例' in chat.social._state[GROUP]['message']
+    # Six uses the model has not seen bring back that one candidate, not the rest.
+    await chatter(chat, [f'yyds {index}' for index in range(4000, 4006)] + numbers(4100, 6))
+    assert jargon_calls(provider)[settled:] == [[('yyds', False)]]
+    # After a second "no" it takes twice as many: eight in one batch are not enough.
+    await chatter(chat, [f'yyds {index}' for index in range(5000, 5012)])
+    assert len(jargon_calls(provider)) == settled + 1
+    await chatter(chat, [f'yyds {index}' for index in range(6000, 6012)])
+    assert jargon_calls(provider)[settled + 1:] == [[('yyds', False)]]
+    assert not store.list_jargon(scope_id=GROUP)
+
+
+@pytest.mark.anyio
+async def test_a_new_explanation_or_a_manual_run_asks_again_at_once(setup):
+    store, _, provider, chat, _ = setup
+    store.upsert_scope({'id': GROUP, 'dictionary_learn': True})
+    provider.reply = []
+    await chatter(chat, [f'yyds 这波建议很不错 {index}' for index in range(12)])
+    await chatter(chat, numbers(1000))
+    await chatter(chat, numbers(2000))
+    settled = len(jargon_calls(provider))
+    # One new use is far from enough, but someone spelling the meaning out is.
+    await chatter(chat, ['我们群里“yyds”是指非常认可'] + numbers(3000, 11))
+    assert jargon_calls(provider)[settled:] == [[('yyds', True)]]
+    await chatter(chat, numbers(4000))
+    assert len(jargon_calls(provider)) == settled + 1
+    # Asking by hand looks at every candidate again.
+    await chat.social.analyze(GROUP)
+    manual = jargon_calls(provider)[-1]
+    assert len(jargon_calls(provider)) == settled + 2 and len(manual) > 1 and ('yyds', True) in manual
+
+
+@pytest.mark.anyio
+async def test_a_failed_analysis_is_not_remembered_as_judged(setup):
+    store, _, provider, chat, _ = setup
+    store.upsert_scope({'id': GROUP, 'dictionary_learn': True})
+    provider.reply = {'error': 'not a list'}
+    await chatter(chat, [f'yyds 这波建议很不错 {index}' for index in range(12)])
+    first = jargon_calls(provider)
+    assert len(first) == 1 and not chat.social._jargon_judged[GROUP]
+    provider.reply = []
+    await chatter(chat, numbers(1000))
+    assert jargon_calls(provider)[1] == first[0]

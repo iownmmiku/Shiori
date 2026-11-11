@@ -150,6 +150,26 @@ window.ShioriPages = (() => {
     else if(action === "copy-runtime-logs"){const text=logLines.map(item=>`${item.time || ""} ${item.level || "INFO"} ${item.message || ""}${item.summary ? "\n    " + item.summary : ""}${item.source === "runtime" && item.detail ? "\n" + item.detail.split("\n").map(line=>"    " + line).join("\n") : ""}`).join("\n");try{await navigator.clipboard.writeText(text);toast("已复制当前显示的日志。");}catch{openModal("复制日志","选择下面内容，按 Ctrl+C 复制。",textarea("logs","当前日志",text,"","readonly rows=\"12\""));}}
     else return false;return true;
   }
+  // Changing the address or key of a connection that live tasks run on takes
+  // effect at once and can silence the bot; the first save only explains
+  // that, the same save again goes through.
+  let sourceChangeAcknowledged = "";
+  function sourceInUse(id,payload) {
+    const existing = id && sources().find(item => item.id === id);
+    if(!existing) return "";
+    const addressChanged = String(payload.base_url || "").trim().replace(/\/+$/,"") !== String(existing.base_url || "").trim().replace(/\/+$/,"");
+    if(!addressChanged && !payload.api_key) return "";
+    const models = new Set((catalog.models || []).filter(item => item.provider_id === id || item.source_id === id).map(item => item.id));
+    const routing = catalog.routing || {}, labels = typeof routeNames === "object" ? routeNames : {};
+    const uses = Object.entries(routing).filter(([purpose,value]) => purpose !== "fallback" && models.has(value)).map(([purpose]) => String(labels[purpose] || purpose).split("（")[0]);
+    if((routing.fallback || []).some(value => models.has(value))) uses.push("备用模型");
+    if((state.settings?.prescreen || {}).source_id === id && (state.settings.prescreen.mode || "off") !== "off") uses.push("快速预筛");
+    if(!uses.length) return "";
+    const signature = [id,payload.base_url,payload.api_key ? "key" : ""].join("|");
+    if(sourceChangeAcknowledged === signature){ sourceChangeAcknowledged = ""; return ""; }
+    sourceChangeAcknowledged = signature;
+    return `这个供应商正在用于：${[...new Set(uses)].join("、")}。修改${addressChanged ? "地址" : "密钥"}会立刻影响它们，填错会让机器人停止回复。如果是要接入另一个服务，请取消后点“添加供应商”新建一个。确认要修改的话，请再点一次保存。`;
+  }
   async function handleSubmit(kind,form) {
     const data=getForm(form);
     if(kind === "model-source"){
@@ -159,6 +179,8 @@ window.ShioriPages = (() => {
       if(quick && !names.length)throw new Error("请选择一个聊天模型，或在下方手动填写准确的模型名称。");
       if(names.length > 200)throw new Error("一次最多添加 200 个模型，请缩小本次选择范围。");
       const payload={name:data.name,base_url:data.base_url,api_key:data.api_key || "",enabled:quick ? true : data.enabled};
+      const inUse=sourceInUse(data.id,payload);
+      if(inUse)throw new Error(inUse);
       const result=await api(data.id ? `/api/model-providers/${key(data.id)}` : "/api/model-providers",{method:data.id ? "PUT" : "POST",body:payload});
       const source=result.provider || result; const sourceId=data.id || source.id; if(!sourceId)throw new Error("供应商已保存，但没有返回有效编号，请刷新后添加模型。");
       selectedSource=sourceId;const idField=$('[name="id"]',form);if(idField)idField.value=sourceId;state.modalRecord=source;const secretField=$('[name="api_key"]',form);if(secretField)secretField.value="";
