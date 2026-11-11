@@ -38,7 +38,8 @@ class Settings:
         self.config = deepcopy(DEFAULTS)
         self.config['model'].update(base_url='https://test.invalid/v1', model='mock')
         self.config['onebot'].update(enabled=True, chat_policy='blacklist')
-        self.config['planner'].update(min_interval_ms=0)
+        # The local pre-filter runs before Jev and would take '哈哈哈哈' itself (tests/test_local_filter.py).
+        self.config['planner'].update(min_interval_ms=0, local_filter='off')
         self.config['time']['awareness_enabled'] = False
         self.config['provider_sources'] = [dict(SOURCE)]
         self.config['prescreen'] = dict(DEFAULTS['prescreen'], mode=mode, source_id='jev')

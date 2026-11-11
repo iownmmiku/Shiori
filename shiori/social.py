@@ -51,6 +51,50 @@ FEEDBACK_BOOST, FEEDBACK_HALF_LIFE = 40.0, 600.0
 _UNWANTED = re.compile(
     r'没(?:有)?(?:在)?(?:喊|叫|问|找|说|艾特|@)(?:的)?(?:是)?你|不是(?:在)?(?:喊|叫|问|说|找)你|谁(?:问|叫|喊|理|找)你了?'
     r'|没人(?:问|叫|喊|找|理)你|没跟你(?:说|讲|聊)|关你(?:什么|啥|屁|毛)事|没你(?:的)?事|(?:别|不要|少)(?:插嘴|插话|接话|多嘴)|闭嘴')
+# Local pre-filter (no model call). A batch of unprompted group messages
+# that holds nothing the Planner could weigh -- only pictures or stickers,
+# only emoji, digits or punctuation, or only a short reaction -- is skipped
+# when nobody in it was talking with the bot. On a live group over three
+# days these were about a fifth of all unprompted Planner calls, and the
+# Planner spoke on none of them. Anything with a question mark is kept, and
+# pictures are kept while image captions let the Planner see them.
+LOCAL_FILTER_MODES = ('off', 'shadow', 'on')
+LOCAL_FILTER_LABELS = {'picture': '只有图片或表情', 'symbols': '只有符号或数字', 'reaction': '只有一句短反应'}
+_PLACEHOLDER = re.compile(r'\[[^\[\]\s]{1,12}\]')      # [图片], [动画表情], sticker names such as [猫想要]
+_SYMBOLS = re.compile(r'[\W\d_]+')
+_REPEATED = re.compile(r'(?:哈|嘿|嘻|呵|嘎|噗|h|w|草|6|啊|嗯|哦|噢|呜|唔)+', re.IGNORECASE)
+REACTIONS = frozenset({
+    '好', '好的', '好吧', '行', '行吧', '可以', '对', '对的', '对啊', '是', '是的', '是啊', '确实', '真的', '有道理',
+    '笑死', '笑死我了', '绷', '难绷', '绷不住', '绷不住了', '没绷住', '乐', '乐了', '典', '急了', '赢', '赢麻了',
+    '牛', '牛逼', '牛啊', '强', '厉害', '6啊', 'nb', 'tql', 'xswl', 'awsl', 'ok', 'okk', 'yes',
+    '我去', '我靠', '卧槽', '我草', '坏了', '完了', '寄', '寄了', '麻了', '离谱', '绝了', '无语', '好家伙',
+    '来了', '收到', '了解', '懂了', '懂', '哎', '唉', '诶', '欸', '呃', '额', '啧'})
+_TRAILING = '。.!！~～…,，、'
+
+
+def local_filter_kind(messages, *, pictures_described=False):
+    """'picture', 'symbols' or 'reaction' when every message of a batch is that empty of content; None otherwise."""
+    kinds = []
+    for item in messages:
+        text = re.sub(r'\s+', '', str(item.get('content') or ''))
+        if '?' in text or '？' in text:
+            return None
+        if pictures_described and ((item.get('metadata') or {}).get('images') or '[图片]' in text):
+            return None                         # the Planner is shown what is in it
+        rest = _PLACEHOLDER.sub('', text)
+        if not rest:
+            kinds.append('picture')
+        elif _SYMBOLS.fullmatch(rest):
+            kinds.append('symbols')
+        else:
+            word = rest.strip(_TRAILING).lower()
+            if not word or word in REACTIONS or _REPEATED.fullmatch(word):
+                kinds.append('reaction')
+            else:
+                return None
+    return next((kind for kind in ('reaction', 'symbols', 'picture') if kind in kinds), None)
+
+
 # Pending jargon nobody reviews: looked at this often while messages arrive.
 JARGON_SWEEP_SECONDS = 3600.0
 JARGON_REASK_USES = 6
@@ -250,7 +294,7 @@ class SocialEngine:
 
     def _planner_options(self, scope):
         options = {'min_interval_ms': 1200, 'daily_calls': 300, 'daily_tokens': 12000, 'max_age_ms': 15000,
-                   'proactive_max_replies': 3, 'proactive_window_seconds': 600, 'eagerness': 50,
+                   'proactive_max_replies': 3, 'proactive_window_seconds': 600, 'eagerness': 50, 'local_filter': 'on',
                    **self.settings.get().get('planner', {})}
         return {key: _value(scope, 'planner_' + key) if _value(scope, 'planner_' + key) is not None else value
                 for key, value in options.items()}
@@ -453,6 +497,37 @@ class SocialEngine:
         """The bot answered this member within the follow-up window."""
         window = max(0, float(_value(scope, 'followup_seconds', 90)))
         return bool(window) and time.monotonic() - self._participants.get((scope['id'], str(user_id)), -float('inf')) <= window
+
+    def _batch_messages(self, scope_id, message):
+        """The stored messages behind a (possibly merged) planning request, each with its own text."""
+        ids = (message.get('metadata') or {}).get('merged_message_ids')
+        if not ids or ids == [message.get('id')]:
+            return [message]
+        found = self.store.ordered_messages(ids, scope_id=scope_id) if hasattr(self.store, 'ordered_messages') else []
+        return found if len(found) == len(set(ids)) else []
+
+    def _partner_set(self, scope, message):
+        """Members the bot was talking with, found the same way as for the Planner's timeline."""
+        scope_id, user_id = scope['id'], str(message.get('user_id', ''))
+        blocked = self._blocked_sources(scope_id)
+        records = self.history_fn(scope_id, user_id) if self.history_fn else self.store.list_messages(scope_id, limit=14)
+        bot_ids = ({x['id'] for x in records if x.get('role') == 'assistant'} if self.history_fn else
+                   {x['id'] for x in self._safe_bot_records(scope_id, user_id, blocked)})
+        return self._partners([x for x in records if x['id'] not in blocked], message, bot_ids)
+
+    def _local_filter(self, scope, message, cfg, partners=None):
+        """The local pre-filter's verdict for an unprompted batch: a kind from LOCAL_FILTER_LABELS, or None."""
+        batch = self._batch_messages(scope['id'], message)
+        described = bool((cfg.get('image_captions') or {}).get('enabled'))
+        kind = local_filter_kind(batch, pictures_described=described) if batch else None
+        if not kind:
+            return None
+        speakers = {str(item.get('user_id', '')) for item in batch} | {str(message.get('user_id', ''))}
+        if partners is None:
+            partners = self._partner_set(scope, message)
+        if any(speaker in partners or self._recent_partner(scope, speaker) for speaker in speakers):
+            return None
+        return kind
 
     def _room_state(self, scope_id, options):
         """How busy the room is and how often the bot spoke, for the Planner."""
@@ -854,6 +929,16 @@ class SocialEngine:
             if remaining > 0:
                 return decide('skip', 'Planner 连续失败后的短暂退避，本轮仅观察', semantic=False,
                               error_code='planner_backoff', retry_after_ms=round(remaining * 1000))
+            if options.get('local_filter', 'on') == 'on':
+                kind = self._local_filter(scope, message, cfg)
+                if kind:
+                    try:
+                        self.store.add_event('planner_local_skip', '本地预筛：没有可判断的内容，未调用 Planner', scope_id=scope_id,
+                                             outcome='skip', local_filter={'mode': 'on', 'kind': kind}, **self._plan_sources(message))
+                    except Exception:
+                        pass  # A log line cannot change the decision.
+                    return decide('skip', f'本地预筛：{LOCAL_FILTER_LABELS[kind]}，且不是在和机器人对话', semantic=False,
+                                  local_filter=kind)
         model = resolve_model(cfg, 'planner')
         if self.provider is None or not model.get('base_url') or not model.get('model'):
             if mention_planner:
@@ -918,6 +1003,11 @@ class SocialEngine:
         if self._recent_partner(scope, user_id):
             partners.add(str(user_id))
         partner = str(user_id) in partners
+        local_verdict = None
+        if unprompted and planner_options.get('local_filter') == 'shadow':
+            kind = self._local_filter(scope, message, cfg, partners=partners)
+            if kind:
+                local_verdict = {'mode': 'shadow', 'kind': kind}
         lines, current_from, current_to, partner_labels = self._timeline(
             visible, message, bot_ids, self._bot_accounts(cfg), partners)
         payload.update(history=lines, current_from=current_from, current_to=current_to,
@@ -1183,6 +1273,7 @@ class SocialEngine:
                         termination_reason=request_trace.get('termination_reason', ''),
                         **({'gate': gate} if gate else {}),
                         **({'prescreen': prescreen_verdict} if prescreen_verdict else {}),
+                        **({'local_filter': local_verdict} if local_verdict else {}),
                         **self._plan_sources(message),
                         **model_trace_snapshot(request_trace))
                 except Exception:
@@ -1872,6 +1963,7 @@ class ConversationFlow:
                 if any(part in reason for part in ('没有直接触发', '主动接话已关闭')): code = 'passive_only'
                 elif '主动接话已达上限' in reason: code = 'proactive_limit'
                 elif '接话门槛' in reason: code = 'proactive_threshold'
+                elif '本地预筛' in reason: code = 'local_filter'
                 elif any(part in reason for part in ('静默时段', '安静模式')): code = 'quiet'
                 elif any(part in reason for part in ('冷却', '判断间隔')): code = 'cooldown'
                 elif '打断' in reason: code = 'interrupted'

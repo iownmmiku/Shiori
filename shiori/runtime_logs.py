@@ -16,7 +16,7 @@ KIND_LABELS = {
     'qq_sent': '已发送', 'qq_delivery': '送达问题', 'qq_output': '分段发送', 'qq_outbox': '分段记录', 'qq_ingress': '收到消息',
     'qq_debounce': '消息合并', 'qq_suppressed': '停止发送', 'qq_reply_timing': '回复耗时', 'qq_rate_limited': '群限速',
     'qq_feedback': '失败提示', 'qq_image_error': '图片读取', 'qq_error': 'QQ 错误', 'qq_protocol_error': '协议错误',
-    'planner_timing': '回复判断', 'planner_prescreen': '快速预筛', 'planner_feedback': '接话反馈', 'jargon_digest': '待审提醒', 'topic_starter': '主动开话题', 'topic_starter_error': '开话题失败', 'planner_error': '判断失败', 'planner_format_retry': '格式重试', 'planner_batch_error': '集中判断失败',
+    'planner_timing': '回复判断', 'planner_prescreen': '快速预筛', 'planner_local_skip': '本地跳过', 'planner_feedback': '接话反馈', 'jargon_digest': '待审提醒', 'topic_starter': '主动开话题', 'topic_starter_error': '开话题失败', 'planner_error': '判断失败', 'planner_format_retry': '格式重试', 'planner_batch_error': '集中判断失败',
     'chat_timing': '生成回复', 'model': '备用模型', 'model_output_budget': '输出额度', 'model_stream_incomplete': '流中断',
     'model_call': '模型调用', 'memory_use': '使用记忆', 'memory_cursor': '整理进度', 'memory_extract_attempt': '开始整理',
     'memory_extract_result': '整理结果', 'memory_error': '整理失败', 'social': '黑话学习', 'social_error': '学习失败',
@@ -56,6 +56,17 @@ def _prescreen(verdict):
             f"{AUDIENCES.get(verdict.get('audience'), verdict.get('audience') or '')} · {decision} · {_ms(verdict.get('latency_ms'))}")
 
 
+LOCAL_FILTER = {'picture': '只有图片或表情', 'symbols': '只有符号或数字', 'reaction': '只有一句短反应'}
+
+
+def _local_filter(verdict):
+    """One line for the local pre-filter's verdict (social.local_filter_kind)."""
+    if not isinstance(verdict, dict) or not verdict.get('kind'):
+        return ''
+    label = LOCAL_FILTER.get(verdict['kind'], str(verdict['kind']))
+    return f'本地预筛（影子）：会跳过，{label}' if verdict.get('mode') == 'shadow' else f'本地预筛：{label}'
+
+
 def summary(kind, details):
     """One readable line of the details that matter for this kind of event."""
     d = details or {}
@@ -72,6 +83,9 @@ def summary(kind, details):
             parts.append('错误 ' + str(d['error_code']))
         parts.append('用时 ' + _ms(d.get('elapsed_ms')) if d.get('elapsed_ms') else '')
         parts.append(_prescreen(d.get('prescreen')))
+        parts.append(_local_filter(d.get('local_filter')))
+    elif kind == 'planner_local_skip':
+        parts += ['未调用 Planner', _local_filter(d.get('local_filter'))]
     elif kind == 'planner_prescreen':
         if d.get('planner_outcome'):
             gate = d.get('gate') or {}

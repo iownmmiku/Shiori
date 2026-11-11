@@ -69,17 +69,26 @@ def activity(store, params):
             params).fetchall()
         decisions = connection.execute(
             'SELECT kind,' + ','.join(path % key for key in (
-                'outcome', 'gate.result', 'prescreen.mode', 'prescreen.ok', 'prescreen.screened'))
-            + ",COUNT(*) FROM events WHERE kind IN ('planner_timing','planner_prescreen') AND created_at>=? AND created_at<?"
-            " GROUP BY 1,2,3,4,5,6", params).fetchall()
+                'outcome', 'gate.result', 'prescreen.mode', 'prescreen.ok', 'prescreen.screened', 'local_filter.mode'))
+            + ",COUNT(*) FROM events WHERE kind IN ('planner_timing','planner_prescreen','planner_local_skip')"
+            " AND created_at>=? AND created_at<? GROUP BY 1,2,3,4,5,6,7", params).fetchall()
         unwanted = connection.execute(
             "SELECT COUNT(*) FROM events WHERE kind='planner_feedback' AND created_at>=? AND created_at<?", params).fetchone()[0]
     waits = [total - flow for total, flow, *_ in replies if isinstance(total, (int, float)) and isinstance(flow, (int, float))]
     columns = list(zip(*replies)) if replies else [[]] * 7
     outcome = {'reply': 0, 'skip': 0, 'failed': 0, 'cancelled': 0}
     screen = {'mode': 'off', 'judged': 0, 'screened': 0, 'failed': 0}
+    local = {'mode': 'off', 'skipped': 0, 'would_skip': 0}
     planner_calls = unprompted = 0
-    for kind, result, gate, mode, ok, screened, count in decisions:
+    for kind, result, gate, mode, ok, screened, local_mode, count in decisions:
+        if kind == 'planner_local_skip':
+            # Skipped before the Planner: no planner_timing record exists for these.
+            local['skipped'] += count
+            local['mode'] = 'on'
+            continue
+        if local_mode == 'shadow':
+            local['would_skip'] += count
+            local['mode'] = local['mode'] if local['mode'] == 'on' else 'shadow'
         if kind == 'planner_timing':
             planner_calls += count
             outcome[result if result in outcome else 'skip'] += count
@@ -98,7 +107,7 @@ def activity(store, params):
             'replies': {'count': len(replies), 'median_ms': {
                 'total': _median(columns[0]), 'wait': _median(waits), 'planner': _median(columns[2]), 'memory': _median(columns[3]),
                 'context': _median(columns[4]), 'model': _median(columns[5]), 'delivery': _median(columns[6])}},
-            'decisions': {'planner_calls': planner_calls, 'outcomes': outcome, 'prescreen': screen,
+            'decisions': {'planner_calls': planner_calls, 'outcomes': outcome, 'prescreen': screen, 'local_filter': local,
                           'unprompted_replies': unprompted, 'unwanted_replies': int(unwanted)}}
 
 

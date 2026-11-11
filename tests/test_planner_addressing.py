@@ -194,6 +194,7 @@ async def test_a_bystander_right_after_the_bots_line_is_not_taken_as_talking_to_
 async def test_a_picture_from_a_bystander_is_not_taken_as_said_to_the_bot(setup):
     store, settings, planner, social = setup
     settings.config['planner']['eagerness'] = 25
+    settings.config['planner']['local_filter'] = 'off'   # by default a bystander's bare picture never reaches the Planner
     seven = say(store, '94354530', '这次坐了七个站才发觉', name='虚勢丶')
     store.add_message(GROUP, 'assistant', 'assistant', '你是和地铁杠上了吗', source_ids=[seven['id']])
     planner.plan = {'audience': 'bot', 'addressed_to_bot': True, 'value': 90, 'speaker_intent': '发图吓唬你'}

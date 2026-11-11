@@ -77,7 +77,7 @@ DEFAULTS = {
     'planner': {'min_interval_ms':1200, 'daily_calls':300, 'daily_tokens':12000, 'max_age_ms':15000,
                 'group_batch_ms':1500,'group_batch_messages':4,
                 'proactive_max_replies':3,'proactive_window_seconds':600,'eagerness':50,
-                'structured_output':'auto','format_retry_enabled':False},
+                'structured_output':'auto','format_retry_enabled':False,'local_filter':'on'},
     'prescreen': dict(PRESCREEN_DEFAULTS),
     'alerts': dict(ALERT_DEFAULTS),
     'image_captions': dict(IMAGE_CAPTION_DEFAULTS),
@@ -776,6 +776,8 @@ class Settings:
                 raise ValueError('回复判断输出格式须为auto、off、json_object或json_schema')
             if type(updated['planner']['format_retry_enabled']) is not bool:
                 raise ValueError('备用回复判断开关须为布尔值')
+            if updated['planner'].get('local_filter', 'on') not in ('off', 'shadow', 'on'):
+                raise ValueError('本地预筛须为 off、shadow 或 on')
             debounce = updated['debounce']
             if type(debounce['enabled']) is not bool:
                 raise ValueError('消息防抖开关须为布尔值')
