@@ -1,6 +1,6 @@
 # Shiori 0.2.3-beta
 
-> **[0.2.3-beta 预发布版](https://github.com/iownmmiku/Shiori/releases/tag/v0.2.3-beta)**：可选的快速预筛（Jev）、故障时私聊提醒管理员、按用途和步骤的统计、设置历史与恢复、待审黑话的过期与 QQ 审核、群图片描述、冷场时主动开话题、从本地安装包更新，并修复大群里每次回复都会卡住一两秒的问题。详见[更新日志](RELEASE_NOTES.md)。
+> **[0.2.3-beta 预发布版](https://github.com/iownmmiku/Shiori/releases/tag/v0.2.3-beta)**：不调用模型的本地预筛、可选的快速预筛（Jev）、故障时私聊提醒管理员、按用途和步骤的统计、设置历史与恢复、待审黑话的过期与 QQ 审核、群图片描述、冷场时主动开话题、从本地安装包更新，并修复大群里每次回复都会卡住一两秒的问题。详见[更新日志](RELEASE_NOTES.md)。
 
 > **稳定版仍为 [0.2.2](https://github.com/iownmmiku/Shiori/releases/tag/v0.2.2)**：包含 0.2.2-beta 的 QQ 群发言限速、接话积极度、对话对象判断、WebUI 保持登录和表情包全库通用，并新增：只把刚聊过的人当作在对它说话、原创默认人格林星遥、表情包上限与锁定，以及更完整的长期记忆（参考上下文、第三人称带昵称、标题、重要度、有效期、话题、合并重复）。详见[更新日志](RELEASE_NOTES.md)。
 
