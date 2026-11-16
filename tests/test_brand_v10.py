@@ -56,15 +56,31 @@ def test_icons_come_from_the_owners_artwork_master():
         assert alpha.getpixel((256, 256)) == 255
 
 
+def _svg_parts(path):
+    """The SVG markup with its embedded PNG taken out, and that PNG's pixels.
+
+    zlib builds differ between platforms, so the PNG bytes inside the SVG are
+    not stable; its markup and its pixels are.
+    """
+    import base64
+    import io
+    import re
+    text = path.read_text('utf-8').replace('\r\n', '\n')
+    match = re.search(r'href="data:image/png;base64,([^"]+)"', text)
+    assert match, path
+    with Image.open(io.BytesIO(base64.b64decode(match.group(1)))) as image:
+        pixels = (image.size, image.mode, image.tobytes())
+    return text.replace(match.group(1), ''), pixels
+
+
 def test_asset_builder_reproduces_bundled_vectors_and_rasters(tmp_path):
     spec = importlib.util.spec_from_file_location('shiori_build_icons', ROOT / 'scripts' / 'build_icons.py')
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     module.build(tmp_path, preview=False)
     for kind in ('app', 'avatar', 'mark', 'tray', 'tray-light'):
-        # A Windows checkout may turn the bundled file's line ending into CRLF; the builder always writes LF.
-        bundled_svg = (ASSETS / f'{kind}.svg').read_bytes().replace(b'\r\n', b'\n')
-        assert (tmp_path / f'{kind}.svg').read_bytes() == bundled_svg
+        assert not (tmp_path / f'{kind}.svg').read_bytes().count(b'\r'), 'the builder writes LF'
+        assert _svg_parts(tmp_path / f'{kind}.svg') == _svg_parts(ASSETS / f'{kind}.svg')
         ElementTree.parse(tmp_path / f'{kind}.svg')
         for size in SIZES:
             with Image.open(tmp_path / f'{kind}-{size}.png') as rebuilt, Image.open(ASSETS / f'{kind}-{size}.png') as bundled:
