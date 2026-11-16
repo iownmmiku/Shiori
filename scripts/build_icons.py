@@ -100,7 +100,7 @@ def svg(kind: str) -> str:
 def build(destination: Path = ASSETS, *, preview: bool = True):
     destination.mkdir(parents=True, exist_ok=True)
     for kind in KINDS:
-        (destination / f'{kind}.svg').write_text(svg(kind), encoding='utf-8')
+        (destination / f'{kind}.svg').write_text(svg(kind), encoding='utf-8', newline='\n')
         for size in SIZES:
             render(kind, size).save(destination / f'{kind}-{size}.png', optimize=True)
     frames = [render('app', size) for size in SIZES]

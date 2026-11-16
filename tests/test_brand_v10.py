@@ -62,7 +62,9 @@ def test_asset_builder_reproduces_bundled_vectors_and_rasters(tmp_path):
     spec.loader.exec_module(module)
     module.build(tmp_path, preview=False)
     for kind in ('app', 'avatar', 'mark', 'tray', 'tray-light'):
-        assert (tmp_path / f'{kind}.svg').read_bytes() == (ASSETS / f'{kind}.svg').read_bytes()
+        # A Windows checkout may turn the bundled file's line ending into CRLF; the builder always writes LF.
+        bundled_svg = (ASSETS / f'{kind}.svg').read_bytes().replace(b'\r\n', b'\n')
+        assert (tmp_path / f'{kind}.svg').read_bytes() == bundled_svg
         ElementTree.parse(tmp_path / f'{kind}.svg')
         for size in SIZES:
             with Image.open(tmp_path / f'{kind}-{size}.png') as rebuilt, Image.open(ASSETS / f'{kind}-{size}.png') as bundled:
