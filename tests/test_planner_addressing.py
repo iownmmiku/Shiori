@@ -220,6 +220,46 @@ async def test_talking_with_the_bot_lapses_after_ten_minutes(setup):
     assert planner.payload()['your_partners'] == ['404'] and result['reply'] and result['addressed_to_bot']
 
 
+@pytest.mark.anyio
+async def test_a_line_meant_for_another_member_is_not_answered_as_if_said_to_the_bot(setup):
+    """Replays production misfires on 0.2.3-beta: the Planner said a line was
+    for another member, still scored it 85, and the reply answered it as if it
+    had been said to the bot ("你是属于害羞" -> "哈？谁害羞了")."""
+    from shiori.runtime_logs import summary
+    store, settings, planner, social = setup
+    settings.config['planner']['eagerness'] = 25  # threshold 82.5
+    say(store, '303', '别骂我', name='阿九')
+    say(store, '404', 'bb你们不一样', name='小林')
+    planner.plan = {'audience': 'member', 'value': 85, 'speaker_intent': '在说阿九害羞'}
+    result = await social.plan(store.get_scope(GROUP), say(store, '404', '你是属于害羞', name='小林'))
+    assert not result['reply'] and '对其他成员说' in result['reason'] and result['audience'] == 'member'
+    assert gate(store) == {'value': 69, 'planner_value': 85, 'member_audience': True, 'threshold': 82.5,
+                           'eagerness': 25, 'scored': True, 'audience': 'member', 'result': 'below_threshold'}
+    assert 'Planner 原给 85' in summary('planner_timing', {'outcome': 'skip', 'gate': gate(store)})
+    # An ordinary low score is left alone and not marked.
+    planner.plan = {'audience': 'member', 'value': 20, 'action': 'skip'}
+    await social.plan(store.get_scope(GROUP), say(store, '303', '才不是', name='阿九'))
+    assert gate(store)['value'] == 20 and 'member_audience' not in gate(store) and 'planner_value' not in gate(store)
+    assert 'Planner 原给' not in summary('planner_timing', {'outcome': 'skip', 'gate': gate(store)})
+    # A line for the whole group is not capped.
+    planner.plan = {'audience': 'group', 'value': 85, 'speaker_intent': '叫大家一起骂'}
+    result = await social.plan(store.get_scope(GROUP), say(store, '505', '要不咱一起骂两句出出气', name='阿柒'))
+    assert result['reply'] and gate(store)['result'] == 'reply' and gate(store)['value'] == 85
+
+
+@pytest.mark.anyio
+async def test_someone_talking_with_the_bot_can_still_draw_it_into_a_side_remark(setup):
+    store, settings, planner, social = setup
+    settings.config['planner']['eagerness'] = 25
+    asked = say(store, '303', '这关好难', name='阿九')
+    store.add_message(GROUP, 'assistant', 'assistant', '多练练就好', source_ids=[asked['id']])
+    planner.plan = {'audience': 'member', 'value': 85, 'speaker_intent': '让小林也来试试'}
+    result = await social.plan(store.get_scope(GROUP), say(store, '303', '小林你也来打打看', name='阿九'))
+    assert planner.payload()['your_partners'] == ['阿九(303)']
+    assert result['reply'] and not result['addressed_to_bot'] and result['audience'] == 'member'
+    assert gate(store)['result'] == 'reply' and 'member_audience' not in gate(store)
+
+
 def test_ascii_quotes_inside_a_value_no_longer_fail_the_plan():
     """Seen in production: speaker_intent quoting a chat line with ASCII quotes
     made 13 of 812 plans invalid JSON. Escaping them keeps the model's own

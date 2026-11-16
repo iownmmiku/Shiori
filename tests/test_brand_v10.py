@@ -34,18 +34,26 @@ def test_windows_icon_contains_all_display_sizes_and_alpha():
             assert frame.getpixel((size // 2, size // 2))[3] > 250
 
 
-def test_tray_is_transparent_and_switches_contrast():
+def test_tray_is_the_full_colour_tile_on_any_taskbar():
     light = tray_image(dark_theme=False)
     dark = tray_image(dark_theme=True)
     assert light.size == dark.size == (64, 64)
-    assert light.getpixel((0, 0))[3] == dark.getpixel((0, 0))[3] == 0
-    # Compare opaque pixels; resampling the curved S edge introduces antialiasing.
-    assert any(pixel == (16, 70, 76, 255) for y in range(64) for x in range(64) for pixel in [light.getpixel((x, y))])
-    assert dark.getpixel((32, 37))[:3] == (255, 255, 255)
-    # The tray mark deliberately fills more of the 16px canvas than the app glyph.
+    # The picture reads on light and dark taskbars alike, so both themes get the same image.
+    assert light.tobytes() == dark.tobytes()
+    assert light.getpixel((0, 0))[3] == 0 and light.getpixel((32, 32))[3] == 255
+    # The rounded tile fills the small canvas instead of shrinking inside it.
     with Image.open(ASSETS / 'tray-16.png') as tiny:
         left, _, right, _ = tiny.getchannel('A').getbbox()
         assert right - left >= 14
+
+
+def test_icons_come_from_the_owners_artwork_master():
+    with Image.open(ASSETS / 'icon-master.png') as master:
+        assert master.size == (512, 512) and master.mode == 'RGBA'
+        alpha = master.getchannel('A')
+        # The white page around the rounded tile is transparent, the tile itself opaque.
+        assert alpha.getpixel((0, 0)) == alpha.getpixel((511, 511)) == 0
+        assert alpha.getpixel((256, 256)) == 255
 
 
 def test_asset_builder_reproduces_bundled_vectors_and_rasters(tmp_path):

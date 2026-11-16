@@ -142,7 +142,9 @@ def test_ambiguous_stickers_are_quarantined_until_manually_labelled(library,clea
     assert item['category']=='待标注' and not item['clear']
     assert asyncio.run(engine.choose('qq:group:1','123','谢谢','谢谢你',lambda:True)) is None
     with pytest.raises(ValueError):engine.update(item['id'],{'clear':True})
-    edited=engine.update(item['id'],{'clear':True,'meaning':'友好地表示感谢','category':'礼貌','tags':['感谢']})
+    with pytest.raises(ValueError,match='固定分类'):
+        engine.update(item['id'],{'clear':True,'meaning':'友好地表示感谢','category':'礼貌','tags':['感谢']})
+    edited=engine.update(item['id'],{'clear':True,'meaning':'友好地表示感谢','category':'感谢','tags':['感谢']})
     assert edited['confidence']==1 and edited['version']==2
     chosen=asyncio.run(engine.choose('qq:group:1','123','谢谢','谢谢你',lambda:True))
     assert chosen['id']==item['id'] and chosen['version']==2

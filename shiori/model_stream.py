@@ -14,6 +14,11 @@ import httpx
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 MAX_LINE_BYTES = 256 * 1024
 FILTER_USAGE_GRACE_SECONDS = 1.0
+# While a stream is open, re-check request authority at most once a second,
+# and leave at least three times a check's own duration between checks so a
+# slow check (a long chat's sources) cannot occupy the event loop.
+CHECK_INTERVAL_SECONDS = 1.0
+CHECK_SPACING = 3.0
 # Matches the local reconciliation ceiling, comfortably above supported model
 # contexts while leaving ample headroom for SQLite's signed 64-bit daily sums.
 MAX_USAGE_TOKENS = 100000000
@@ -241,10 +246,17 @@ async def _receive_chat(client, url, payload, headers, *, first_token_seconds, c
                 data_lines.append(value[5:].lstrip(' '))
 
         iterator = response.aiter_bytes().__aiter__()
+        next_check = 0.0
         try:
             while not done:
-                if check:
+                # The authority check re-reads sources and memories. Per chunk
+                # it piled up whenever a relay delivered a burst at once; the
+                # check after the loop still runs before any result is used.
+                if check and time.monotonic() >= next_check:
+                    began = time.monotonic()
                     check()
+                    finished_at = time.monotonic()
+                    next_check = finished_at + max(CHECK_INTERVAL_SECONDS, CHECK_SPACING * (finished_at - began))
                 remaining = first_token_seconds - (time.monotonic() - started)
                 if content_filtered and (time.monotonic() - filtered_at >= FILTER_USAGE_GRACE_SECONDS
                                          or _complete_usage(usage)):

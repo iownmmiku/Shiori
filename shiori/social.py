@@ -33,7 +33,11 @@ UNSCORED_REPLY_VALUE = 75  # a reply from a model that gave no score
 # Without @, a quote or its name, a message is taken as said to the bot only
 # from someone it was talking with in the last PARTNER_SECONDS. Anyone else
 # the Planner calls its audience goes through the threshold as unprompted
-# speech, its score held to the top of the "could join in" band.
+# speech, its score held to the top of the "could join in" band. The same cap
+# holds for a line the Planner itself says was meant for another member, from
+# someone the bot was not talking with: on a live group the Planner still
+# scored such lines 85-90 now and then ("是你吗", "你是属于害羞"), and the
+# reply then answered them as if they had been said to the bot.
 PARTNER_SECONDS = 600.0
 IMPLICIT_VALUE_CAP = 69
 # Automatic jargon analysis looks at a window of recent messages that moves by
@@ -210,7 +214,7 @@ def _topic(text):
     words = set(re.findall(r'[a-z][a-z0-9_]{1,20}', str(text).casefold()))
     for run in re.findall(r'[\u3400-\u9fff]{2,}', str(text)):
         words.update(run[i:i + 2] for i in range(len(run) - 1))
-    return words - {'初音', '未来', 'miku', '林星', '星遥', '阿遥', '帮我', '请问', '一下', '这个', '那个', '怎么', '为什么', '知道', '觉得', '大家', '有人', '能不能'}
+    return words - {'初音', '未来', 'miku', '林星', '星遥', '阿遥', '佐藤', '藤栞', '小栞', '栞酱', '帮我', '请问', '一下', '这个', '那个', '怎么', '为什么', '知道', '觉得', '大家', '有人', '能不能'}
 
 
 def _incomplete(text):
@@ -1197,6 +1201,11 @@ class SocialEngine:
                         addressed, hints = False, {}
                         gate.update(value=min(score, IMPLICIT_VALUE_CAP), planner_value=score, implicit_audience=True)
                         score = gate['value']
+                    elif audience == 'member' and not partner and score > IMPLICIT_VALUE_CAP:
+                        # Joining in here means answering for the member who
+                        # was spoken to; it is ordinary joining in at most.
+                        gate.update(value=IMPLICIT_VALUE_CAP, planner_value=score, member_audience=True)
+                        score = gate['value']
                     to_bot = addressed and choice['action'] == 'reply'
                     if to_bot:
                         gate['result'] = 'addressed'
@@ -1212,6 +1221,8 @@ class SocialEngine:
                         held = f'接话价值 {score} 低于当前门槛 {threshold:g}'
                         if gate.get('implicit_audience'):
                             held = '对方近期没有和你对话，也没有@、引用或叫名字，按普通接话：' + held
+                        elif gate.get('member_audience'):
+                            held = '这句是对其他成员说的，对方近期也没有和你对话，按普通接话：' + held
                         return decide('skip', reason if choice['action'] == 'skip' else held, addressed_to_bot=False,
                                       intent=intent, needed_info=needed, semantic=True, explicit=False,
                                       value=score, threshold=threshold, **hints)
@@ -2173,7 +2184,11 @@ class ConversationFlow:
             return False
         from .delivery import NOT_SENT, DeliveryLedger
         ledger=DeliveryLedger(self.store)
-        receipt=ledger.create(scope_id,user_id,parts,metadata,batch) if parts and batch.get('logical_message_id') else None
+        # The receipt fingerprints every message the reply drew on. A long
+        # private chat cites over a thousand earlier messages (tens of MB of
+        # rows), which held the event loop for seconds per reply.
+        receipt=(await asyncio.to_thread(ledger.create,scope_id,user_id,parts,metadata,batch)
+                 if parts and batch.get('logical_message_id') else None)
         confirmed = 0
         current = lambda: self._may_answer(scope_id, user_id, batch)
         for index, part in enumerate(parts, 1):

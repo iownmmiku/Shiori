@@ -211,7 +211,7 @@ async def test_a_slow_shadow_answer_is_recorded_when_it_lands(setup):
 async def test_messages_said_to_the_bot_never_go_through_the_screen(setup):
     store, planner, relay = setup, Planner(), Jev(jev(0.01))
     social = engine(store, Settings('screen'), planner, relay)
-    await social.plan(store.get_scope(GROUP), say(store, '303', '林星遥你在吗', at_bot=True), direct=True)
+    await social.plan(store.get_scope(GROUP), say(store, '303', '佐藤栞你在吗', at_bot=True), direct=True)
     await social.plan(store.get_scope(GROUP), say(store, '303', '回我一下', reply_to_bot=True), reply_to_bot=True)
     assert not relay.requests
     await social.close()

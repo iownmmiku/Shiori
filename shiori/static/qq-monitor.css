@@ -4,10 +4,10 @@
 :root .qq-sidebar{display:flex;flex-direction:column;min-width:0;min-height:0;border-right:1px solid var(--line)}
 :root .qq-list-toolbar{padding:16px;border-bottom:1px solid var(--line)}
 :root .qq-search{display:flex;align-items:center;gap:8px;border:1px solid var(--line-3);border-radius:10px;background:var(--panel);padding:8px 11px;min-width:0;transition:border-color .2s,box-shadow .25s}
-:root .qq-search:focus-within{border-color:var(--teal);box-shadow:0 0 0 3px #17a5962b}
+:root .qq-search:focus-within{border-color:var(--teal);box-shadow:0 0 0 3px #8959472b}
 :root .qq-search svg{width:15px;height:15px;flex-shrink:0;color:var(--muted)}
 :root .qq-search input{width:100%;min-width:0;border:0;background:transparent;padding:2px;font:inherit;font-size:12.5px;color:var(--ink);border-radius:0;outline:0}
-:root .qq-kind-tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:2px;margin-top:12px;padding:3px;border-radius:11px;background:#12302d0d}
+:root .qq-kind-tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:2px;margin-top:12px;padding:3px;border-radius:11px;background:#2b27340d}
 :root .qq-kind-tabs button{background:transparent;border:0;border-radius:8px;padding:6px 4px;transition:background .25s var(--ease),color .2s,box-shadow .25s;color:var(--ink-2);font:inherit;font-size:12px;cursor:pointer}
 :root .qq-kind-tabs button.active{background:var(--panel);color:var(--ink);font-weight:600;box-shadow:var(--sh-1)}
 :root .qq-conversations{min-height:0;overflow-y:auto;overflow-x:hidden}

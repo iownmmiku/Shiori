@@ -1,0 +1,54 @@
+/* Shiori's character, 佐藤栞, in the web console. Art lives in assets/character
+   (cut from the owner's character sheets); colours come from theme.css tokens.
+   Loaded last so it can replace the older brand glyphs; the app icon stays. */
+:root{
+  --char-avatar:url('/static/assets/character/avatar.jpg');
+  --char-portrait:url('/static/assets/character/portrait.png');
+  --char-quiet:url('/static/assets/character/chibi-quiet.png');
+  --char-pout:url('/static/assets/character/chibi-pout.png');
+  --char-angry:url('/static/assets/character/chibi-angry.png');
+  --char-coffee:url('/static/assets/character/coffee.png');
+  --char-cream:#f3e6dc;
+}
+
+/* The assistant's face in chats. */
+:root .chat-avatar,:root .message.assistant .message-avatar{background:var(--char-cream) var(--char-avatar) center/cover no-repeat!important;border-radius:50%!important;color:transparent!important;font-size:0!important;box-shadow:0 0 0 2px var(--panel),0 6px 14px -8px #3a344680!important}
+:root .message.assistant .message-avatar>*{visibility:hidden}
+
+/* Empty conversation: she waits quietly instead of the bubble glyph. */
+:root .chat-welcome-glyph,:root .chat-workspace-standalone .chat-welcome-glyph{width:118px!important;height:129px!important;margin:0 auto 12px!important;background:var(--char-quiet) center bottom/contain no-repeat!important;border-radius:0!important;box-shadow:none!important;outline:0!important;color:transparent!important;font-size:0!important}
+@media(max-width:760px){:root .chat-workspace-standalone .chat-welcome-glyph{width:84px!important;height:92px!important}}
+
+/* Empty lists anywhere in the console. */
+:root .empty-state .empty-symbol{width:92px;height:100px;margin-inline:auto;background:var(--char-quiet) center bottom/contain no-repeat;border:0;border-radius:0;box-shadow:none;color:transparent}
+:root .empty-state .empty-symbol>*{display:none}
+
+/* A page that failed to load: a cross face next to the message. */
+:root #content>.inline-error{position:relative;min-height:118px;padding:20px 20px 20px 128px;display:flex;align-items:center;line-height:1.8}
+:root #content>.inline-error::before{content:"";position:absolute;left:18px;bottom:0;width:96px;height:110px;background:var(--char-angry) center bottom/contain no-repeat}
+
+/* Overview hero: she sits at the right end of the banner. */
+:root .home-intro{background:var(--char-quiet) right clamp(150px,14vw,200px) bottom -4px/132px 144px no-repeat,linear-gradient(120deg,var(--slab) 0%,#3c354c 55%,#61453b 100%)}
+@media(max-width:1280px){:root .home-intro{background:linear-gradient(120deg,var(--slab) 0%,#3c354c 55%,#61453b 100%)}}
+
+/* Quick start banner: she peeks in from the right. */
+:root .wizard-banner{position:relative;overflow:hidden}
+:root .wizard-banner::after{content:"";position:absolute;right:56px;bottom:-6px;width:104px;height:114px;background:var(--char-quiet) center bottom/contain no-repeat;pointer-events:none}
+:root .wizard-banner>*{position:relative;z-index:1}
+:root .wizard-banner .quick-close{z-index:2}
+@media(max-width:640px){:root .wizard-banner::after{display:none}}
+
+/* Sign-in: half-body portrait beside the card on wide screens, a small
+   pouting face above the card on narrow ones. Only on real sign-in screens
+   (with a form), not the brief "checking" placeholder every page load shows. */
+:root .auth-page::before{background:radial-gradient(circle,#8c5b4c2e,transparent 65%)}
+@media(min-width:980px){
+  :root .auth-page:has(form){padding-right:min(34vw,480px)}
+  :root .auth-page:has(form)::after{right:max(2vw,calc(50% - 660px));bottom:0;top:auto;left:auto;width:min(33vw,440px);height:auto;aspect-ratio:560/813;border-radius:0;filter:drop-shadow(0 18px 40px #3a344633);background:var(--char-portrait) center bottom/contain no-repeat;animation:char-rise .9s var(--ease) both}
+}
+@media(max-width:979px){
+  :root .auth-card:has(form){margin-top:64px}
+  :root .auth-card:has(form)::before{content:"";position:absolute;right:26px;top:-78px;width:84px;height:81px;background:var(--char-pout) center bottom/contain no-repeat;pointer-events:none}
+}
+@keyframes char-rise{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:none}}
+@media(prefers-reduced-motion:reduce){:root .auth-page::after{animation:none}}

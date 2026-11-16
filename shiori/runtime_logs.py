@@ -78,6 +78,8 @@ def summary(kind, details):
             parts.append(f"价值 {gate.get('value')} / 门槛 {gate.get('threshold')}")
             if gate.get('audience'):
                 parts.append(AUDIENCES.get(gate['audience'], gate['audience']))
+            if gate.get('planner_value') is not None and gate.get('planner_value') != gate.get('value'):
+                parts.append(f"Planner 原给 {gate['planner_value']}，对方近期没和它对话，按普通接话封顶")
             parts.append(GATES.get(gate.get('result'), ''))
         if d.get('error_code'):
             parts.append('错误 ' + str(d['error_code']))

@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shiori · 本机运行的 AI 聊天伙伴</title>
+<meta name="description" content="Shiori 是在你自己电脑上运行的 AI 聊天机器人与任务助手：独立聊天、QQ 接入、长期记忆、群语言学习和电脑任务。看板娘：佐藤栞。">
+<meta property="og:title" content="Shiori · 本机运行的 AI 聊天伙伴">
+<meta property="og:description" content="独立聊天 · QQ 接入 · 长期记忆 · 电脑任务。看板娘：佐藤栞。">
+<meta property="og:image" content="https://iownmmiku.github.io/Shiori/assets/banner.jpg">
+<meta name="theme-color" content="#3a3446">
+<link rel="icon" href="assets/character/avatar.jpg">
+<style>
+:root{
+  color-scheme:light;
+  --paper:#f7f0e9;--paper-2:#f2e6dc;--panel:#fffcf9;--wash:#f5e7de;--wash-2:#efddd1;
+  --ink:#2a2127;--ink-2:#4f4247;--muted:#75676a;--line:#ebdfd6;
+  --chestnut:#8c5b4c;--chestnut-d:#6b4337;--plum:#3a3446;--plum-2:#4a4357;--coral:#c4493f;--amber:#b87a4b;
+  --r:16px;--shadow:0 18px 40px -22px #3a344659,0 2px 6px -2px #3a34461a;
+  --font:"Segoe UI Variable Text","Segoe UI","Microsoft YaHei UI","Microsoft YaHei","PingFang SC","Noto Sans SC",system-ui,sans-serif;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.75 var(--font);-webkit-font-smoothing:antialiased}
+img{max-width:100%;height:auto;display:block}
+a{color:var(--chestnut-d)}
+.wrap{width:min(1120px,100% - 32px);margin-inline:auto}
+header.top{position:sticky;top:0;z-index:5;background:#f7f0e9e6;-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);border-bottom:1px solid var(--line)}
+header.top .wrap{display:flex;align-items:center;justify-content:space-between;height:60px;gap:16px}
+.mark{display:flex;align-items:center;gap:10px;font-weight:700;font-size:21px;color:var(--ink);text-decoration:none;letter-spacing:.2px}
+.mark img{width:34px;height:34px;border-radius:50%;box-shadow:0 0 0 2px var(--panel),0 4px 10px -4px #3a344666}
+.mark b{color:var(--chestnut)}
+nav{display:flex;gap:22px;font-size:14px}
+nav a{color:var(--ink-2);text-decoration:none}
+nav a:hover{color:var(--chestnut-d)}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:12px 20px;border-radius:999px;font-weight:650;font-size:15px;text-decoration:none;border:1px solid transparent;transition:transform .2s,box-shadow .2s,background .2s}
+.btn.primary{background:linear-gradient(180deg,#9a6555,var(--chestnut));color:#fff;box-shadow:0 10px 22px -12px #6b4337cc}
+.btn.primary:hover{transform:translateY(-1px);box-shadow:0 14px 26px -12px #6b4337}
+.btn.ghost{background:var(--panel);border-color:var(--line);color:var(--ink)}
+.btn.ghost:hover{border-color:#dacabe}
+.hero{position:relative;overflow:hidden;padding:56px 0 0}
+.hero::before{content:"";position:absolute;width:760px;height:760px;right:-160px;top:-120px;border-radius:50%;background:radial-gradient(circle,#efd9cb,transparent 66%);pointer-events:none}
+.hero .wrap{position:relative;display:grid;grid-template-columns:1.05fr .95fr;align-items:end;gap:24px}
+.hero-copy{padding-bottom:84px}
+.eyebrow{display:inline-block;padding:4px 14px;border-radius:999px;background:var(--wash-2);color:var(--chestnut-d);font-size:13px;font-weight:650;letter-spacing:.5px}
+h1{font-size:clamp(52px,8vw,96px);line-height:1;margin:18px 0 18px;letter-spacing:-1px}
+h1 b{color:var(--chestnut)}
+.lead{font-size:clamp(19px,2.2vw,24px);font-weight:650;color:var(--ink-2);margin:0 0 10px}
+.hero p.sub{color:var(--muted);max-width:520px;margin:0 0 28px}
+.cta{display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+.cta small{display:block;width:100%;color:var(--muted);font-size:13px;margin-top:4px}
+.hero-art{position:relative;justify-self:center;width:min(440px,100%)}
+.hero-art img{filter:drop-shadow(0 22px 40px #3a344640)}
+.bubble{position:absolute;top:13%;right:-4%;padding:9px 18px;background:#fffcf9;border:2px solid #ab968d;border-radius:24px;color:var(--ink-2);font-size:17px;white-space:nowrap}
+.bubble::after{content:"";position:absolute;left:18px;bottom:-12px;width:16px;height:16px;background:#fffcf9;border:2px solid #ab968d;border-top:0;border-left:0;transform:skewX(-30deg) rotate(45deg)}
+.plaid{height:22px;background:repeating-linear-gradient(90deg,#d6c2b4 0 22px,transparent 22px 40px,#cd6c5e 40px 42px,transparent 42px 64px),linear-gradient(#e6d6c8,#e6d6c8);border-top:1px solid #dccbbd}
+section{padding:72px 0}
+h2{font-size:clamp(26px,3.2vw,34px);line-height:1.3;margin:0 0 10px}
+.section-lead{color:var(--muted);margin:0 0 32px;max-width:640px}
+.features{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+.card{position:relative;background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:22px 22px 20px;box-shadow:var(--shadow)}
+.card h3{margin:0 0 6px;font-size:18px}
+.card p{margin:0;color:var(--ink-2);font-size:14.5px}
+.card .tag{display:inline-block;margin-bottom:10px;width:34px;height:4px;border-radius:4px;background:var(--chestnut)}
+.card:nth-child(3n+2) .tag{background:var(--amber)}
+.card:nth-child(3n) .tag{background:var(--plum-2)}
+#download{background:linear-gradient(180deg,var(--paper),var(--paper-2))}
+.releases{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px}
+.release{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:24px;box-shadow:var(--shadow)}
+.release.beta{background:#fffaf6;border-style:dashed}
+.release h3{display:flex;align-items:baseline;gap:10px;margin:0 0 4px;font-size:21px}
+.release h3 span{font-size:13px;font-weight:650;color:var(--chestnut-d);background:var(--wash);padding:2px 10px;border-radius:999px}
+.release .date{color:var(--muted);font-size:13px;margin:0 0 16px}
+.files{display:grid;gap:10px;margin:0;padding:0;list-style:none}
+.files a{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 16px;border-radius:12px;border:1px solid var(--line);background:var(--panel);text-decoration:none;color:var(--ink)}
+.files a:hover{border-color:#cdb5a6;background:#fff}
+.files a.main{background:var(--plum);border-color:var(--plum);color:#f7eee8}
+.files a.main:hover{background:var(--plum-2)}
+.files em{font-style:normal;font-size:13px;opacity:.75;white-space:nowrap}
+.notes{margin:24px 0 0;color:var(--muted);font-size:14px}
+.notes li{margin:4px 0}
+.character .wrap{display:grid;grid-template-columns:300px 1fr;gap:48px;align-items:center}
+.character .stand{justify-self:center;max-height:560px;width:auto;filter:drop-shadow(0 18px 30px #3a344633)}
+.faces{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:28px}
+.face{margin:0;background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:18px 14px 14px;text-align:center}
+.face img{height:120px;width:auto;margin:0 auto 10px;object-fit:contain}
+.face span{font-size:14px;color:var(--ink-2)}
+footer{padding:36px 0 48px;color:var(--muted);font-size:13px;border-top:1px solid var(--line)}
+footer .wrap{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px}
+.hidden{display:none!important}
+@media(max-width:900px){
+  .hero .wrap{grid-template-columns:1fr}
+  .hero-copy{padding-bottom:12px}
+  .hero-art{width:min(340px,86%)}
+  .bubble{right:0;top:8%;font-size:15px}
+  .features{grid-template-columns:1fr 1fr}
+  .character .wrap{grid-template-columns:1fr;gap:20px}
+  .character .stand{max-height:420px}
+}
+@media(max-width:600px){
+  nav a:not(.keep){display:none}
+  .features{grid-template-columns:1fr}
+  section{padding:52px 0}
+  .face img{height:84px}
+  .face span{font-size:12.5px}
+}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}.btn{transition:none}}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <a class="mark" href="#"><img src="assets/character/avatar.jpg" alt=""><span>Shiori<b>.</b></span></a>
+    <nav aria-label="页面导航">
+      <a href="#features">功能</a>
+      <a href="#shiori">看板娘</a>
+      <a class="keep" href="#download">下载</a>
+      <a href="https://github.com/iownmmiku/Shiori/blob/main/docs/USER_GUIDE.md">使用指南</a>
+      <a class="keep" href="https://github.com/iownmmiku/Shiori">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <div class="hero">
+    <div class="wrap">
+      <div class="hero-copy">
+        <span class="eyebrow">开源 · MIT 许可</span>
+        <h1>Shiori<b>.</b></h1>
+        <p class="lead">本机运行的 AI 聊天伙伴</p>
+        <p class="sub">装在你自己的电脑上：在网页里和她聊天，也可以接入 QQ。她会记住重要的事，学会群里的说法，获得授权后还能帮你操作电脑。数据留在运行 Shiori 的电脑上。</p>
+        <div class="cta">
+          <a class="btn primary" id="hero-download" href="https://github.com/iownmmiku/Shiori/releases/latest">下载 Windows 版</a>
+          <a class="btn ghost" href="#download">全部下载方式</a>
+          <small id="hero-version">安装版和便携版无需 Python；源码支持 Python 3.11–3.13。</small>
+        </div>
+      </div>
+      <div class="hero-art">
+        <img src="assets/character/portrait.png" width="560" height="813" alt="看板娘佐藤栞：围着格子围巾、拿着冰美式的女孩">
+        <span class="bubble" aria-hidden="true">……没什么。</span>
+      </div>
+    </div>
+    <div class="plaid" aria-hidden="true"></div>
+  </div>
+
+  <section id="features">
+    <div class="wrap">
+      <h2>她能做什么</h2>
+      <p class="section-lead">首次使用只需要一个模型服务的地址和密钥。QQ、电脑能力和更细的模型分工都可以以后再开。</p>
+      <div class="features">
+        <article class="card"><i class="tag"></i><h3>Chat 工作台</h3><p>在网页里直接聊天，按项目整理对话，回复边写边显示；每个对话可以单独换模型。</p></article>
+        <article class="card"><i class="tag"></i><h3>QQ 接入</h3><p>支持 NapCat、SnowLuma 和 QQ 官方机器人。群里有发言限速和接话积极度，会先判断一句话是不是在对她说。</p></article>
+        <article class="card"><i class="tag"></i><h3>长期记忆</h3><p>记住重要的人和事，带来源、重要度和有效期；在记忆档案里随时查看和修改。</p></article>
+        <article class="card"><i class="tag"></i><h3>群语言与表情包</h3><p>学习群里的黑话和说法，确认后的词义在群里共享；表情包按含义收集，聊天时挑合适的发。</p></article>
+        <article class="card"><i class="tag"></i><h3>人格与角色日程</h3><p>人格蒸馏自动整理角色资料，角色日程安排她的生活和日记，让聊天更像同一个人。</p></article>
+        <article class="card"><i class="tag"></i><h3>电脑任务</h3><p>管理员授权后，她可以在本机执行文件和命令任务；默认关闭，可以随时收回权限。</p></article>
+      </div>
+    </div>
+  </section>
+
+  <section id="shiori" class="character">
+    <div class="wrap">
+      <img class="stand" src="assets/character/stand.png" width="290" height="900" alt="佐藤栞全身立绘：藏青外套、米色开衫、格子围巾和黑色连裤袜">
+      <div>
+        <span class="eyebrow">看板娘</span>
+        <h2 style="margin-top:14px">佐藤栞</h2>
+        <p class="section-lead">Shiori 的看板娘。格子围巾总是裹到鼻尖，手里常握着一杯冰美式，嘴上说着“……没什么”。网页控制台里的头像、空页面和提示里都能见到她。</p>
+        <div class="faces">
+          <figure class="face"><img src="assets/character/chibi-quiet.png" alt="不说话的佐藤栞" loading="lazy"><span>“……”</span></figure>
+          <figure class="face"><img src="assets/character/chibi-pout.png" alt="嘟着嘴的佐藤栞" loading="lazy"><span>“我、我又不是讨厌你……”</span></figure>
+          <figure class="face"><img src="assets/character/chibi-angry.png" alt="生气的佐藤栞" loading="lazy"><span>“真是的——！”</span></figure>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="download">
+    <div class="wrap">
+      <h2>下载</h2>
+      <p class="section-lead">日常使用选稳定版；愿意先试新功能可以选预发布版。已经装好的 Shiori 可以在右上角“版本与更新”里直接升级。</p>
+      <div class="releases" id="releases">
+        <article class="release" id="fallback">
+          <h3>最新版本</h3>
+          <p class="date">版本列表暂时读不到，请到 GitHub 发布页下载。</p>
+          <ul class="files">
+            <li><a class="main" href="https://github.com/iownmmiku/Shiori/releases/latest">前往最新稳定版<em>GitHub Releases</em></a></li>
+            <li><a href="https://github.com/iownmmiku/Shiori/releases">查看全部版本（含预发布版）<em>GitHub Releases</em></a></li>
+          </ul>
+        </article>
+      </div>
+      <ul class="notes">
+        <li>Windows 安装版一键安装；便携版完整解压后运行 <code>shiori.exe</code>；源码版按 README 用 Python 启动。</li>
+        <li>安装包没有 Windows 代码签名，可能出现 SmartScreen 提示；下载后可以核对同名的 <code>.sha256</code> 文件。</li>
+        <li>不含模型账号、API Key、QQ 客户端或 NapCat / SnowLuma，需要自己准备；模型调用按服务商规则计费。</li>
+      </ul>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>Shiori · 代码以 MIT 许可证开源</span>
+    <span><a href="https://github.com/iownmmiku/Shiori">GitHub</a> · <a href="https://github.com/iownmmiku/Shiori/issues">反馈问题</a> · <a href="https://github.com/iownmmiku/Shiori/blob/main/RELEASE_NOTES.md">更新日志</a></span>
+  </div>
+</footer>
+
+<script>
+(() => {
+  const repo = 'iownmmiku/Shiori';
+  const kinds = [
+    [/-Windows-Setup\.exe$/, 'Windows 安装版', '推荐'],
+    [/-Windows-x64\.zip$/, 'Windows 便携版', '解压即用'],
+    [/-source\.zip$/, '源码包', 'Python 3.11–3.13'],
+  ];
+  const text = value => String(value).replace(/[&<>"']/g, ch => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[ch]));
+  const size = bytes => bytes >= 1048576 ? (bytes / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(bytes / 1024)) + ' KB';
+  const day = iso => new Date(iso).toLocaleDateString('zh-CN', {year: 'numeric', month: 'long', day: 'numeric'});
+  function card(release, beta) {
+    const files = kinds.map(([pattern, label, hint], index) => {
+      const asset = release.assets.find(a => pattern.test(a.name));
+      if (!asset) return '';
+      return `<li><a class="${index === 0 ? 'main' : ''}" href="${text(asset.browser_download_url)}">${label}<em>${hint} · ${size(asset.size)}</em></a></li>`;
+    }).join('');
+    return `<article class="release${beta ? ' beta' : ''}"><h3>${text(release.tag_name)}<span>${beta ? '预发布版' : '稳定版'}</span></h3>`
+      + `<p class="date">发布于 ${day(release.published_at)} · <a href="${text(release.html_url)}">更新说明</a></p>`
+      + `<ul class="files">${files || `<li><a class="main" href="${text(release.html_url)}">打开发布页<em>GitHub</em></a></li>`}</ul></article>`;
+  }
+  fetch(`https://api.github.com/repos/${repo}/releases?per_page=20`, {headers: {Accept: 'application/vnd.github+json'}})
+    .then(response => response.ok ? response.json() : Promise.reject(new Error(response.status)))
+    .then(list => {
+      const shown = list.filter(r => !r.draft);
+      const stable = shown.find(r => !r.prerelease);
+      const beta = shown.find(r => r.prerelease && (!stable || new Date(r.published_at) > new Date(stable.published_at)));
+      if (!stable && !beta) return;
+      document.getElementById('releases').innerHTML = (stable ? card(stable, false) : '') + (beta ? card(beta, true) : '');
+      const setup = stable && stable.assets.find(a => kinds[0][0].test(a.name));
+      if (setup) {
+        document.getElementById('hero-download').href = setup.browser_download_url;
+        document.getElementById('hero-download').textContent = `下载 Windows 版 ${stable.tag_name}`;
+        document.getElementById('hero-version').textContent = `稳定版 ${stable.tag_name} · ${size(setup.size)}，安装版和便携版无需 Python。`;
+      }
+    })
+    .catch(() => {});
+})();
+</script>
+</body>
+</html>

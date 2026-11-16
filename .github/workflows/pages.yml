@@ -1,0 +1,38 @@
+name: Download page
+# Publishes site/ (plus the character art from the app) to GitHub Pages.
+# Needs Settings → Pages → Source: GitHub Actions.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'site/**'
+      - 'shiori/static/assets/character/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: true
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assemble the page
+        run: |
+          mkdir -p _site/assets
+          cp -r site/. _site/
+          cp -r shiori/static/assets/character _site/assets/character
+          rm -f _site/assets/character/README.md
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deployment
+        uses: actions/deploy-pages@v4

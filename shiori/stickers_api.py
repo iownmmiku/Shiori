@@ -4,17 +4,44 @@ import sqlite3
 import tempfile
 from pathlib import Path
 
-from fastapi import Body
+from fastapi import Body, File, Form, UploadFile
 from fastapi.responses import Response
+
+from .stickers import MAX_UPLOAD_BYTES
 
 
 def install_stickers(app, chat):
     @app.get('/api/stickers')
-    async def stickers(scope_id: str = '', category: str = '', q: str = '', offset: int = 0, limit: int = 50, locked: str = ''):
+    async def stickers(scope_id: str = '', category: str = '', q: str = '', offset: int = 0, limit: int = 50, locked: str = '',
+                       origin: str = ''):
         if len(q) > 240 or len(category) > 20: raise ValueError('表情包筛选过长')
         if locked not in ('', 'true', 'false'): raise ValueError('锁定筛选无效')
         return await asyncio.to_thread(chat.stickers.page,scope_id,category,q,offset,limit,
-                                       locked=None if not locked else locked == 'true')
+                                       locked=None if not locked else locked == 'true',origin=origin)
+
+    @app.post('/api/stickers/upload')
+    async def upload_stickers(files: list[UploadFile] = File(...), category: str = Form('')):
+        if len(files) > 200: raise ValueError('单次最多选择 200 个文件；压缩包里可以放更多图片')
+        received, total = [], 0
+        for file in files:
+            raw = await file.read(MAX_UPLOAD_BYTES - total + 1)
+            total += len(raw)
+            if total > MAX_UPLOAD_BYTES: raise ValueError('单次上传不能超过 32MB，请分批上传')
+            received.append((Path(file.filename or '').name, raw))
+        return await asyncio.to_thread(chat.stickers.upload, received, category)
+
+    @app.get('/api/stickers/analysis')
+    async def sticker_analysis():
+        return await asyncio.to_thread(chat.stickers.analysis_status)
+
+    @app.post('/api/stickers/analysis')
+    async def start_sticker_analysis(payload: dict = Body(default={})):
+        if set(payload) - {'ids', 'filters'} or ('ids' in payload and 'filters' in payload): raise ValueError('分析参数无效')
+        return chat.stickers.start_analysis(payload.get('ids'), payload.get('filters'))
+
+    @app.post('/api/stickers/analysis/stop')
+    async def stop_sticker_analysis():
+        return chat.stickers.stop_analysis()
 
     @app.post('/api/stickers/prune')
     async def prune_stickers(payload: dict = Body(default={})):

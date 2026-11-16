@@ -23,7 +23,7 @@ def memory(store, **changes):
 def test_empty_store_has_only_config_seeds_and_wal(store):
     assert store.stats()["messages"] == store.stats()["memories"] == 0
     assert {p["id"] for p in store.list_personas()} == {"default"}
-    assert store.get_persona("default")["name"] == "林星遥"
+    assert store.get_persona("default")["name"] == "佐藤栞"
     with sqlite3.connect(store.path) as conn:
         assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
 

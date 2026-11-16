@@ -1,11 +1,12 @@
 "use strict";
 const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 const calls=[];let modal;
+const fixed=['开心','赞同','感谢','安慰','疑惑','惊讶','无语','难过','生气','问候','害羞','得意','嫌弃','委屈','其他','待标注'];
 const escape=value=>String(value??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
 const item={id:'aabb',scope_id:'qq:group:1',meaning:'<script>unsafe</script>',tags:['谢谢'],category:'感谢',enabled:true,clear:true,shareable:false,use_count:0};
 const sandbox={window:{ShioriExperience:{handleAction:async()=>false,handleSubmit:async()=>false}},state:{scope:'qq:group:1',settings:{stickers:{},providers:[]}},
-  e:escape,query:params=>new URLSearchParams(Object.entries(params).filter(([,v])=>v!==undefined)).toString(),api:async(url,options)=>{calls.push([url,options]);return {items:[item],categories:['感谢'],total:1,offset:0,has_more:false};},
-  field:(name,title,value)=>`<input name="${name}" value="${escape(value)}">`,textarea:(name,title,value)=>`<textarea name="${name}">${escape(value)}</textarea>`,select:()=>'',toggle:()=>'',tag:escape,scopeName:escape,
+  e:escape,query:params=>new URLSearchParams(Object.entries(params).filter(([,v])=>v!==undefined)).toString(),api:async(url,options)=>{calls.push([url,options]);return url.startsWith('/api/stickers/analysis')||url==='/api/stickers/upload'?{total:1,running:true,added:1,duplicates:0,rejected:[],rejected_count:0}:{items:[item],categories:fixed,guide:{害羞:'脸红、不好意思'},analysis:{pending:2,running:false},total:1,offset:0,has_more:false};},
+  field:(name,title,value)=>`<input name="${name}" value="${escape(value)}">`,textarea:(name,title,value)=>`<textarea name="${name}">${escape(value)}</textarea>`,select:(name,title,options)=>`<select name="${name}">${options.map(([v,t])=>`<option value="${escape(v)}">${escape(t)}</option>`).join('')}</select>`,FormData:class{constructor(form){this.form=form;}getAll(){return this.form.files;}},toggle:()=>'',tag:escape,scopeName:escape,
   button:(text,action,style,symbol,attrs='')=>`<button data-action="${action}" ${attrs}>${text}</button>`,getForm:form=>form.values,splitNames:value=>value.split(/[，,]/).map(x=>x.trim()).filter(Boolean),
   openModal:(...args)=>{modal=args;sandbox.state.modalRecord=args[4];},closeModal:()=>{},toast:()=>{},bootstrap:async()=>{},renderPage:async()=>{},confirmAction:async(title,text,fn)=>fn()};
 vm.createContext(sandbox);vm.runInContext(fs.readFileSync(path.join(__dirname,'../shiori/static/stickers.js'),'utf8'),sandbox);
@@ -25,6 +26,22 @@ async function main(){
   await actions.handleAction('sticker-prune',{dataset:{}});
   assert.equal(calls.at(-1)[0],'/api/stickers/prune');assert.equal(calls.at(-1)[1].body.dry_run,true);
   html=await ui.render();assert.match(html,/语义匹配度/);assert.match(html,/data-action="sticker-lock"/);
+  assert.match(html,/data-form="sticker-upload"/);assert.match(html,/type="file" name="files" multiple/);assert.match(html,/有 2 张自己上传的表情还没分析语义/);
+  assert.match(html,/<option value="upload">自己上传<\/option>/);assert.match(html,/害羞<\/b>：脸红/);
+  await actions.handleSubmit('sticker-upload',{files:[{size:10}]});
+  assert.equal(calls.at(-1)[0],'/api/stickers/upload');assert.equal(calls.at(-1)[1].method,'POST');assert.equal(calls.at(-1)[1].body.constructor.name,'FormData');
+  await assert.rejects(actions.handleSubmit('sticker-upload',{files:[]}),/请选择/);
+  await assert.rejects(actions.handleSubmit('sticker-upload',{files:[{size:33*1024*1024}]}),/32MB/);
+  await actions.handleAction('sticker-analyze-pending',{dataset:{}});
+  assert.equal(calls.at(-1)[0],'/api/stickers/analysis');assert.deepEqual(JSON.parse(JSON.stringify(calls.at(-1)[1].body)),{});
+  await actions.handleAction('sticker-analyze-one',{dataset:{id:'aabb'}});
+  assert.deepEqual(JSON.parse(JSON.stringify(calls.at(-1)[1].body)),{ids:['aabb']});
+  await actions.handleSubmit('sticker-filter',{values:{q:'',category:'害羞',origin:'upload'}});await ui.render();
+  assert.match(calls.at(-1)[0],/origin=upload/);
+  await actions.handleAction('sticker-analyze-filtered',{dataset:{}});
+  assert.deepEqual(JSON.parse(JSON.stringify(calls.at(-1)[1].body.filters)),{scope_id:'',category:'害羞',q:'',locked:'',origin:'upload'});
+  await actions.handleAction('sticker-edit',{dataset:{id:'aabb'}});
+  assert.match(modal[2],/<select name="category">/);assert.match(modal[2],/<option value="害羞">害羞（脸红、不好意思）<\/option>/);assert.ok(!/<input name="category"/.test(modal[2]));
   console.log('sticker defaults, safe previews, editing, locking, pruning, probabilities and filter pagination passed');
 }
 main().catch(error=>{console.error(error);process.exitCode=1;});

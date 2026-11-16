@@ -895,7 +895,7 @@ class ChatService:
     @timed('memory_recall_ms')
     async def _recall_context(self, scope_id, user_id, text,needed_info=None):
         memory_cfg = self.settings.get().get('memory', {})
-        top_k = memory_cfg.get('top_k', 8)
+        top_k = memory_cfg.get('top_k', 5)   # the most memories one reply carries, preferences included
         deadline = SemanticBudget(asyncio.get_running_loop().time() + self._recall_budget_seconds(memory_cfg, text, needed_info))
         related = await self.memory.recall(scope_id, user_id, text, top_k, semantic_deadline=deadline)
         # The Planner may repeat the current question or another lookup. Compare
@@ -2029,18 +2029,25 @@ class ChatService:
         config = self.settings.get()
         bot = resolved_identity(config, self.store.get_scope(scope_id))['name'] or '你'
         picked = {}
+        # Neighbours in the store's chronological order (created_at, then
+        # rowid), so SQLite walks the (scope_id, created_at) index from the
+        # anchor. Ordering by rowid alone made it sort the whole chat for each
+        # source: about 1s for 32 sources in a 42,000-message group, all while
+        # holding the store lock the event loop needs.
         with self.store._lock:
             conn = self.store._conn
             for source in records:
-                row = conn.execute('SELECT rowid FROM messages WHERE id=? AND scope_id=?', (source['id'], scope_id)).fetchone()
+                row = conn.execute('SELECT rowid,created_at FROM messages WHERE id=? AND scope_id=?', (source['id'], scope_id)).fetchone()
                 if not row:
                     continue
                 anchor = message_anchor(source)
-                nearby = (conn.execute('SELECT rowid,data FROM messages WHERE scope_id=? AND rowid<=? ORDER BY rowid DESC LIMIT ?',
-                                       (scope_id, row[0], self.CONTEXT_BEFORE + 1)).fetchall()
-                          + conn.execute('SELECT rowid,data FROM messages WHERE scope_id=? AND rowid>? ORDER BY rowid LIMIT ?',
-                                         (scope_id, row[0], self.CONTEXT_AFTER)).fetchall())
-                for rowid, raw in nearby:
+                nearby = (conn.execute('SELECT rowid,created_at,data FROM messages WHERE scope_id=? AND created_at<=? '
+                                       'AND NOT (created_at=? AND rowid>?) ORDER BY created_at DESC,rowid DESC LIMIT ?',
+                                       (scope_id, row[1], row[1], row[0], self.CONTEXT_BEFORE + 1)).fetchall()
+                          + conn.execute('SELECT rowid,created_at,data FROM messages WHERE scope_id=? AND created_at>=? '
+                                         'AND NOT (created_at=? AND rowid<=?) ORDER BY created_at,rowid LIMIT ?',
+                                         (scope_id, row[1], row[1], row[0], self.CONTEXT_AFTER)).fetchall())
+                for rowid, created_at, raw in nearby:
                     if rowid in picked:
                         continue
                     message = json.loads(raw)
@@ -2048,10 +2055,10 @@ class ChatService:
                     if (message['id'] not in own and anchor and stamp
                             and abs((stamp - anchor).total_seconds()) > self.CONTEXT_SECONDS):
                         continue
-                    picked[rowid] = message
+                    picked[rowid] = (created_at, message)
         lines = []
-        for rowid in sorted(picked):
-            message = picked[rowid]
+        for rowid in sorted(picked, key=lambda key: (picked[key][0], key)):
+            message = picked[rowid][1]
             if message['id'] in blocked or message.get('role') not in ('user', 'assistant'):
                 continue
             meta = message.get('metadata') or {}

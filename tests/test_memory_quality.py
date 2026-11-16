@@ -72,7 +72,7 @@ async def test_extraction_sees_nearby_chat_but_only_cites_the_member(runtime):
     assert context['member_name'] == '阿明'
     lines = context['conversation']
     assert [line['from'] for line in lines] == ['other', 'you', 'member']
-    assert lines[0]['speaker'] == '小周' and lines[1]['speaker'] == '林星遥'
+    assert lines[0]['speaker'] == '小周' and lines[1]['speaker'] == '佐藤栞'
     # Only the member's own line carries an id that may be cited.
     assert [line.get('id') for line in lines] == [None, None, own['id']]
     assert other_chat['content'] not in messages[1]['content']
@@ -80,6 +80,33 @@ async def test_extraction_sees_nearby_chat_but_only_cites_the_member(runtime):
     assert [item['id'] for item in sources] == [own['id']] and sources[0]['speaker'] == '阿明'
     # A nickname is member-controlled text: data, never part of the instructions.
     assert '阿明' not in messages[0]['content'] and 'durability' in messages[0]['content']
+
+
+@pytest.mark.anyio
+async def test_nearby_lines_walk_the_chat_index_instead_of_sorting_the_whole_chat(runtime):
+    """On a 42,000-message group, ordering the neighbours by rowid made SQLite
+    sort the whole chat for every source line while the store lock was held:
+    1-7 s event-loop stalls at each automatic extraction on the server."""
+    e = runtime
+    for index in range(30):
+        say(e.store, '777', f'旧闲聊 {index}', '小周')
+        e.store.add_message('qq:group:901', '888', 'user', f'别的群 {index}', sender_name='路人')
+    before = [say(e.store, '777', f'前面 {index}', '小周') for index in range(5)]
+    own = say(e.store, '555', '我最近在学吉他', '阿明')
+    after = [say(e.store, '777', f'后面 {index}', '小周') for index in range(3)]
+    statements = []
+    e.store._conn.set_trace_callback(statements.append)
+    try:
+        lines = e.chat._extraction_context(GROUP, [own], set())
+    finally:
+        e.store._conn.set_trace_callback(None)
+    assert [line['content'] for line in lines] == ([m['content'] for m in before[-e.chat.CONTEXT_BEFORE:]] + [own['content']]
+                                                   + [m['content'] for m in after[:e.chat.CONTEXT_AFTER]])
+    nearby = [sql for sql in statements if 'FROM messages' in sql and 'LIMIT' in sql]
+    assert len(nearby) == 2
+    for sql in nearby:
+        plan = ' '.join(row[3] for row in e.store._conn.execute('EXPLAIN QUERY PLAN ' + sql))
+        assert 'messages_scope_time' in plan and 'TEMP B-TREE' not in plan, plan
 
 
 @pytest.mark.anyio

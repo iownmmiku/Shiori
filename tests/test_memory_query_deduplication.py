@@ -84,3 +84,25 @@ async def test_distinct_long_queries_keep_the_existing_300_character_bound(recal
     # Compare identity on the original input; clipping is only the dispatch bound.
     assert [call[2] for call in calls] == ['问题', prefix[:300], prefix[:300]]
     assert [call[3] for call in calls] == [8, 3, 3]
+
+
+@pytest.mark.anyio
+async def test_a_reply_carries_at_most_five_memories_by_default(tmp_path):
+    """The default limit is 5, preferences included; it stays adjustable."""
+    from shiori.settings import Settings
+    assert Settings(tmp_path).get()['memory']['top_k'] == 5
+    calls = []
+
+    async def recall(scope_id, user_id, query, limit, *, semantic_deadline):
+        calls.append(limit)
+        return [{'id': f'{query}-{index}', 'content': f'{query} {index}'} for index in range(limit)]
+
+    chat = object.__new__(ChatService)
+    chat.settings = SimpleNamespace(get=lambda: {'memory': {'semantic_timeout_seconds': 8}})
+    chat.memory = SimpleNamespace(recall=recall)
+    chat.social = SimpleNamespace(_allowed=lambda scope_id: True)
+    chat.store = SimpleNamespace(profile_preferences=lambda *args, scope_allowed: [
+        {'id': f'preference-{index}', 'content': f'喜欢 {index}'} for index in range(3)])
+    result = await chat._recall_context('qq:group:test', 'member', '咖啡', ['旅行计划', '音乐节'])
+    assert calls == [5, 3, 3]
+    assert len(result) == 5 and [item['id'] for item in result[:3]] == ['preference-0', 'preference-1', 'preference-2']
