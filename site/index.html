@@ -4,183 +4,447 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Shiori · 本机运行的 AI 聊天伙伴</title>
-<meta name="description" content="Shiori 是在你自己电脑上运行的 AI 聊天机器人与任务助手：独立聊天、QQ 接入、长期记忆、群语言学习和电脑任务。看板娘：佐藤栞。">
+<meta name="description" content="Shiori 是装在你自己电脑上的 AI 聊天伙伴：网页聊天、QQ 群聊、长期记忆、表情包和电脑任务。看板娘：佐藤栞。">
+<meta property="og:type" content="website">
 <meta property="og:title" content="Shiori · 本机运行的 AI 聊天伙伴">
-<meta property="og:description" content="独立聊天 · QQ 接入 · 长期记忆 · 电脑任务。看板娘：佐藤栞。">
+<meta property="og:description" content="网页聊天 · QQ 群聊 · 长期记忆 · 表情包 · 电脑任务。看板娘：佐藤栞。">
 <meta property="og:image" content="https://iownmmiku.github.io/Shiori/assets/banner.jpg">
-<meta name="theme-color" content="#3a3446">
-<link rel="icon" href="assets/character/avatar.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#f8f1ea">
+<link rel="icon" href="assets/icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;700&family=Noto+Serif+SC:wght@600;900&display=swap">
+<link rel="preload" as="image" href="assets/art/hero.webp">
 <style>
 :root{
   color-scheme:light;
-  --paper:#f7f0e9;--paper-2:#f2e6dc;--panel:#fffcf9;--wash:#f5e7de;--wash-2:#efddd1;
-  --ink:#2a2127;--ink-2:#4f4247;--muted:#75676a;--line:#ebdfd6;
-  --chestnut:#8c5b4c;--chestnut-d:#6b4337;--plum:#3a3446;--plum-2:#4a4357;--coral:#c4493f;--amber:#b87a4b;
-  --r:16px;--shadow:0 18px 40px -22px #3a344659,0 2px 6px -2px #3a34461a;
-  --font:"Segoe UI Variable Text","Segoe UI","Microsoft YaHei UI","Microsoft YaHei","PingFang SC","Noto Sans SC",system-ui,sans-serif;
+  --paper:#f8f1ea;--paper-2:#f2e6db;--card:#fffaf5;--line:#eadcd0;
+  --ink:#2e252c;--ink-2:#55474d;--muted:#857479;
+  --chestnut:#8c5b4c;--chestnut-2:#a8705d;--navy:#34304a;--navy-2:#4a4362;
+  --sakura:#efc4bc;--coral:#c56a59;
+  --serif:"Noto Serif SC","Source Han Serif SC","Source Han Serif","Songti SC","STSong",serif;
+  --sans:"Segoe UI Variable Text","Segoe UI","Microsoft YaHei UI","Microsoft YaHei","PingFang SC","Noto Sans SC",system-ui,sans-serif;
+  --hand:"Caveat","Segoe Print","Bradley Hand",cursive;
+  --shadow:0 1px 2px #2e252c0d,0 18px 40px -24px #2e252c40;
+  --wrap:min(1180px,100% - 48px);
 }
 *{box-sizing:border-box}
-html{scroll-behavior:smooth}
-body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.75 var(--font);-webkit-font-smoothing:antialiased}
+html{scroll-behavior:smooth;scroll-padding-top:72px}
+body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.8 var(--sans);-webkit-font-smoothing:antialiased;overflow-x:hidden}
+/* Paper grain over everything, very faint. */
+body::after{content:"";position:fixed;inset:0;z-index:60;pointer-events:none;opacity:.32;mix-blend-mode:multiply;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .45 0 0 0 0 .35 0 0 0 0 .3 0 0 0 .09 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
 img{max-width:100%;height:auto;display:block}
-a{color:var(--chestnut-d)}
-.wrap{width:min(1120px,100% - 32px);margin-inline:auto}
-header.top{position:sticky;top:0;z-index:5;background:#f7f0e9e6;-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);border-bottom:1px solid var(--line)}
-header.top .wrap{display:flex;align-items:center;justify-content:space-between;height:60px;gap:16px}
-.mark{display:flex;align-items:center;gap:10px;font-weight:700;font-size:21px;color:var(--ink);text-decoration:none;letter-spacing:.2px}
-.mark img{width:34px;height:34px;border-radius:50%;box-shadow:0 0 0 2px var(--panel),0 4px 10px -4px #3a344666}
-.mark b{color:var(--chestnut)}
-nav{display:flex;gap:22px;font-size:14px}
-nav a{color:var(--ink-2);text-decoration:none}
-nav a:hover{color:var(--chestnut-d)}
-.btn{display:inline-flex;align-items:center;gap:8px;padding:12px 20px;border-radius:999px;font-weight:650;font-size:15px;text-decoration:none;border:1px solid transparent;transition:transform .2s,box-shadow .2s,background .2s}
-.btn.primary{background:linear-gradient(180deg,#9a6555,var(--chestnut));color:#fff;box-shadow:0 10px 22px -12px #6b4337cc}
-.btn.primary:hover{transform:translateY(-1px);box-shadow:0 14px 26px -12px #6b4337}
-.btn.ghost{background:var(--panel);border-color:var(--line);color:var(--ink)}
-.btn.ghost:hover{border-color:#dacabe}
-.hero{position:relative;overflow:hidden;padding:56px 0 0}
-.hero::before{content:"";position:absolute;width:760px;height:760px;right:-160px;top:-120px;border-radius:50%;background:radial-gradient(circle,#efd9cb,transparent 66%);pointer-events:none}
-.hero .wrap{position:relative;display:grid;grid-template-columns:1.05fr .95fr;align-items:end;gap:24px}
-.hero-copy{padding-bottom:84px}
-.eyebrow{display:inline-block;padding:4px 14px;border-radius:999px;background:var(--wash-2);color:var(--chestnut-d);font-size:13px;font-weight:650;letter-spacing:.5px}
-h1{font-size:clamp(52px,8vw,96px);line-height:1;margin:18px 0 18px;letter-spacing:-1px}
-h1 b{color:var(--chestnut)}
-.lead{font-size:clamp(19px,2.2vw,24px);font-weight:650;color:var(--ink-2);margin:0 0 10px}
-.hero p.sub{color:var(--muted);max-width:520px;margin:0 0 28px}
-.cta{display:flex;flex-wrap:wrap;gap:12px;align-items:center}
-.cta small{display:block;width:100%;color:var(--muted);font-size:13px;margin-top:4px}
-.hero-art{position:relative;justify-self:center;width:min(440px,100%)}
-.hero-art img{filter:drop-shadow(0 22px 40px #3a344640)}
-.bubble{position:absolute;top:13%;right:-4%;padding:9px 18px;background:#fffcf9;border:2px solid #ab968d;border-radius:24px;color:var(--ink-2);font-size:17px;white-space:nowrap}
-.bubble::after{content:"";position:absolute;left:18px;bottom:-12px;width:16px;height:16px;background:#fffcf9;border:2px solid #ab968d;border-top:0;border-left:0;transform:skewX(-30deg) rotate(45deg)}
-.plaid{height:22px;background:repeating-linear-gradient(90deg,#d6c2b4 0 22px,transparent 22px 40px,#cd6c5e 40px 42px,transparent 42px 64px),linear-gradient(#e6d6c8,#e6d6c8);border-top:1px solid #dccbbd}
-section{padding:72px 0}
-h2{font-size:clamp(26px,3.2vw,34px);line-height:1.3;margin:0 0 10px}
-.section-lead{color:var(--muted);margin:0 0 32px;max-width:640px}
-.features{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
-.card{position:relative;background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:22px 22px 20px;box-shadow:var(--shadow)}
-.card h3{margin:0 0 6px;font-size:18px}
-.card p{margin:0;color:var(--ink-2);font-size:14.5px}
-.card .tag{display:inline-block;margin-bottom:10px;width:34px;height:4px;border-radius:4px;background:var(--chestnut)}
-.card:nth-child(3n+2) .tag{background:var(--amber)}
-.card:nth-child(3n) .tag{background:var(--plum-2)}
-#download{background:linear-gradient(180deg,var(--paper),var(--paper-2))}
-.releases{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px}
-.release{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:24px;box-shadow:var(--shadow)}
-.release.beta{background:#fffaf6;border-style:dashed}
-.release h3{display:flex;align-items:baseline;gap:10px;margin:0 0 4px;font-size:21px}
-.release h3 span{font-size:13px;font-weight:650;color:var(--chestnut-d);background:var(--wash);padding:2px 10px;border-radius:999px}
-.release .date{color:var(--muted);font-size:13px;margin:0 0 16px}
+a{color:var(--chestnut)}
+.wrap{width:var(--wrap);margin-inline:auto}
+.hand{font-family:var(--hand)}
+
+/* ---------- navigation ---------- */
+.nav{position:fixed;inset:0 0 auto;z-index:40;transition:background .3s,box-shadow .3s,-webkit-backdrop-filter .3s,backdrop-filter .3s}
+.nav.scrolled{background:#f8f1eadb;-webkit-backdrop-filter:blur(14px) saturate(1.2);backdrop-filter:blur(14px) saturate(1.2);box-shadow:0 1px 0 var(--line)}
+.nav .wrap{display:flex;align-items:center;justify-content:space-between;height:68px;gap:20px}
+.logo{display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--ink);font:900 22px/1 var(--serif);letter-spacing:.01em}
+.logo img{width:34px;height:34px}
+.logo b{color:var(--chestnut)}
+.nav nav{display:flex;align-items:center;gap:26px;font-size:14.5px}
+.nav nav a{color:var(--ink-2);text-decoration:none;position:relative}
+.nav nav a:not(.pill)::after{content:"";position:absolute;left:0;right:0;bottom:-4px;height:2px;border-radius:2px;background:var(--chestnut);transform:scaleX(0);transform-origin:left;transition:transform .25s}
+.nav nav a:not(.pill):hover::after{transform:scaleX(1)}
+.nav .pill{padding:7px 16px;border-radius:999px;background:var(--navy);color:#fbf4ee;font-weight:600}
+.nav .pill:hover{background:var(--navy-2)}
+
+/* ---------- buttons ---------- */
+.btn{display:inline-flex;align-items:center;gap:10px;padding:14px 24px;border-radius:999px;font-weight:650;font-size:15.5px;text-decoration:none;border:1px solid transparent;transition:transform .2s,box-shadow .2s,background .2s,border-color .2s}
+.btn svg{width:18px;height:18px;flex:none}
+.btn.primary{background:var(--navy);color:#fbf4ee;box-shadow:0 16px 30px -16px #34304aee}
+.btn.primary:hover{background:var(--navy-2);transform:translateY(-2px);box-shadow:0 20px 34px -16px #34304a}
+.btn.ghost{background:#fffaf5c4;border-color:var(--line);color:var(--ink)}
+.btn.ghost:hover{border-color:#d6c0b1;transform:translateY(-2px)}
+
+/* ---------- hero ---------- */
+.hero{position:relative;isolation:isolate;min-height:min(100svh,920px);display:flex;align-items:center;overflow:hidden}
+.hero-bg{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:right 22%;z-index:-3}
+.hero::after{content:"";position:absolute;inset:0;z-index:-2;pointer-events:none;
+  background:linear-gradient(90deg,#f8f1ea 0%,#f8f1eaeb 24%,#f8f1ea8c 40%,#f8f1ea00 56%),linear-gradient(0deg,#f8f1ea 0%,#f8f1ea00 16%)}
+.hero-copy{width:var(--wrap);margin-inline:auto;padding:128px 0 112px}
+.hero-copy>*{max-width:540px}
+.kicker{display:inline-flex;align-items:center;gap:10px;padding:6px 16px 6px 12px;border-radius:999px;background:#fffaf5d0;border:1px solid var(--line);font-size:13px;font-weight:600;color:var(--chestnut);letter-spacing:.3px}
+.kicker i{width:8px;height:8px;border-radius:50%;background:var(--coral);box-shadow:0 0 0 4px #c56a5926}
+h1{font:900 clamp(76px,11vw,150px)/.95 var(--serif);letter-spacing:-.025em;margin:24px 0 18px;color:var(--ink)}
+h1 span{color:var(--chestnut)}
+.tagline{font:600 clamp(22px,2.5vw,31px)/1.4 var(--serif);margin:0 0 16px}
+.intro{color:var(--ink-2);font-size:17px;margin:0 0 34px;max-width:470px}
+.cta{display:flex;flex-wrap:wrap;gap:12px}
+.meta{color:var(--muted);font-size:13px;margin:16px 0 0}
+.hero-note{position:absolute;right:max(24px,calc((100% - 1180px) / 2));bottom:56px;margin:0;display:flex;align-items:center;gap:12px;padding:10px 18px 10px 12px;border-radius:16px;background:#fffaf5d9;border:1px solid #fffaf5;box-shadow:var(--shadow);font-size:14px;color:var(--ink-2);transform:rotate(-1.5deg)}
+.hero-note img{width:40px;height:40px;border-radius:50%;object-fit:cover;object-position:50% 14%;background:var(--paper-2)}
+.hero-note .hand{display:block;font-size:21px;line-height:1;color:var(--coral)}
+.petals{position:absolute;inset:0;z-index:-1;pointer-events:none;overflow:hidden}
+.petals i{position:absolute;top:-6%;left:var(--x);width:var(--s,13px);height:calc(var(--s,13px) * .72);border-radius:85% 0 85% 0;background:linear-gradient(135deg,#f6d3cc,#e9aea4);opacity:.75;animation:fall var(--d,14s) linear var(--delay,0s) infinite}
+@keyframes fall{0%{transform:translate3d(0,0,0) rotate(0)}100%{transform:translate3d(var(--drift,-120px),112vh,0) rotate(600deg)}}
+.scroll-cue{position:absolute;left:50%;bottom:22px;transform:translateX(-50%);width:26px;height:40px;border:2px solid #8c5b4c66;border-radius:14px}
+.scroll-cue::after{content:"";position:absolute;left:50%;top:8px;width:4px;height:8px;margin-left:-2px;border-radius:2px;background:var(--chestnut);animation:cue 1.8s ease-in-out infinite}
+@keyframes cue{0%,100%{transform:translateY(0);opacity:1}60%{transform:translateY(10px);opacity:0}}
+
+/* Scarf plaid, used as a divider. */
+.plaid{height:30px;background:
+  repeating-linear-gradient(90deg,transparent 0 40px,#c56a5980 40px 42px,transparent 42px 84px),
+  repeating-linear-gradient(90deg,#cbb4a2 0 22px,transparent 22px 84px),
+  repeating-linear-gradient(0deg,transparent 0 10px,#bba491aa 10px 16px,transparent 16px 30px),
+  #e8d9cb}
+
+/* ---------- sections ---------- */
+section{position:relative;padding:112px 0}
+.sec-head{margin:0 0 64px;max-width:660px}
+.sec-head.center{margin-inline:auto;text-align:center}
+.eyebrow{font:700 28px/1 var(--hand);color:var(--coral);margin:0 0 10px}
+h2{font:900 clamp(34px,4.6vw,54px)/1.2 var(--serif);letter-spacing:-.01em;margin:0}
+.lead{color:var(--ink-2);font-size:17px;margin:16px 0 0}
+
+/* ---------- features ---------- */
+.feature{display:grid;grid-template-columns:1fr 1fr;align-items:center;gap:clamp(32px,7vw,110px)}
+.feature+.feature{margin-top:96px}
+.feature:nth-of-type(even) .art{order:2}
+.art{position:relative;height:clamp(340px,42vw,520px);display:flex;justify-content:center;align-items:flex-end}
+.art::before{content:"";position:absolute;inset:16% 9% 0;border-radius:999px 999px 34px 34px;background:var(--tone,#f4e1d6);box-shadow:inset 0 0 0 1px #00000008}
+.art::after{content:"";position:absolute;left:4%;top:20%;width:72px;height:72px;border-radius:50%;border:2px dashed #8c5b4c40;animation:spin 40s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.art img{position:relative;height:100%;width:auto;max-width:96%;object-fit:contain;object-position:bottom;
+  -webkit-mask-image:linear-gradient(#000 88%,#0000);mask-image:linear-gradient(#000 88%,#0000);transition:transform .6s cubic-bezier(.2,.7,.2,1)}
+.feature:hover .art img{transform:translateY(-6px)}
+.art.full img{-webkit-mask-image:none;mask-image:none;height:92%}
+.art.chat{--tone:#f6dcd5}.art.memory{--tone:#efe1cf}.art.stickers{--tone:#f4d7dc}.art.local{--tone:#e3e0ea}
+.copy .num{display:flex;align-items:baseline;gap:14px;margin:0 0 6px}
+.copy .num b{font:900 64px/1 var(--serif);color:transparent;-webkit-text-stroke:1.5px var(--chestnut-2)}
+.copy .num span{font:700 26px/1 var(--hand);color:var(--coral)}
+.copy h3{font:900 clamp(28px,3.2vw,40px)/1.25 var(--serif);margin:0 0 16px}
+.copy p{color:var(--ink-2);font-size:16.5px;margin:0}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin:24px 0 0;padding:0;list-style:none}
+.chips li{padding:5px 14px;border-radius:999px;background:var(--card);border:1px solid var(--line);font-size:13.5px;color:var(--ink-2)}
+.more{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:112px}
+.more article{background:var(--card);border:1px solid var(--line);border-radius:22px;padding:26px 26px 24px;box-shadow:var(--shadow);transition:transform .25s}
+.more article:hover{transform:translateY(-4px)}
+.more svg{width:30px;height:30px;color:var(--chestnut);margin-bottom:12px}
+.more h4{font:900 19px/1.4 var(--serif);margin:0 0 6px}
+.more p{margin:0;color:var(--ink-2);font-size:14.5px}
+
+/* ---------- meet 佐藤栞 ---------- */
+.meet{background:linear-gradient(180deg,var(--paper) 0%,var(--paper-2) 100%);overflow:hidden}
+.meet::before{content:"栞";position:absolute;right:-4vw;top:-6vw;font:900 clamp(320px,46vw,640px)/1 var(--serif);color:#8c5b4c0d;pointer-events:none}
+.meet-grid{display:grid;grid-template-columns:minmax(280px,440px) 1fr;gap:clamp(40px,7vw,104px);align-items:center}
+.stand{position:relative;justify-self:center;width:fit-content}
+.stand img{height:min(760px,82vh);width:auto;filter:drop-shadow(0 26px 30px #34304a2e)}
+.stand::after{content:"";position:absolute;left:12%;right:12%;bottom:-8px;height:22px;border-radius:50%;background:radial-gradient(#34304a2e,#34304a00 70%);z-index:-1}
+.anno{position:absolute;margin:0;font:700 23px/1 var(--hand);color:var(--chestnut);white-space:nowrap;display:flex;align-items:center;gap:8px}
+.anno::before{content:"";width:44px;border-top:1.5px dashed #8c5b4c99}
+.anno.l{flex-direction:row-reverse}
+.anno.cup{left:84%;top:18.5%}.anno.bun{left:66%;top:2.5%}.anno.scarf{right:86%;top:22%}.anno.plush{right:92%;top:39%}.anno.tall{left:72%;top:93%}
+.profile{position:relative;background:var(--card);border:1px solid var(--line);border-radius:28px;padding:40px 40px 34px;box-shadow:var(--shadow)}
+.profile .tab{position:absolute;top:-14px;left:32px;padding:4px 14px;border-radius:999px;background:var(--navy);color:#fbf4ee;font-size:11.5px;font-weight:700;letter-spacing:.24em}
+.profile .name{font:900 clamp(44px,5.4vw,66px)/1.15 var(--serif);margin:12px 0 4px;letter-spacing:.04em}
+.profile rt{font:600 .28em/1 var(--sans);color:var(--muted);letter-spacing:.2em}
+.profile .alias{margin:0 0 26px;color:var(--ink-2)}
+.profile .alias .hand{font-size:24px;color:var(--coral);margin-left:6px}
+.profile dl{display:grid;grid-template-columns:repeat(2,1fr);gap:16px 28px;margin:0 0 28px;padding:24px 0 0;border-top:1px dashed var(--line)}
+.profile dt{font-size:12.5px;color:var(--muted);letter-spacing:.12em}
+.profile dd{margin:2px 0 0;font-weight:600}
+.profile dl .wide{grid-column:1/-1}
+.profile blockquote{margin:0;padding:18px 22px;border-radius:18px;background:var(--paper);font:600 18px/1.7 var(--serif);color:var(--ink-2);position:relative}
+.profile blockquote::before{content:"“";position:absolute;left:12px;top:-22px;font:900 64px/1 var(--serif);color:var(--sakura)}
+.profile .fine{margin:18px 0 0;font-size:13.5px;color:var(--muted)}
+.faces{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;margin-top:96px}
+.face{margin:0;padding:26px 18px 22px;border-radius:26px;background:var(--card);border:1px solid var(--line);text-align:center;box-shadow:var(--shadow)}
+.face img{height:230px;width:auto;margin:0 auto;transition:transform .35s cubic-bezier(.3,1.6,.5,1)}
+.face:hover img{transform:translateY(-6px) rotate(-3deg)}
+.face .hand{display:block;margin-top:14px;font-size:24px;line-height:1;color:var(--coral)}
+.face figcaption{margin-top:6px;font:600 16.5px/1.6 var(--serif);color:var(--ink-2)}
+
+/* ---------- three steps ---------- */
+.steps{counter-reset:step}
+.steps-list{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;margin:0;padding:0;list-style:none}
+.steps-list li{position:relative;background:var(--card);border:1px solid var(--line);border-radius:24px;padding:30px 28px 28px;box-shadow:var(--shadow)}
+.steps-list li::before{counter-increment:step;content:counter(step,decimal-leading-zero);position:absolute;right:24px;top:16px;font:900 52px/1 var(--serif);color:var(--chestnut);opacity:.18}
+.steps-list h3{font:900 21px/1.4 var(--serif);margin:0 0 8px}
+.steps-list p{margin:0;color:var(--ink-2);font-size:15px}
+.peek{position:absolute;right:max(8px,calc((100% - 1180px) / 2 - 140px));bottom:-28px;width:150px;transform:rotate(8deg);pointer-events:none}
+
+/* ---------- download ---------- */
+.download{background:var(--navy);color:#efe6e0;padding-top:120px}
+.download::before{content:"";position:absolute;inset:0 0 auto;height:30px;background:inherit}
+.download h2{color:#fbf4ee}
+.download .eyebrow{color:#f0b2a6}
+.download .lead{color:#d9cdc6}
+.dl-grid{display:grid;grid-template-columns:minmax(0,.85fr) minmax(0,1.15fr);gap:clamp(40px,6vw,88px);align-items:start}
+.dl-grid .sec-head{margin-bottom:36px}
+.dl-side{position:relative;padding-top:96px}
+.perch{position:absolute;right:36px;top:-30px;width:132px;z-index:1;pointer-events:none;filter:drop-shadow(0 10px 14px #0005)}
+.releases{position:relative;display:grid;gap:20px}
+.release{background:var(--card);color:var(--ink);border-radius:26px;padding:30px;box-shadow:0 30px 60px -30px #0008}
+.release.beta{background:#f3ece6}
+.release h3{display:flex;align-items:center;gap:12px;margin:0 0 4px;font:900 28px/1.2 var(--serif)}
+.release h3 span{font:700 12.5px/1 var(--sans);letter-spacing:.08em;color:var(--chestnut);background:#f4e1d6;padding:6px 12px;border-radius:999px}
+.release .date{color:var(--muted);font-size:13.5px;margin:0 0 20px}
 .files{display:grid;gap:10px;margin:0;padding:0;list-style:none}
-.files a{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 16px;border-radius:12px;border:1px solid var(--line);background:var(--panel);text-decoration:none;color:var(--ink)}
-.files a:hover{border-color:#cdb5a6;background:#fff}
-.files a.main{background:var(--plum);border-color:var(--plum);color:#f7eee8}
-.files a.main:hover{background:var(--plum-2)}
-.files em{font-style:normal;font-size:13px;opacity:.75;white-space:nowrap}
-.notes{margin:24px 0 0;color:var(--muted);font-size:14px}
-.notes li{margin:4px 0}
-.character .wrap{display:grid;grid-template-columns:300px 1fr;gap:48px;align-items:center}
-.character .stand{justify-self:center;max-height:560px;width:auto;filter:drop-shadow(0 18px 30px #3a344633)}
-.faces{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:28px}
-.face{margin:0;background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:18px 14px 14px;text-align:center}
-.face img{height:120px;width:auto;margin:0 auto 10px;object-fit:contain}
-.face span{font-size:14px;color:var(--ink-2)}
-footer{padding:36px 0 48px;color:var(--muted);font-size:13px;border-top:1px solid var(--line)}
-footer .wrap{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px}
-.hidden{display:none!important}
-@media(max-width:900px){
-  .hero .wrap{grid-template-columns:1fr}
-  .hero-copy{padding-bottom:12px}
-  .hero-art{width:min(340px,86%)}
-  .bubble{right:0;top:8%;font-size:15px}
-  .features{grid-template-columns:1fr 1fr}
-  .character .wrap{grid-template-columns:1fr;gap:20px}
-  .character .stand{max-height:420px}
+.files a{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 18px;border-radius:14px;border:1px solid var(--line);background:#fff;text-decoration:none;color:var(--ink);font-weight:600;transition:border-color .2s,transform .2s}
+.files a:hover{border-color:#cdb5a6;transform:translateX(3px)}
+.files a.main{background:var(--chestnut);border-color:var(--chestnut);color:#fff}
+.files a.main:hover{background:#7d4f41}
+.files em{font-style:normal;font-weight:400;font-size:13px;opacity:.75;white-space:nowrap}
+.notes{display:grid;gap:16px;margin:0;padding:0;list-style:none;color:#cbbfb9;font-size:14px}
+.notes li{padding-top:14px;border-top:1px solid #ffffff26}
+.notes code{color:#fbf4ee}
+footer{padding:40px 0 48px;color:var(--muted);font-size:13.5px}
+footer .wrap{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:16px}
+footer .sign{display:flex;align-items:center;gap:14px}
+footer .sign img{width:56px;height:auto}
+footer a{color:var(--ink-2)}
+
+/* ---------- reveal on scroll ---------- */
+.js .reveal{opacity:0;transform:translateY(28px);transition:opacity .8s ease,transform .8s cubic-bezier(.2,.7,.2,1)}
+.js .reveal.in{opacity:1;transform:none}
+
+/* ---------- smaller screens ---------- */
+@media (max-width:1080px){
+  .hero{display:block;min-height:0}
+  .hero-bg{position:relative;height:auto;aspect-ratio:4/3;max-height:72vh;object-position:80% 18%}
+  .hero::after{background:linear-gradient(0deg,#f8f1ea 0%,#f8f1ea 30%,#f8f1ea00 52%)}
+  .hero-copy{margin-top:-120px;padding:0 0 72px}
+  .hero-copy>*{max-width:none}
+  .hero-note,.scroll-cue{display:none}
+  .meet-grid{grid-template-columns:1fr}
+  .stand img{height:min(640px,76vh)}
+  .peek{display:none}
 }
-@media(max-width:600px){
-  nav a:not(.keep){display:none}
-  .features{grid-template-columns:1fr}
-  section{padding:52px 0}
-  .face img{height:84px}
-  .face span{font-size:12.5px}
+@media (max-width:860px){
+  section{padding:84px 0}
+  .feature{grid-template-columns:1fr;gap:20px}
+  .feature:nth-of-type(even) .art{order:0}
+  .feature+.feature{margin-top:72px}
+  .art{height:min(420px,92vw)}
+  .more,.steps-list,.dl-grid{grid-template-columns:1fr}
+  .dl-side{padding-top:72px}
+  .more{margin-top:72px}
+  .faces{gap:12px;margin-top:64px}
+  .face{padding:18px 8px 16px}
+  .face img{height:min(200px,34vw)}
+  .face figcaption{font-size:14px}
+  .anno{font-size:19px}
+  .anno::before{width:24px}
 }
-@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}.btn{transition:none}}
+@media (max-width:600px){
+  :root{--wrap:min(1180px,100% - 32px)}
+  .nav nav a:not(.keep){display:none}
+  .hero-copy{margin-top:-64px}
+  .profile{padding:34px 22px 26px}
+  .profile dl{grid-template-columns:1fr 1fr;gap:14px 16px}
+  .anno.scarf,.anno.plush{display:none}
+  .anno.cup{left:62%;top:11%}
+  .dl-side{padding-top:150px}
+  .perch{width:104px;right:18px;top:0}
+  .anno.bun{left:58%;top:1%}
+  .face .hand{font-size:19px}
+}
+@media (prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto}
+  .petals,.scroll-cue{display:none}
+  .art::after{animation:none}
+  .js .reveal{opacity:1;transform:none;transition:none}
+  .btn,.files a,.more article,.face img,.art img{transition:none}
+}
 </style>
 </head>
 <body>
-<header class="top">
+<header class="nav" id="nav">
   <div class="wrap">
-    <a class="mark" href="#"><img src="assets/character/avatar.jpg" alt=""><span>Shiori<b>.</b></span></a>
+    <a class="logo" href="#top"><img src="assets/icon.png" width="64" height="64" alt=""><span>Shiori<b>.</b></span></a>
     <nav aria-label="页面导航">
       <a href="#features">功能</a>
       <a href="#shiori">看板娘</a>
-      <a class="keep" href="#download">下载</a>
-      <a href="https://github.com/iownmmiku/Shiori/blob/main/docs/USER_GUIDE.md">使用指南</a>
+      <a href="#start">开始使用</a>
       <a class="keep" href="https://github.com/iownmmiku/Shiori">GitHub</a>
+      <a class="pill keep" href="#download">下载</a>
     </nav>
   </div>
 </header>
 
-<main>
+<main id="top">
   <div class="hero">
-    <div class="wrap">
-      <div class="hero-copy">
-        <span class="eyebrow">开源 · MIT 许可</span>
-        <h1>Shiori<b>.</b></h1>
-        <p class="lead">本机运行的 AI 聊天伙伴</p>
-        <p class="sub">装在你自己的电脑上：在网页里和她聊天，也可以接入 QQ。她会记住重要的事，学会群里的说法，获得授权后还能帮你操作电脑。数据留在运行 Shiori 的电脑上。</p>
-        <div class="cta">
-          <a class="btn primary" id="hero-download" href="https://github.com/iownmmiku/Shiori/releases/latest">下载 Windows 版</a>
-          <a class="btn ghost" href="#download">全部下载方式</a>
-          <small id="hero-version">安装版和便携版无需 Python；源码支持 Python 3.11–3.13。</small>
-        </div>
-      </div>
-      <div class="hero-art">
-        <img src="assets/character/portrait.png" width="560" height="813" alt="看板娘佐藤栞：围着格子围巾、拿着冰美式的女孩">
-        <span class="bubble" aria-hidden="true">……没什么。</span>
-      </div>
+    <img class="hero-bg" src="assets/art/hero.webp" width="1672" height="941" alt="看板娘佐藤栞：围着格子围巾、捧着一杯冰美式，身边飘着樱花和栗子">
+    <div class="petals" aria-hidden="true">
+      <i style="--x:8%;--d:15s;--delay:-2s;--drift:-60px"></i>
+      <i style="--x:18%;--d:19s;--delay:-11s;--s:10px;--drift:-140px"></i>
+      <i style="--x:29%;--d:13s;--delay:-6s;--drift:-90px"></i>
+      <i style="--x:41%;--d:17s;--delay:-14s;--s:16px;--drift:-160px"></i>
+      <i style="--x:52%;--d:21s;--delay:-3s;--s:11px;--drift:-80px"></i>
+      <i style="--x:63%;--d:16s;--delay:-9s;--drift:-120px"></i>
+      <i style="--x:74%;--d:20s;--delay:-16s;--s:15px;--drift:-180px"></i>
+      <i style="--x:86%;--d:14s;--delay:-5s;--s:10px;--drift:-70px"></i>
+      <i style="--x:95%;--d:18s;--delay:-12s;--drift:-150px"></i>
     </div>
-    <div class="plaid" aria-hidden="true"></div>
+    <div class="hero-copy">
+      <p class="kicker"><i></i><span id="hero-kicker">开源 · MIT 许可 · Windows / 源码</span></p>
+      <h1>Shiori<span>.</span></h1>
+      <p class="tagline">本机运行的 AI 聊天伙伴</p>
+      <p class="intro">装在你自己的电脑上。在网页里和她聊天，也能带她进 QQ 群；她会记住重要的事，学会群里的说法，挑合适的表情包。聊天和记忆都留在你的电脑上。</p>
+      <div class="cta">
+        <a class="btn primary" id="hero-download" href="https://github.com/iownmmiku/Shiori/releases/latest">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 19h14"/></svg>
+          <span id="hero-download-label">下载 Windows 版</span>
+        </a>
+        <a class="btn ghost" href="#features">看看她能做什么</a>
+      </div>
+      <p class="meta" id="hero-meta">安装版和便携版无需 Python · 源码支持 Python 3.11–3.13</p>
+    </div>
+    <p class="hero-note"><img src="assets/art/chibi-sleepy.webp" alt=""><span><span class="hand">today's mascot</span>佐藤栞 · 今天也在喝冰美式</span></p>
+    <span class="scroll-cue" aria-hidden="true"></span>
   </div>
+  <div class="plaid" aria-hidden="true"></div>
 
   <section id="features">
     <div class="wrap">
-      <h2>她能做什么</h2>
-      <p class="section-lead">首次使用只需要一个模型服务的地址和密钥。QQ、电脑能力和更细的模型分工都可以以后再开。</p>
-      <div class="features">
-        <article class="card"><i class="tag"></i><h3>Chat 工作台</h3><p>在网页里直接聊天，按项目整理对话，回复边写边显示；每个对话可以单独换模型。</p></article>
-        <article class="card"><i class="tag"></i><h3>QQ 接入</h3><p>支持 NapCat、SnowLuma 和 QQ 官方机器人。群里有发言限速和接话积极度，会先判断一句话是不是在对她说。</p></article>
-        <article class="card"><i class="tag"></i><h3>长期记忆</h3><p>记住重要的人和事，带来源、重要度和有效期；在记忆档案里随时查看和修改。</p></article>
-        <article class="card"><i class="tag"></i><h3>群语言与表情包</h3><p>学习群里的黑话和说法，确认后的词义在群里共享；表情包按含义收集，聊天时挑合适的发。</p></article>
-        <article class="card"><i class="tag"></i><h3>人格与角色日程</h3><p>人格蒸馏自动整理角色资料，角色日程安排她的生活和日记，让聊天更像同一个人。</p></article>
-        <article class="card"><i class="tag"></i><h3>电脑任务</h3><p>管理员授权后，她可以在本机执行文件和命令任务；默认关闭，可以随时收回权限。</p></article>
+      <header class="sec-head reveal">
+        <p class="eyebrow">what she does</p>
+        <h2>她能做什么</h2>
+        <p class="lead">第一次用只需要一个模型服务的地址和密钥。QQ、记忆检索、电脑能力和更细的模型分工，都可以以后慢慢打开。</p>
+      </header>
+
+      <article class="feature reveal">
+        <div class="art chat"><img src="assets/art/feature-chat.webp" width="900" height="1129" loading="lazy" decoding="async" alt="佐藤栞低头用手机聊天，旁边飘着两个对话气泡"></div>
+        <div class="copy">
+          <p class="num"><b>01</b><span>in your group chat</span></p>
+          <h3>在群里，接得上话</h3>
+          <p>接入 NapCat、SnowLuma 或 QQ 官方机器人。她会先判断一句话是不是在对她说、值不值得接，再决定开不开口；群友之间的话不会被当成在问她。发言有限速，接话积极度可以调，不会刷屏。</p>
+          <ul class="chips"><li>对话对象判断</li><li>接话积极度</li><li>发言限速</li><li>本地预筛省调用</li></ul>
+        </div>
+      </article>
+
+      <article class="feature reveal">
+        <div class="art memory"><img src="assets/art/feature-memory.webp" width="900" height="1166" loading="lazy" decoding="async" alt="佐藤栞拿着贴满便签的小本子，咬着笔想事情"></div>
+        <div class="copy">
+          <p class="num"><b>02</b><span>long-term memory</span></p>
+          <h3>记得住，也分得清</h3>
+          <p>重要的人和事会写成带来源的长期记忆，标上重要度和有效期；随口一提的事过一阵就淡了，同一件事换个说法讲也会合并。记忆档案里随时可以查看和修改，每次回复只带最相关的几条。</p>
+          <ul class="chips"><li>来源可查</li><li>重要度与有效期</li><li>合并重复</li><li>按昵称回忆</li></ul>
+        </div>
+      </article>
+
+      <article class="feature reveal">
+        <div class="art stickers"><img src="assets/art/feature-stickers.webp" width="900" height="956" loading="lazy" decoding="async" alt="佐藤栞举着一张印满自己 Q 版头像的贴纸，脸上也贴了一张"></div>
+        <div class="copy">
+          <p class="num"><b>03</b><span>stickers</span></p>
+          <h3>会挑表情包</h3>
+          <p>上传你自己的表情包（图片或压缩包都行），或者让她在群里收集。识图模型给每张写好含义、分类和图里的字，聊天时按语境挑一张合适的发；同一个聊天里最近发过的不会马上重复。</p>
+          <ul class="chips"><li>16 个固定分类</li><li>图片 / ZIP 上传</li><li>手动语义分析</li><li>动图也能识别</li></ul>
+        </div>
+      </article>
+
+      <article class="feature reveal">
+        <div class="art local full"><img src="assets/art/feature-local.webp" width="900" height="972" loading="lazy" decoding="async" alt="佐藤栞盘腿坐着用笔记本电脑，身边放着冰美式、栗子玩偶和贝斯琴包"></div>
+        <div class="copy">
+          <p class="num"><b>04</b><span>on your own PC</span></p>
+          <h3>装在你自己的电脑上</h3>
+          <p>Windows 安装版和便携版无需 Python，打开就是独立窗口。聊天、记忆和设置都存放在运行 Shiori 的电脑上。管理员授权后，她还能帮你在本机处理文件、运行命令；权限默认关闭，随时可以收回。</p>
+          <ul class="chips"><li>数据留在本机</li><li>Chat 工作台</li><li>电脑任务需授权</li><li>应用内一键更新</li></ul>
+        </div>
+      </article>
+
+      <div class="more">
+        <article class="reveal">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16v10H9l-5 4z"/><path d="M8 9h8M8 12h5"/></svg>
+          <h4>群语言学习</h4>
+          <p>学会群里的黑话和说法，确认后的词义在群里共享；待审的词可以设过期，也能在 QQ 私聊里审核。</p>
+        </article>
+        <article class="reveal">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>
+          <h4>人格与角色日程</h4>
+          <p>人格蒸馏自动整理角色资料；角色日程安排她的作息和日记，让每次聊天都像同一个人。</p>
+        </article>
+        <article class="reveal">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>
+          <h4>多模型分工与统计</h4>
+          <p>聊天、判断、记忆和整理可以用不同的模型；统计页按用途显示用量和一次回复的时间花在哪。</p>
+        </article>
       </div>
     </div>
   </section>
 
-  <section id="shiori" class="character">
+  <section id="shiori" class="meet">
     <div class="wrap">
-      <img class="stand" src="assets/character/stand.png" width="290" height="900" alt="佐藤栞全身立绘：藏青外套、米色开衫、格子围巾和黑色连裤袜">
-      <div>
-        <span class="eyebrow">看板娘</span>
-        <h2 style="margin-top:14px">佐藤栞</h2>
-        <p class="section-lead">Shiori 的看板娘。格子围巾总是裹到鼻尖，手里常握着一杯冰美式，嘴上说着“……没什么”。网页控制台里的头像、空页面和提示里都能见到她。</p>
-        <div class="faces">
-          <figure class="face"><img src="assets/character/chibi-quiet.png" alt="不说话的佐藤栞" loading="lazy"><span>“……”</span></figure>
-          <figure class="face"><img src="assets/character/chibi-pout.png" alt="嘟着嘴的佐藤栞" loading="lazy"><span>“我、我又不是讨厌你……”</span></figure>
-          <figure class="face"><img src="assets/character/chibi-angry.png" alt="生气的佐藤栞" loading="lazy"><span>“真是的——！”</span></figure>
+      <div class="meet-grid">
+        <div class="stand reveal">
+          <img src="assets/art/stand.webp" width="574" height="1770" loading="lazy" decoding="async" alt="佐藤栞全身立绘：藏青外套、米色开衫、格子围巾、黑色连裤袜和乐福鞋，手里拿着冰美式">
+          <p class="anno bun" aria-hidden="true">messy bun</p>
+          <p class="anno cup" aria-hidden="true">iced americano</p>
+          <p class="anno l scarf" aria-hidden="true">plaid scarf</p>
+          <p class="anno l plush" aria-hidden="true">chestnut plush!</p>
+          <p class="anno tall" aria-hidden="true">155 cm</p>
+        </div>
+        <div class="reveal">
+          <header class="sec-head" style="margin-bottom:40px">
+            <p class="eyebrow">meet our mascot</p>
+            <h2>认识佐藤栞</h2>
+          </header>
+          <div class="profile">
+            <span class="tab">CHARACTER</span>
+            <p class="name"><ruby>佐藤<rt>さとう</rt></ruby> <ruby>栞<rt>しおり</rt></ruby></p>
+            <p class="alias">外号「栗子」<span class="hand">Kuriko</span></p>
+            <dl>
+              <div><dt>学年</dt><dd>东京 · 高二</dd></div>
+              <div><dt>生日</dt><dd>10 月 21 日</dd></div>
+              <div><dt>身高</dt><dd>155 cm</dd></div>
+              <div><dt>社团</dt><dd>轻音社 · 贝斯</dd></div>
+              <div class="wide"><dt>喜欢</dt><dd>冰美式、关东煮、薄荷甜点、便利店新口味、电车和车站</dd></div>
+            </dl>
+            <blockquote>……也不是特意帮你的，只是刚好有空而已。</blockquote>
+            <p class="fine">懒散、毒舌、嘴硬心软。新安装的 Shiori 默认就是她，你也可以随时换成自己的人格。</p>
+          </div>
         </div>
       </div>
+
+      <div class="faces">
+        <figure class="face reveal"><img src="assets/art/chibi-happy.webp" width="520" height="877" loading="lazy" decoding="async" alt="开心的 Q 版佐藤栞"><span class="hand">happy</span><figcaption>还、还不错啦！</figcaption></figure>
+        <figure class="face reveal"><img src="assets/art/chibi-annoyed.webp" width="520" height="864" loading="lazy" decoding="async" alt="抱着胳膊不高兴的 Q 版佐藤栞"><span class="hand">annoyed</span><figcaption>哈？谁要理你。</figcaption></figure>
+        <figure class="face reveal"><img src="assets/art/chibi-sleepy.webp" width="520" height="886" loading="lazy" decoding="async" alt="抱着栗子玩偶打哈欠的 Q 版佐藤栞"><span class="hand">sleepy</span><figcaption>困……让我睡五分钟。</figcaption></figure>
+      </div>
     </div>
   </section>
 
-  <section id="download">
+  <section id="start" class="steps">
     <div class="wrap">
-      <h2>下载</h2>
-      <p class="section-lead">日常使用选稳定版；愿意先试新功能可以选预发布版。已经装好的 Shiori 可以在右上角“版本与更新”里直接升级。</p>
+      <header class="sec-head center reveal">
+        <p class="eyebrow">three steps</p>
+        <h2>三步开始</h2>
+      </header>
+      <ol class="steps-list">
+        <li class="reveal"><h3>下载并打开</h3><p>安装版一键安装，便携版完整解压后运行 <code>shiori.exe</code>。第一次打开时设置登录密码。</p></li>
+        <li class="reveal"><h3>填一个模型服务</h3><p>在快速入门里填服务商的 API 地址和密钥，选好聊天模型，点一下测试就能用。</p></li>
+        <li class="reveal"><h3>开始聊天</h3><p>打开 Chat 工作台说一声“你好”。QQ、记忆检索和电脑能力都可以以后再开。</p></li>
+      </ol>
+    </div>
+    <img class="peek" src="assets/art/chibi-annoyed.webp" width="520" height="864" loading="lazy" decoding="async" alt="">
+  </section>
+
+  <div class="plaid" aria-hidden="true"></div>
+  <section id="download" class="download">
+    <div class="wrap dl-grid">
+      <div>
+        <header class="sec-head reveal">
+          <p class="eyebrow">download</p>
+          <h2>下载</h2>
+          <p class="lead">日常使用选稳定版。已经装好的 Shiori，在右上角“版本与更新”里就能直接升级。</p>
+        </header>
+        <ul class="notes">
+          <li>安装版一键安装；便携版完整解压后运行 <code>shiori.exe</code>；源码版按 README 用 Python 3.11–3.13 启动。</li>
+          <li>安装包没有 Windows 代码签名，可能出现 SmartScreen 提示；下载后可以核对同名的 <code>.sha256</code> 文件。</li>
+          <li>不含模型账号、API Key、QQ 客户端或 NapCat / SnowLuma，需要自己准备；模型调用按服务商规则计费。</li>
+        </ul>
+      </div>
+      <div class="dl-side reveal">
+      <img class="perch" src="assets/art/chibi-happy.webp" width="520" height="877" loading="lazy" decoding="async" alt="">
       <div class="releases" id="releases">
-        <article class="release" id="fallback">
-          <h3>最新版本</h3>
+        <article class="release">
+          <h3>最新版本<span>GitHub</span></h3>
           <p class="date">版本列表暂时读不到，请到 GitHub 发布页下载。</p>
           <ul class="files">
             <li><a class="main" href="https://github.com/iownmmiku/Shiori/releases/latest">前往最新稳定版<em>GitHub Releases</em></a></li>
@@ -188,24 +452,41 @@ footer .wrap{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px}
           </ul>
         </article>
       </div>
-      <ul class="notes">
-        <li>Windows 安装版一键安装；便携版完整解压后运行 <code>shiori.exe</code>；源码版按 README 用 Python 启动。</li>
-        <li>安装包没有 Windows 代码签名，可能出现 SmartScreen 提示；下载后可以核对同名的 <code>.sha256</code> 文件。</li>
-        <li>不含模型账号、API Key、QQ 客户端或 NapCat / SnowLuma，需要自己准备；模型调用按服务商规则计费。</li>
-      </ul>
+      </div>
     </div>
   </section>
 </main>
 
 <footer>
   <div class="wrap">
-    <span>Shiori · 代码以 MIT 许可证开源</span>
-    <span><a href="https://github.com/iownmmiku/Shiori">GitHub</a> · <a href="https://github.com/iownmmiku/Shiori/issues">反馈问题</a> · <a href="https://github.com/iownmmiku/Shiori/blob/main/RELEASE_NOTES.md">更新日志</a></span>
+    <span class="sign"><img src="assets/art/chibi-sleepy.webp" width="520" height="886" loading="lazy" decoding="async" alt="">Shiori · 代码以 MIT 许可证开源 · 看板娘 佐藤栞</span>
+    <span><a href="https://github.com/iownmmiku/Shiori">GitHub</a> · <a href="https://github.com/iownmmiku/Shiori/blob/main/docs/USER_GUIDE.md">使用指南</a> · <a href="https://github.com/iownmmiku/Shiori/blob/main/RELEASE_NOTES.md">更新日志</a> · <a href="https://github.com/iownmmiku/Shiori/issues">反馈问题</a></span>
   </div>
 </footer>
 
 <script>
 (() => {
+  const root = document.documentElement;
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  const nav = document.getElementById('nav');
+  const onScroll = () => nav.classList.toggle('scrolled', scrollY > 24);
+  addEventListener('scroll', onScroll, {passive: true});
+  onScroll();
+
+  if ('IntersectionObserver' in window && !reduced) {
+    root.classList.add('js');
+    const seen = new IntersectionObserver(entries => {
+      for (const entry of entries) {
+        if (entry.isIntersecting) { entry.target.classList.add('in'); seen.unobserve(entry.target); }
+      }
+    }, {rootMargin: '0px 0px -8% 0px', threshold: 0.12});
+    document.querySelectorAll('.reveal').forEach((el, i) => {
+      el.style.transitionDelay = (el.parentElement.classList.contains('faces') || el.parentElement.classList.contains('more') || el.parentElement.classList.contains('steps-list')) ? `${(i % 3) * 90}ms` : '0ms';
+      seen.observe(el);
+    });
+  }
+
   const repo = 'iownmmiku/Shiori';
   const kinds = [
     [/-Windows-Setup\.exe$/, 'Windows 安装版', '推荐'],
@@ -233,11 +514,13 @@ footer .wrap{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px}
       const beta = shown.find(r => r.prerelease && (!stable || new Date(r.published_at) > new Date(stable.published_at)));
       if (!stable && !beta) return;
       document.getElementById('releases').innerHTML = (stable ? card(stable, false) : '') + (beta ? card(beta, true) : '');
-      const setup = stable && stable.assets.find(a => kinds[0][0].test(a.name));
+      if (!stable) return;
+      document.getElementById('hero-kicker').textContent = `${stable.tag_name} 已发布 · 开源 MIT`;
+      const setup = stable.assets.find(a => kinds[0][0].test(a.name));
       if (setup) {
         document.getElementById('hero-download').href = setup.browser_download_url;
-        document.getElementById('hero-download').textContent = `下载 Windows 版 ${stable.tag_name}`;
-        document.getElementById('hero-version').textContent = `稳定版 ${stable.tag_name} · ${size(setup.size)}，安装版和便携版无需 Python。`;
+        document.getElementById('hero-download-label').textContent = `下载 Windows 版 ${stable.tag_name}`;
+        document.getElementById('hero-meta').textContent = `安装包 ${size(setup.size)} · 无需 Python · 发布于 ${day(stable.published_at)}`;
       }
     })
     .catch(() => {});
