@@ -41,13 +41,16 @@ a{color:var(--chestnut)}
 .hand{font-family:var(--hand)}
 
 /* ---------- navigation ---------- */
-.nav{position:fixed;inset:0 0 auto;z-index:40;transition:background .3s,box-shadow .3s,-webkit-backdrop-filter .3s,backdrop-filter .3s}
-.nav.scrolled{background:#f8f1eadb;-webkit-backdrop-filter:blur(14px) saturate(1.2);backdrop-filter:blur(14px) saturate(1.2);box-shadow:0 1px 0 var(--line)}
-.nav .wrap{display:flex;align-items:center;justify-content:space-between;height:68px;gap:20px}
-.logo{display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--ink);font:900 22px/1 var(--serif);letter-spacing:.01em}
+/* The bar itself stays transparent; the logo and the links sit in frosted pills so they read over any picture. */
+.nav{position:fixed;inset:0 0 auto;z-index:40;pointer-events:none}
+.nav .wrap{display:flex;align-items:center;justify-content:space-between;height:76px;gap:12px}
+.glass{pointer-events:auto;border-radius:999px;background:#fffaf5b8;-webkit-backdrop-filter:blur(14px) saturate(1.3);backdrop-filter:blur(14px) saturate(1.3);border:1px solid #ffffffb3;box-shadow:0 10px 26px -16px #34304a73,0 1px 2px #34304a14;transition:background .3s,box-shadow .3s}
+.nav.scrolled .glass{background:#fffaf5e0;box-shadow:0 12px 28px -16px #34304a8c,0 1px 2px #34304a1f}
+@supports not ((-webkit-backdrop-filter:blur(1px)) or (backdrop-filter:blur(1px))){.glass{background:#fffaf5eb}}
+.logo{display:flex;align-items:center;gap:10px;padding:5px 18px 5px 5px;text-decoration:none;color:var(--ink);font:900 21px/1 var(--serif);letter-spacing:.01em}
 .logo img{width:34px;height:34px}
 .logo b{color:var(--chestnut)}
-.nav nav{display:flex;align-items:center;gap:26px;font-size:14.5px}
+.nav nav{display:flex;align-items:center;gap:24px;padding:5px 5px 5px 22px;font-size:14.5px}
 .nav nav a{color:var(--ink-2);text-decoration:none;position:relative}
 .nav nav a:not(.pill)::after{content:"";position:absolute;left:0;right:0;bottom:-4px;height:2px;border-radius:2px;background:var(--chestnut);transform:scaleX(0);transform-origin:left;transition:transform .25s}
 .nav nav a:not(.pill):hover::after{transform:scaleX(1)}
@@ -140,6 +143,7 @@ h2{font:900 clamp(34px,4.6vw,54px)/1.2 var(--serif);letter-spacing:-.01em;margin
 .anno::before{content:"";width:44px;border-top:1.5px dashed #8c5b4c99}
 .anno.l{flex-direction:row-reverse}
 .anno.cup{left:84%;top:18.5%}.anno.bun{left:66%;top:2.5%}.anno.scarf{right:86%;top:22%}.anno.plush{right:92%;top:39%}.anno.tall{left:72%;top:93%}
+.meet-copy .sec-head{margin-bottom:40px}
 .profile{position:relative;background:var(--card);border:1px solid var(--line);border-radius:28px;padding:40px 40px 34px;box-shadow:var(--shadow)}
 .profile .tab{position:absolute;top:-14px;left:32px;padding:4px 14px;border-radius:999px;background:var(--navy);color:#fbf4ee;font-size:11.5px;font-weight:700;letter-spacing:.24em}
 .profile .name{font:900 clamp(44px,5.4vw,66px)/1.15 var(--serif);margin:12px 0 4px;letter-spacing:.04em}
@@ -212,7 +216,10 @@ footer a{color:var(--ink-2)}
   .hero-copy{margin-top:-120px;padding:0 0 72px}
   .hero-copy>*{max-width:none}
   .hero-note,.scroll-cue{display:none}
-  .meet-grid{grid-template-columns:1fr}
+  .meet-grid{grid-template-columns:1fr;gap:36px}
+  /* Heading first, then her picture, then the profile card. */
+  .meet-copy{display:contents}
+  .meet-copy .sec-head{order:-1;margin-bottom:0}
   .stand img{height:min(640px,76vh)}
   .peek{display:none}
 }
@@ -223,6 +230,11 @@ footer a{color:var(--ink-2)}
   .feature+.feature{margin-top:72px}
   .art{height:min(420px,92vw)}
   .more,.steps-list,.dl-grid{grid-template-columns:1fr}
+  .dl-grid{gap:28px}
+  /* Heading, then the download card, then the notes. */
+  .dl-copy{display:contents}
+  .dl-copy .sec-head{order:-1;margin-bottom:0}
+  .dl-copy .notes{order:1}
   .dl-side{padding-top:72px}
   .more{margin-top:72px}
   .faces{gap:12px;margin-top:64px}
@@ -234,16 +246,34 @@ footer a{color:var(--ink-2)}
 }
 @media (max-width:600px){
   :root{--wrap:min(1180px,100% - 32px)}
+  .nav .wrap{height:64px}
   .nav nav a:not(.keep){display:none}
-  .hero-copy{margin-top:-64px}
+  .logo{padding:4px 14px 4px 4px;font-size:19px}
+  .logo img{width:30px;height:30px}
+  .nav nav{gap:16px;padding:4px 4px 4px 16px;font-size:14px}
+  .nav .pill{padding:6px 14px}
+  .hero-bg{aspect-ratio:4/5;max-height:80vh;object-position:76% 0}
+  .hero-copy{margin-top:-72px}
+  .cta .btn{flex:1 1 100%;justify-content:center}
+  .meet::before{display:none}
+  /* Her picture on the left, the notes in the free space on the right. */
+  .stand{justify-self:start;margin-left:4px}
+  .stand img{height:min(560px,72vh)}
+  .anno.scarf,.anno.plush{display:none}
+  .anno.cup{left:86%;top:18%}
+  .anno.bun{left:70%;top:2%}
+  .anno.tall{left:76%;top:93%}
   .profile{padding:34px 22px 26px}
   .profile dl{grid-template-columns:1fr 1fr;gap:14px 16px}
-  .anno.scarf,.anno.plush{display:none}
-  .anno.cup{left:62%;top:11%}
+  /* The three chibis become a row you can swipe. */
+  .faces{display:flex;gap:14px;overflow-x:auto;scroll-snap-type:x mandatory;margin:56px -16px 0;padding:4px 16px 20px;scrollbar-width:none}
+  .faces::-webkit-scrollbar{display:none}
+  .face{flex:0 0 66%;scroll-snap-align:center;padding:22px 14px 18px}
+  .face img{height:210px}
+  .face figcaption{font-size:15.5px}
+  .js .faces .reveal{opacity:1;transform:none}
   .dl-side{padding-top:150px}
   .perch{width:104px;right:18px;top:0}
-  .anno.bun{left:58%;top:1%}
-  .face .hand{font-size:19px}
 }
 @media (prefers-reduced-motion:reduce){
   html{scroll-behavior:auto}
@@ -257,8 +287,8 @@ footer a{color:var(--ink-2)}
 <body>
 <header class="nav" id="nav">
   <div class="wrap">
-    <a class="logo" href="#top"><img src="assets/icon.png" width="64" height="64" alt=""><span>Shiori<b>.</b></span></a>
-    <nav aria-label="页面导航">
+    <a class="logo glass" href="#top"><img src="assets/icon.png" width="64" height="64" alt=""><span>Shiori<b>.</b></span></a>
+    <nav class="glass" aria-label="页面导航">
       <a href="#features">功能</a>
       <a href="#shiori">看板娘</a>
       <a href="#start">开始使用</a>
@@ -380,12 +410,12 @@ footer a{color:var(--ink-2)}
           <p class="anno l plush" aria-hidden="true">chestnut plush!</p>
           <p class="anno tall" aria-hidden="true">155 cm</p>
         </div>
-        <div class="reveal">
-          <header class="sec-head" style="margin-bottom:40px">
+        <div class="meet-copy">
+          <header class="sec-head reveal">
             <p class="eyebrow">meet our mascot</p>
             <h2>认识佐藤栞</h2>
           </header>
-          <div class="profile">
+          <div class="profile reveal">
             <span class="tab">CHARACTER</span>
             <p class="name"><ruby>佐藤<rt>さとう</rt></ruby> <ruby>栞<rt>しおり</rt></ruby></p>
             <p class="alias">外号「栗子」<span class="hand">Kuriko</span></p>
@@ -428,7 +458,7 @@ footer a{color:var(--ink-2)}
   <div class="plaid" aria-hidden="true"></div>
   <section id="download" class="download">
     <div class="wrap dl-grid">
-      <div>
+      <div class="dl-copy">
         <header class="sec-head reveal">
           <p class="eyebrow">download</p>
           <h2>下载</h2>
