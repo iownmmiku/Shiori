@@ -11,6 +11,7 @@ on the loop. The sticker check decoded the chat's last 200 messages on the loop
 to find one id.
 """
 import asyncio
+import gc
 import json
 import sqlite3
 import threading
@@ -21,6 +22,7 @@ import pytest
 
 from shiori import delivery
 from shiori.chat import ChatService
+from shiori.context import ContextEngine
 from shiori.db import Store
 from shiori.delivery import DeliveryLedger, _delivery_fingerprint
 from shiori.settings import DEFAULTS, resolve_model
@@ -119,6 +121,27 @@ def test_sources_are_read_in_short_lock_holds_and_still_in_chat_order(store):
     assert len(reads) == 3                  # one store-lock hold per 100 ids
     plan = ' | '.join(row[3] for row in store._conn.execute('EXPLAIN QUERY PLAN ' + reads[0]))
     assert 'TEMP B-TREE' not in plan and 'SCAN messages' not in plan, plan
+
+
+def test_a_provenance_walk_is_freed_on_return_not_by_the_garbage_collector(store):
+    # The walk's recursive helper referenced itself, and through it every row
+    # it had loaded: about 150 MB per walk in the server's long chat, freed
+    # only by full collections that paused every thread for 0.5-0.8 s.
+    long_chat(store, 30)
+    for n in range(20):
+        store.create_memory({'scope_id': SCOPE, 'user_id': USER, 'content': f'喜欢第 {n} 座山'})
+    context = ContextEngine(store, {'context': {'enabled': False}}, None)
+    history = store.list_messages(SCOPE, limit=24)
+    gc.collect()
+    gc.disable()
+    try:
+        assert len(context.reference(SCOPE, USER, history)['messages']) == 24
+        after_walk = gc.collect()
+        assert len(store.visible_memories(SCOPE, USER)) == 20
+        after_projection = gc.collect()
+    finally:
+        gc.enable()
+    assert after_walk < 20 and after_projection < 20, (after_walk, after_projection)
 
 
 def test_the_sticker_check_finds_the_newest_member_line_without_decoding_any(store, monkeypatch):

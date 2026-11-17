@@ -1264,7 +1264,11 @@ class Store:
             memo[record_id] = True
             return True
 
-        return [record for record in records if record['id'] in selected_ids and allowed(record, set())]
+        result = [record for record in records if record['id'] in selected_ids and allowed(record, set())]
+        # `allowed` calls itself; drop that self-reference so the projection is
+        # freed on return instead of waiting for the garbage collector.
+        allowed = None
+        return result
 
     def profile_preferences(self, scope_id: str, user_id: str, limit: int = 3, *, scope_allowed=None) -> list[dict]:
         """Bounded chat projection; no full profile or summary allocation."""

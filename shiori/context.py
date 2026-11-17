@@ -255,6 +255,11 @@ class ContextEngine:
                         memory_versions[ancestor] = memories[ancestor]['version']
                     elif ancestor not in sources:
                         pending.append(ancestor)
+        # `source` calls itself, so it holds a reference to itself, and through
+        # it every row this walk loaded. Left alone, that cycle waits for the
+        # garbage collector: about 150 MB per walk in a long private chat, and
+        # the full collections that freed it paused every thread for 0.5-0.8 s.
+        source = None
         if cache is None:
             return valid, sources, memory_versions, jargon_versions
         cache['result'] = (valid, (valid, sources, memory_versions, jargon_versions))
