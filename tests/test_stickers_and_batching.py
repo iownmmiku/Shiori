@@ -32,10 +32,9 @@ class Model:
     async def complete(self,messages,**kwargs):
         assert kwargs['before_send']()
         self.calls.append((messages,kwargs['purpose']))
-        if kwargs['purpose']=='sticker_vision': result=dict(self.description)
-        else:
-            candidates=json.loads(messages[-1]['content'])['candidates']
-            result={'id':candidates[0]['id'],'confidence':.98,'appropriate':True}
+        # Only recognition calls a model; the chat model picks stickers while replying.
+        assert kwargs['purpose']=='sticker_vision'
+        result=dict(self.description)
         if self.after:self.after()
         return {'content':json.dumps(result,ensure_ascii=False)}
 
@@ -114,9 +113,8 @@ def test_rate_limit_pauses_sticker_calls_and_records_no_traceback(library, monke
     kinds = [e['kind'] for e in store.list_events()]
     assert 'stickers_error' not in kinds
     assert any(e['kind'] == 'stickers_skipped' and e['details']['reason'] == 'upstream_busy' for e in store.list_events())
-    # While cooling, neither collection nor selection reaches the model.
+    # While cooling, collection does not reach the model.
     asyncio.run(collect(store, engine))
-    assert asyncio.run(engine.choose('qq:group:1', '123', '谢谢', '谢谢你', lambda: True)) is None
     assert seen == ['sticker_vision']
     now[0] += 601
     monkeypatch.setattr(model, 'complete', Model.complete.__get__(model))
@@ -140,13 +138,15 @@ def test_ambiguous_stickers_are_quarantined_until_manually_labelled(library,clea
     asyncio.run(collect(store,engine))
     item=engine.page()['items'][0]
     assert item['category']=='待标注' and not item['clear']
-    assert asyncio.run(engine.choose('qq:group:1','123','谢谢','谢谢你',lambda:True)) is None
+    assert engine.sendable_categories('qq:group:1')==[]
+    with pytest.raises(ValueError):engine.pick('qq:group:1','待标注')
     with pytest.raises(ValueError):engine.update(item['id'],{'clear':True})
     with pytest.raises(ValueError,match='固定分类'):
         engine.update(item['id'],{'clear':True,'meaning':'友好地表示感谢','category':'礼貌','tags':['感谢']})
     edited=engine.update(item['id'],{'clear':True,'meaning':'友好地表示感谢','category':'感谢','tags':['感谢']})
     assert edited['confidence']==1 and edited['version']==2
-    chosen=asyncio.run(engine.choose('qq:group:1','123','谢谢','谢谢你',lambda:True))
+    assert engine.sendable_categories('qq:group:1')==['感谢']
+    chosen=engine.pick('qq:group:1','感谢','谢谢')
     assert chosen['id']==item['id'] and chosen['version']==2
 
 
@@ -158,16 +158,20 @@ def test_regular_images_are_not_saved_and_probability_is_a_gate(library):
     asyncio.run(collect(store,engine));assert len(model.calls)==1 and engine.page()['total']==0
 
 
-def test_send_probability_ambiguity_and_current_version_are_rechecked(library):
+def test_a_sticker_edited_after_the_reply_picked_it_is_not_sent(library):
     store,cfg,model,engine=library
     asyncio.run(collect(store,engine));item=engine.page()['items'][0]
-    cfg.update({'stickers':{'send_probability':.1}});engine.random=lambda:.5
-    assert asyncio.run(engine.choose('qq:group:1','123','谢谢','谢谢！',lambda:True)) is None
-    assert len(model.calls)==1
-    engine.random=lambda:0
-    model.after=lambda:engine.update(item['id'],{'meaning':'含义已经改变'})
-    assert asyncio.run(engine.choose('qq:group:1','123','谢谢','谢谢！',lambda:True)) is None
+    chosen=engine.pick('qq:group:1','感谢','谢谢')
+    assert asyncio.run(engine.confirm('qq:group:1',chosen,lambda:True))==chosen
+    assert asyncio.run(engine.confirm('qq:group:1',chosen,lambda:False)) is None
+    engine.update(item['id'],{'meaning':'含义已经改变'})
+    assert asyncio.run(engine.confirm('qq:group:1',chosen,lambda:True)) is None
     with pytest.raises(ValueError):engine.payload(item['id'],'qq:group:1',1)
+    # Turning sending off empties the categories the chat model is offered.
+    cfg.update({'stickers':{'send_enabled':False}})
+    assert engine.sendable_categories('qq:group:1')==[]
+    with pytest.raises(ValueError):engine.pick('qq:group:1','感谢')
+    assert len(model.calls)==1   # only the recognition; picking and checking call no model
 
 
 def test_shared_library_source_revocation_and_delete_tombstone(library):
@@ -294,7 +298,7 @@ def test_selection_records_semantic_match_statistics(library):
     store,cfg,model,engine=library
     asyncio.run(collect(store,engine))
     key=engine.page()['items'][0]['id']
-    assert asyncio.run(engine.choose('qq:group:1','123','谢谢你帮忙','不客气，开心能帮上忙',lambda:True))['id']==key
+    assert engine.pick('qq:group:1','感谢','开心地道谢')['id']==key
     match=engine.page()['items'][0]['match']
     assert (match['seen'],match['matched'],match['offered'],match['chosen'])==(1,1,1,1) and match['score']>.5
     engine.delete(key)
@@ -371,7 +375,9 @@ async def test_flow_sends_one_sticker_only_after_confirmed_text(library):
         async def observe(self,s,u,t,images,metadata):return store.add_message(s,u,'user',t,**metadata)
         async def respond(self,s,u,t,images,metadata):
             record=store.add_message(s,'assistant','assistant','谢谢你！',source_ids=metadata['source_ids'])
-            return {'reply':'谢谢你！','message_id':record['id']}
+            # The reply asked for a sticker with the send_sticker tool.
+            queued={'status':'queued','sticker':engine.pick(s,'感谢','谢谢')}
+            return {'reply':'谢谢你！','message_id':record['id'],'actions':[{'tool':'send_sticker','ok':True,'result':queued}]}
     chat=Chat();chat.social=social;chat.stickers=engine
     sent=[]
     async def emit(scope,text,metadata):sent.append((text,metadata));return True

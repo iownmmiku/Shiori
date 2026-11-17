@@ -76,6 +76,16 @@ REACTIONS = frozenset({
 _TRAILING = '。.!！~～…,，、'
 
 
+def requested_sticker(result):
+    """The sticker a reply queued with the send_sticker tool, if any."""
+    for action in result.get('actions') or []:
+        output = action.get('result')
+        if (action.get('tool') == 'send_sticker' and action.get('ok') and isinstance(output, dict)
+                and isinstance(output.get('sticker'), dict)):
+            return output['sticker']
+    return None
+
+
 def local_filter_kind(messages, *, pictures_described=False):
     """'picture', 'symbols' or 'reaction' when every message of a batch is that empty of content; None otherwise."""
     kinds = []
@@ -1632,7 +1642,7 @@ class ConversationFlow:
         self._active_group_entries = {}
         # Optional decorations never occupy the text job queue or its per-user
         # turn lock. Retain cancelled tasks until completion so churn cannot
-        # create an unbounded population of model requests.
+        # create an unbounded population of tasks.
         self._sticker_tasks = {}
         self._sticker_jobs = set()
         self._sticker_timeout = 5.0
@@ -1696,17 +1706,18 @@ class ConversationFlow:
         if task is not None:
             task.cancel()
 
-    def _schedule_sticker(self, scope_id, user_id, text, reply, metadata, batch):
+    def _schedule_sticker(self, scope_id, user_id, metadata, batch, sticker):
+        """Send, after the text, the sticker the reply asked for with send_sticker."""
         self._cancel_sticker(scope_id)
         library = getattr(self.chat, 'stickers', None)
-        if self._closed or library is None or len(self._sticker_jobs) >= 128:
+        if self._closed or not sticker or library is None or len(self._sticker_jobs) >= 128:
             return
         batch['sticker_persona_id'] = self.store.get_scope(scope_id).get('persona_id', 'default')
         try:
             batch['sticker_persona'] = self.store.get_persona(batch['sticker_persona_id'])
         except KeyError:
             return
-        task = asyncio.create_task(self._send_sticker(scope_id, user_id, text, reply, metadata, batch, library))
+        task = asyncio.create_task(self._send_sticker(scope_id, user_id, metadata, batch, library, sticker))
         self._sticker_tasks[scope_id] = task
         self._sticker_jobs.add(task)
         def completed(done):
@@ -1715,7 +1726,7 @@ class ConversationFlow:
                 self._sticker_tasks.pop(scope_id, None)
         task.add_done_callback(completed)
 
-    async def _send_sticker(self, scope_id, user_id, text, reply, metadata, batch, library):
+    async def _send_sticker(self, scope_id, user_id, metadata, batch, library, requested):
         task = asyncio.current_task()
         social = getattr(self.chat, 'social', None) or self._fallback
         def current():
@@ -1736,13 +1747,13 @@ class ConversationFlow:
                 return
             try:
                 async with asyncio.timeout(self._sticker_timeout):
-                    sticker = await library.choose(scope_id, user_id, text, reply, current)
+                    sticker = await library.confirm(scope_id, requested, current)
             except TimeoutError:
-                self.store.add_event('sticker_timeout', '表情包选择超过等待期限，已跳过；文字回复不受影响', scope_id=scope_id)
+                self.store.add_event('sticker_timeout', '表情包核对超过等待期限，已跳过；文字回复不受影响', scope_id=scope_id)
                 return
             if not sticker or not current() or self._output_locks[scope_id].locked():
                 return
-            # Selection never holds this lock and decorations do not queue
+            # The check never holds this lock and decorations do not queue
             # ahead of a text reply already being sent. An image already sent
             # keeps the bridge's normal ACK deadline, rather than an artificial
             # five-second cutoff that could manufacture an unknown receipt.
@@ -2304,7 +2315,7 @@ class ConversationFlow:
                             scope_id, user_id, ids, generation=batch.get('generation'),
                             proactive=':group:' in scope_id and not batch.get('explicit')
                             and not (batch.get('planner') or {}).get('addressed_to_bot'))
-                        self._schedule_sticker(scope_id, user_id, text, result['reply'], metadata, batch)
+                        self._schedule_sticker(scope_id, user_id, metadata, batch, requested_sticker(result))
                     else:
                         if batch.get('outcome') != 'suppressed':
                             self.store.add_event('qq_delivery', '群聊回复被平台拒收，未送达' if batch.get('outcome') == 'not_sent'

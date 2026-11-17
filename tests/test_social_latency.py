@@ -33,6 +33,7 @@ class Chat:
         self.store = store
         self.social = SocialEngine(store, settings, None)
         self.calls = []
+        self.sticker = {'id': 'fixture', 'version': 1}   # what each reply asks for with send_sticker
 
     async def observe(self, scope, user, text, images, metadata):
         return self.store.add_message(scope, user, 'user', text, **metadata)
@@ -41,7 +42,8 @@ class Chat:
         self.calls.append(text)
         message = self.store.add_message(scope, 'assistant', 'assistant', '回答：' + text,
                                          source_ids=metadata['source_ids'])
-        return {'reply': '回答：' + text, 'message_id': message['id'],
+        actions = [{'tool': 'send_sticker', 'ok': True, 'result': {'status': 'queued', 'sticker': self.sticker}}] if self.sticker else []
+        return {'reply': '回答：' + text, 'message_id': message['id'], 'actions': actions,
                 'timings': {'memory_recall_ms': 2, 'reply_model_ms': 4, 'total_ms': 6}}
 
 
@@ -53,7 +55,7 @@ class Stickers:
         self.guard = None
         self.sent = []
 
-    async def choose(self, scope, user, text, reply, current):
+    async def confirm(self, scope, sticker, current):
         self.guard = current
         self.started.set()
         try:
@@ -61,7 +63,7 @@ class Stickers:
         except asyncio.CancelledError:
             self.cancelled.set()
             raise
-        return {'id': 'fixture', 'version': 1}
+        return sticker
 
     def note_sent(self, *args):
         self.sent.append(args)
@@ -234,7 +236,7 @@ async def test_cancelled_optional_tasks_remain_under_global_cap_until_drained(se
         # Rapid superseding turns can cancel tasks before their first tick. Such
         # not-yet-drained cancellations still count against the population cap.
         for _ in range(140):
-            flow._schedule_sticker('qq:group:202', '303', 'input', 'reply', {}, {})
+            flow._schedule_sticker('qq:group:202', '303', {}, {}, {'id': 'fixture', 'version': 1})
         assert len(flow._sticker_jobs) == 128
         assert len(flow._sticker_tasks) <= 1
     finally:

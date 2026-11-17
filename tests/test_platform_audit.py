@@ -49,18 +49,17 @@ def test_store_and_planner_share_the_configured_day(tmp_path,monkeypatch):
     store.close()
 
 
-def test_vision_and_selection_share_one_budget_without_repeating_calls(library):
+def test_recognition_uses_the_daily_budget_and_sending_uses_none(library):
     store,settings,model,engine=library
     settings.update({'stickers':{'daily_model_calls':1}})
     asyncio.run(collect(store,engine))
     assert engine.quota_status()['vision']==1
-    assert asyncio.run(engine.choose('qq:group:1','123','谢谢','谢谢你的帮助',lambda:True)) is None
-    assert len(model.calls)==1 and engine.quota_status()['selection']==0
-    settings.update({'stickers':{'daily_model_calls':2}})
-    asyncio.run(engine.choose('qq:group:1','123','谢谢','谢谢你的帮助',lambda:True))
+    # The budget is spent, yet the chat model can still have a sticker sent.
+    chosen=engine.pick('qq:group:1','感谢','谢谢你的帮助')
+    assert asyncio.run(engine.confirm('qq:group:1',chosen,lambda:True))==chosen
     quota=engine.quota_status()
-    assert quota['vision']==quota['selection']==1 and quota['total']==2
-    assert engine.page()['quota']['total']==2
+    assert len(model.calls)==1 and quota['selection']==0 and quota['total']==1
+    assert engine.page()['quota']['total']==1
 
 
 def test_shared_quota_is_atomic_under_parallel_attempts(library):

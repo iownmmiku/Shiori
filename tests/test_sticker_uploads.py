@@ -64,9 +64,6 @@ class Vision:
             self.during()
         if self.fail:
             raise self.fail
-        if kwargs['purpose'] == 'sticker_select':
-            candidates = json.loads(messages[-1]['content'])['candidates']
-            return {'content': json.dumps({'id': candidates[0]['id'], 'confidence': .95, 'appropriate': True})}
         if self.raw is not None:
             return {'content': self.raw}
         return {'content': json.dumps(self.answer, ensure_ascii=False)}
@@ -110,7 +107,7 @@ def test_images_and_archives_upload_with_category_hints_and_duplicates(library):
                for x in items.values())
     assert engine.page(origin='collected')['total'] == 0
     # Not sendable until its meaning is known, and nothing was analysed yet.
-    assert asyncio.run(engine.choose('qq:group:1', '123', '夸你', '谢谢', lambda: True)) is None
+    assert engine.sendable_categories('qq:group:1') == []
     assert model.calls == [] and engine.analysis_status()['pending'] == 4
     again = engine.upload([('one-again.png', image('cyan'))], '开心')
     assert again['added'] == 0 and again['duplicates'] == 1
@@ -143,8 +140,8 @@ def test_manual_analysis_labels_uploads_and_makes_them_sendable_without_using_th
     status = engine.analysis_status()
     assert status['running'] is False and status['done'] == 1 and status['pending'] == 0
     assert engine.quota_status()['vision'] == 0
-    chosen = asyncio.run(engine.choose('qq:group:1', '123', '你真好看', '才没有', lambda: True))
-    assert chosen['id'] == item['id']
+    assert engine.sendable_categories('qq:group:1') == ['害羞']
+    assert engine.pick('qq:group:1', '害羞', '被夸')['id'] == item['id']
     assert engine.payload(item['id'], 'qq:group:1')[0]['id'] == item['id']
 
 
@@ -236,16 +233,21 @@ def test_categories_are_fixed_and_old_custom_ones_fold_into_other(tmp_path, libr
         asyncio.run(reopened.close())
 
 
-def test_a_chat_does_not_get_the_same_sticker_again_right_away(library):
+def test_a_chat_gets_the_other_stickers_before_one_comes_again(library):
     store, cfg, model, engine = library
     store.upsert_scope({'id': 'qq:group:2'})
-    engine.upload([('a.png', image('red'))], '')
+    engine.upload([('a.png', image('red')), ('b.png', image('blue'))], '')
     analyse(engine)
-    key = engine.page()['items'][0]['id']
-    chosen = asyncio.run(engine.choose('qq:group:1', '1', '夸你', '才没有', lambda: True))
-    engine.note_sent(chosen['id'], 'qq:group:1', chosen['version'])
-    assert asyncio.run(engine.choose('qq:group:1', '1', '夸你', '才没有', lambda: True)) is None
-    assert asyncio.run(engine.choose('qq:group:2', '1', '夸你', '才没有', lambda: True))['id'] == key
+    first = engine.pick('qq:group:1', '害羞', '被夸')
+    engine.note_sent(first['id'], 'qq:group:1', first['version'])
+    second = engine.pick('qq:group:1', '害羞', '被夸')
+    assert second['id'] != first['id']
+    engine.note_sent(second['id'], 'qq:group:1', second['version'])
+    # Both went out here recently: the earlier one comes back instead of nothing.
+    assert engine.pick('qq:group:1', '害羞', '被夸')['id'] == first['id']
+    # Each chat keeps its own list of recent stickers.
+    engine.note_sent(second['id'], 'qq:group:2', second['version'])
+    assert engine.pick('qq:group:2', '害羞', '被夸')['id'] == first['id']
 
 
 def test_deleted_uploads_come_back_when_uploaded_again_and_full_libraries_say_so(library):
