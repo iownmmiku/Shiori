@@ -287,8 +287,20 @@ class ContextEngine:
                 for source_id in current["source_ids"]:
                     sources[source_id] = self.store.get_message(source_id)
                 summary = current
+        # Versions that the records of this closure carry themselves. Walking a
+        # reply's ancestors compares each record's own versions with the
+        # current ones, so a new reply need not store these again; it keeps
+        # only what it depends on directly (see ChatService._respond).
+        inherited_memories, inherited_jargon = {}, {}
+        for record in sources.values():
+            metadata = (record or {}).get('metadata') or {}
+            if isinstance(metadata.get('memory_versions'), dict):
+                inherited_memories.update(metadata['memory_versions'])
+            if isinstance(metadata.get('jargon_versions'), dict):
+                inherited_jargon.update(metadata['jargon_versions'])
         return {"messages": valid, "summary": summary, "source_ids": sorted(sources),
                 "memory_versions": memories, "jargon_versions": jargon,
+                "inherited_memory_versions": inherited_memories, "inherited_jargon_versions": inherited_jargon,
                 "compressed": bool(summary), "reason": reason}
 
     @staticmethod

@@ -100,6 +100,11 @@ def create_app(data_dir=None, *, start_workers=True, allow_remote=False):
             await chat.memory_lifecycle.start()
             await chat.character_schedule.start()
             await topic_starter.start()
+            from .delivery import release_outbox_history
+            try:
+                await release_outbox_history(store)
+            except Exception as exc:    # housekeeping only; never blocks the service
+                store.add_exception('qq_outbox_release_error', '整理旧发送记录未完成，下次启动重试', exc)
         starter = asyncio.create_task(start_when_ready()) if start_workers else None
         yield
         await loop_watch.stop()

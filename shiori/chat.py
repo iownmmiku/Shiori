@@ -44,6 +44,81 @@ class QQImageSourceChanged(ValueError):
     """The batch's source messages or permission changed while images loaded."""
 
 
+def _direct_provenance(context, current_ids, closure, versions, jargon_versions, recalled_memories=(), recalled_jargon=()):
+    """What a new reply stores: its direct sources and dependencies, not the closure.
+
+    A reply used to store every message and memory version its validated
+    history reached, so each reply copied the one before it plus one round. In
+    a long private chat that was 1,430 message IDs and 717 memory versions per
+    reply (103 KB), every reply re-read all of them, and the chat slowed down a
+    little with every turn. Validation walks ancestors anyway: checking a reply
+    follows its sources' own `context_source_ids`/`source_ids` and compares each
+    record's own versions with the current ones (ContextManager._manifest), the
+    format legacy replies already used. So the stored sources are the history
+    records this reply was given, the summary's sources, the current request and
+    any evidence outside that history's closure; that walk reaches the same
+    closure. A version is left out only when a record of the closure carries the
+    same one, where the walk compares it. The delivery guard and the outbox still
+    get the whole closure from `ChatService._respond`'s result. Memories and terms
+    recalled for this reply always stay on it.
+    """
+    inherited = set(context.get('source_ids') or [])
+    summary = context.get('summary') or {}
+    sources = (set(current_ids) | {record['id'] for record in context.get('messages') or []}
+               | set(summary.get('source_ids') or []) | (set(closure) - inherited))
+    memories = context.get('inherited_memory_versions') or {}
+    jargon = context.get('inherited_jargon_versions') or {}
+    return (sorted(sources),
+            {key: value for key, value in versions.items()
+             if key in recalled_memories or key not in memories or memories[key] != value},
+            {key: value for key, value in jargon_versions.items()
+             if key in recalled_jargon or key not in jargon or jargon[key] != value})
+
+
+def _direct(record):
+    """The reply stores direct sources (`_direct_provenance`), not its closure."""
+    return (record.get('metadata') or {}).get('provenance') == 'direct'
+
+
+def _lineage_verdicts(candidates, ancestors, own):
+    """For each direct-source candidate: it and every same-chat ancestor pass `own`.
+
+    `own` is the check a flattened reply got on its own record. A record that
+    stores its closure (or has no sources) ends the walk, as its own sources
+    are the rest of the closure. A cycle fails, as in ContextManager._manifest.
+    """
+    records = {**ancestors, **{record['id']: record for record in candidates}}
+
+    def parents(record):
+        meta = record.get('metadata') or {}
+        keys = dict.fromkeys((*(meta.get('context_source_ids') or []), *(meta.get('source_ids') or [])))
+        return [records[key] for key in keys if isinstance(key, str) and key in records]
+
+    verdict, visiting = {}, set()
+    for start in candidates:
+        if not _direct(start) or start['id'] in verdict:
+            continue
+        stack = [(start, False)]
+        while stack:
+            record, expanded = stack.pop()
+            key = record['id']
+            if key in verdict:
+                continue
+            if not _direct(record):
+                verdict[key] = own(record)
+            elif not expanded:
+                if key in visiting:
+                    verdict[key] = False
+                    continue
+                visiting.add(key)
+                stack.append((record, True))
+                stack.extend((parent, False) for parent in parents(record) if parent['id'] not in verdict)
+            else:
+                visiting.discard(key)
+                verdict[key] = own(record) and all(verdict.get(parent['id'], False) for parent in parents(record))
+    return verdict
+
+
 def _schema(name, description, properties, required=()):
     return {'type': 'function', 'function': {'name': name, 'description': description,
             'parameters': {'type': 'object', 'properties': properties, 'required': list(required), 'additionalProperties': False}}}
@@ -812,10 +887,13 @@ class ChatService:
                 reply, reply_parts = adjusted['reply'], adjusted['reply_parts']
                 adjustment_metadata = {key: adjusted[key] for key in ('original_reply', 'output_adjustment', 'output_filtered') if key in adjusted}
                 job_ids = list(dict.fromkeys(x['result']['job_id'] for x in actions if isinstance(x.get('result'), dict) and x['result'].get('job_id')))
+                stored_sources, stored_versions, stored_jargon = _direct_provenance(
+                    context, current_ids, manifest['message_ids'], versions, jargon_versions,
+                    recalled_memories={x['id'] for x in memories}, recalled_jargon={x['id'] for x in jargon + expressions})
                 message = self.store.add_message(scope_id, 'assistant', 'assistant', reply, source_ids=current_ids, reply_parts=reply_parts, job_ids=job_ids,
-                                                 flow_trace_id=metadata.get('flow_trace_id'),
-                                                 context_source_ids=sorted(manifest['message_ids']), memory_ids=[x['id'] for x in memories],
-                                                 jargon_ids=[x['id'] for x in jargon], expression_ids=[x['id'] for x in expressions], memory_versions=versions, jargon_versions=jargon_versions,
+                                                 flow_trace_id=metadata.get('flow_trace_id'), provenance='direct',
+                                                 context_source_ids=stored_sources, memory_ids=[x['id'] for x in memories],
+                                                 jargon_ids=[x['id'] for x in jargon], expression_ids=[x['id'] for x in expressions], memory_versions=stored_versions, jargon_versions=stored_jargon,
                                                  knowledge_refs=manifest.get('knowledge_refs', {}), persona_id=scope.get('persona_id', 'default'), actions=actions,
                                                  **adjustment_metadata)
                 self._capture_schedule_material(message)
@@ -823,7 +901,12 @@ class ChatService:
                 self.memory.mark_used(scope_id,str(user_id),versions,message['id'])
                 jobs = [self.runs.get(job_id) for job_id in job_ids if hasattr(self, 'runs') and job_id in self.runs._jobs]
                 return {'reply': reply, 'reply_parts': reply_parts, 'message_id': message['id'], 'jobs': jobs, 'memories': memories, 'jargon': jargon, 'expressions': expressions, 'context_compressed': context.get('compressed', False), 'usage': usage, 'actions': actions, 'pending_actions':pending_actions,
-                        'output_filtered': adjusted.get('output_filtered', False), 'output_adjustment': adjusted.get('output_adjustment', {})}
+                        'output_filtered': adjusted.get('output_filtered', False), 'output_adjustment': adjusted.get('output_adjustment', {}),
+                        # The whole closure this reply was checked against; the
+                        # delivery guard and the outbox use it, as they used the
+                        # stored copy before replies kept only direct sources.
+                        'provenance': {'context_source_ids': sorted(manifest['message_ids']),
+                                       'memory_versions': dict(versions), 'jargon_versions': dict(jargon_versions)}}
         raise ValueError('本次回复未完成')
 
     def _request_current(self, scope_id, user_id, metadata):
@@ -946,9 +1029,23 @@ class ChatService:
             limit = min(limit, config.get('max_history_messages', 400))
         blocked = self._blocked_sources(scope_id)
         candidates = self.store.list_messages(scope_id, limit=limit)
-        memory_ids = {key for item in candidates for key in (item.get('metadata') or {}).get('memory_versions', {})}
+        ancestors = self._direct_ancestors(scope_id, candidates)
+        memory_ids = {key for item in (*candidates, *ancestors.values())
+                      for key in (item.get('metadata') or {}).get('memory_versions', {})}
         projection = {item['id']: item for item in self.store.visible_memories(scope_id, str(user_id),
                       record_ids=memory_ids, scope_allowed=self.social._allowed)} if user_id is not None else None
+        settled = {}
+
+        def own(record):
+            """A record's own sources and versions are still current (a flattened reply's are its closure)."""
+            key = record['id']
+            if key not in settled:
+                meta = record.get('metadata') or {}
+                source_ids = set(meta.get('context_source_ids', [])) | set(meta.get('source_ids', []))
+                settled[key] = not (key in blocked or source_ids & blocked or self._changed(
+                    meta.get('memory_versions', {}), meta.get('jargon_versions', {}), scope_id, user_id, memory_projection=projection))
+            return settled[key]
+        lineage = _lineage_verdicts(candidates, ancestors, own)
         result = []
         for message in candidates:
             meta = message.get('metadata') or {}
@@ -956,12 +1053,36 @@ class ChatService:
                 continue
             if not self._reference_allowed(meta,scope_id,user_id):
                 continue
-            source_ids = set(meta.get('context_source_ids', [])) | set(meta.get('source_ids', []))
-            if (message['id'] in blocked or source_ids & blocked or self._changed(meta.get('memory_versions', {}), meta.get('jargon_versions', {}), scope_id, user_id, memory_projection=projection)
+            if (not own(message) or not lineage.get(message['id'], True)
                     or self._knowledge_changed(meta.get('persona_id', 'default'), meta.get('knowledge_refs', {}))):
                 continue
             result.append(message)
         return align_rounds(result)
+
+    def _direct_ancestors(self, scope_id, records):
+        """Same-chat records reached from replies that store direct sources, read a layer at a time.
+
+        A reply written since `_direct_provenance` keeps only its direct sources,
+        so the history filter follows them to where the closure is complete: a
+        record that stores its own closure (every older reply) or has no sources.
+        """
+        known = {record['id']: record for record in records}
+        found, seen = {}, set()
+        layer = [record for record in records if _direct(record)]
+        while layer:
+            wanted = []
+            for record in layer:
+                if record['id'] in seen:
+                    continue
+                seen.add(record['id'])
+                meta = record.get('metadata') or {}
+                for key in (*(meta.get('context_source_ids') or []), *(meta.get('source_ids') or [])):
+                    if isinstance(key, str) and key not in known and key not in found:
+                        wanted.append(key)
+            loaded = self.store.ordered_messages(wanted, scope_id=scope_id) if wanted else []
+            found.update((record['id'], record) for record in loaded)
+            layer = [record for record in loaded if _direct(record)]
+        return found
 
     def _time_history(self,scope_id,user_id,text):
         return time_history(self, scope_id, user_id, text)

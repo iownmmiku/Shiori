@@ -367,14 +367,24 @@ async def test_another_members_at_does_not_authorize_a_bystanders_command(runtim
 
 
 @pytest.mark.anyio
-async def test_group_delivery_rechecks_each_original_members_admission(runtime):
+async def test_group_delivery_rechecks_each_original_members_admission(runtime, monkeypatch):
     store, _, _, _, _, flow, _ = runtime
+    created, real_create = [], DeliveryLedger.create
+
+    def create(self, *args):
+        record = real_create(self, *args)
+        created.append(deepcopy(record))
+        return record
+    monkeypatch.setattr(DeliveryLedger, 'create', create)
     try:
         await send(runtime, '404', '较早成员的问题')
         await send(runtime, '101', '最后成员的问题')
         await drain(flow)
         ledger = DeliveryLedger(store)
-        record = ledger.list(SCOPE)[0]
+        # The receipt as a resume would check it: no part sent yet, snapshot kept.
+        # (Once every part went out, the stored copy no longer keeps the snapshot.)
+        record = created[-1]
+        assert ledger.list(SCOPE)[0]['id'] == record['id']
         originals = [m for m in store.list_messages(SCOPE) if m['role'] == 'user']
         assert set(record['source_ids']) == {m['id'] for m in originals}
         assert ledger.valid(record, flow)

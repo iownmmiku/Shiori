@@ -721,6 +721,8 @@ class SocialEngine:
             metadata = item.get('metadata') or {}
             if metadata.get('knowledge_refs') or metadata.get('failure_feedback'):
                 continue  # The Chat history callback owns persona-knowledge validation.
+            if metadata.get('provenance') == 'direct':
+                continue  # Stores direct sources only; the Chat history callback walks its closure.
             sources = set(metadata.get('context_source_ids', []))
             sources.update(id for id in metadata.get('source_ids', []) if isinstance(id, str))
             if not sources <= live or sources & blocked:
@@ -2284,7 +2286,10 @@ class ConversationFlow:
                 batch['outcome'] = 'generated' if result.get('reply') else 'failed'
                 try:
                     batch['reply_message'] = self.store.get_message(batch['logical_message_id'])
-                    batch['dependencies'] = batch['reply_message'].get('metadata') or {}
+                    # The stored reply keeps its direct sources; the guard and
+                    # the outbox check the whole closure the reply was built on.
+                    batch['dependencies'] = dict(batch['reply_message'].get('metadata') or {},
+                                                 **(result.get('provenance') or {}))
                 except KeyError:
                     pass  # Minimal connector test doubles may not store an assistant record.
                 if result.get('reply') and self._may_answer(scope_id, user_id, batch):

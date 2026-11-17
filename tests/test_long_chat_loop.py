@@ -209,7 +209,10 @@ async def test_a_reply_checks_its_history_off_the_event_loop(tmp_path, monkeypat
         assert on_loop == {'_history': {False}, '_context': {False}, 'reference': {False}}
         # Same reply as before: the recalled lines still reach the model and its provenance.
         assert '【历史消息（时间检索）】' in model.prompts[-1] and '昨天说好周日去爬山' in model.prompts[-1]
-        assert old['id'] in store.get_message(result['message_id'])['metadata']['context_source_ids']
+        assert old['id'] in result['provenance']['context_source_ids']
+        # The stored reply keeps direct sources; walking them still reaches the recalled line.
+        stored = store.get_message(result['message_id'])
+        assert old['id'] in chat.context.reference(SCOPE, USER, [stored])['source_ids']
     finally:
         await chat.close()
         store.close()

@@ -1,5 +1,6 @@
 """Durable multipart receipts. Unknown deliveries are never replayed."""
 from __future__ import annotations
+import asyncio
 import json
 import hashlib
 import threading
@@ -61,12 +62,82 @@ def _stored_fingerprint(data):
     return known
 
 
+# The snapshot only guards a resume of parts that never went out. A record with
+# no part left `pending` (or still `sending`) is never resumed, so its stored copy
+# drops the source list and fingerprints: about 250 KB per reply in a long private
+# chat, 172 MB of the server's events table on 2026-11-17.
+_SNAPSHOT_FIELDS = ('context_source_ids', 'message_fingerprints')
+_DEPENDENCY_SNAPSHOT_FIELDS = ('context_source_ids', 'memory_versions', 'jargon_versions')
+
+
+def _finished(record):
+    parts = record.get('parts')
+    return isinstance(parts, list) and all(isinstance(part, dict) and part.get('status') not in ('pending', 'sending')
+                                           for part in parts)
+
+
+def released_copy(record):
+    """The stored form of a finished outbox record, or None when there is nothing to drop."""
+    dependencies = record.get('dependencies') if isinstance(record.get('dependencies'), dict) else {}
+    if not _finished(record) or not (any(key in record for key in _SNAPSHOT_FIELDS)
+                                     or any(key in dependencies for key in _DEPENDENCY_SNAPSHOT_FIELDS)):
+        return None
+    fingerprints = record.get('message_fingerprints')
+    copy = {key: value for key, value in record.items() if key not in _SNAPSHOT_FIELDS and key != 'snapshot_version'}
+    copy['dependencies'] = {key: value for key, value in dependencies.items() if key not in _DEPENDENCY_SNAPSHOT_FIELDS}
+    copy['snapshot_released'] = {'sources': len(fingerprints) if isinstance(fingerprints, dict) else None}
+    return copy
+
+
+def release_finished_snapshots(store, after='', limit=50):
+    """Drop the snapshot from finished outbox records written before this change.
+
+    Walks the outbox in time order from `after`, `limit` rows per call, each row
+    rewritten in its own short lock hold. Returns (rewritten, last created_at,
+    rows read); a call that reads no row is the end.
+    """
+    with store._lock:
+        rows = store._conn.execute("SELECT id,created_at,data FROM events WHERE kind='qq_outbox' AND created_at>? "
+                                   "ORDER BY created_at LIMIT ?", (after, limit)).fetchall()
+    rewritten = 0
+    for key, created_at, data in rows:
+        event = json.loads(data)
+        details = event.get('details')
+        copy = released_copy(details) if isinstance(details, dict) else None
+        if copy is None:
+            continue
+        with store._lock, store._conn:
+            current = store._conn.execute('SELECT data FROM events WHERE id=?', (key,)).fetchone()
+            if current is None or current[0] != data:
+                continue    # saved again meanwhile; that save decides
+            store._write('events', dict(event, details=copy), ('kind', 'created_at'))
+        rewritten += 1
+    return rewritten, (rows[-1][1] if rows else after), len(rows)
+
+
+async def release_outbox_history(store, *, pause=0.2):
+    """Run release_finished_snapshots over the whole outbox off the event loop, once per start."""
+    after, total = '', 0
+    while True:
+        rewritten, after, read = await asyncio.to_thread(release_finished_snapshots, store, after)
+        total += rewritten
+        if not read:
+            break
+        if rewritten:
+            await asyncio.sleep(pause)
+    if total:
+        store.add_event('qq_outbox_released', '已发完的分段发送记录不再保存来源快照', records=total)
+    return total
+
+
 class DeliveryLedger:
     def __init__(self,store):self.store=store
 
     def save(self,record):
         record['updated_at']=utc_now()
-        event={'id':record['id'],'kind':'qq_outbox','message':'QQ 分段发送记录','created_at':record['updated_at'],'details':record}
+        # The caller keeps the full record in memory; only the stored copy is released.
+        stored=released_copy(record) or record
+        event={'id':record['id'],'kind':'qq_outbox','message':'QQ 分段发送记录','created_at':record['updated_at'],'details':stored}
         with self.store._lock,self.store._conn:self.store._write('events',event,('kind','created_at'))
         return record
 

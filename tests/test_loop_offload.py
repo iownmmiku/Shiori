@@ -179,7 +179,8 @@ async def test_the_delivery_receipt_is_built_off_the_event_loop(tmp_path, monkey
         await asyncio.wait_for(bridge._flow.handle(scope, '303', 'Hello', [], {'at_bot': True}, direct=True), 5)
         assert threads == [False]
         receipt = DeliveryLedger(store).list(scope)[0]
-        assert receipt['message_fingerprints'] and [part['status'] for part in receipt['parts']] == ['confirmed']
+        # Built with its sources; once every part went out, the stored copy keeps only their count.
+        assert receipt['snapshot_released']['sources'] >= 2 and [part['status'] for part in receipt['parts']] == ['confirmed']
     finally:
         await bridge.stop()
         await chat.close()
