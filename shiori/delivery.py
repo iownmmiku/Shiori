@@ -2,6 +2,8 @@
 from __future__ import annotations
 import json
 import hashlib
+import threading
+from collections import OrderedDict
 from uuid import uuid4
 from fastapi import Body
 from .db import message_fingerprint, utc_now
@@ -28,6 +30,35 @@ def _delivery_fingerprint(record):
     payload={'message':message_fingerprint(record),
              'sent_at':record.get('sent_at'),'received_at':record.get('received_at')}
     return hashlib.sha256(json.dumps(payload,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+
+
+# Receipt fingerprints of stored rows, keyed by a digest of the row's exact
+# stored JSON. A fingerprint depends on that text alone, so a hit is what a
+# fresh decode would give, and an edited row has new text and a new key. Each
+# reply of a long private chat cites nearly every message the one before it
+# did (1,430 on the server, 45 MB); decoding and re-encoding all of them for
+# every reply took seconds of CPU in a worker thread, and the event loop's own
+# small reads waited for the interpreter meanwhile.
+_STORED_FINGERPRINTS = OrderedDict()
+_STORED_FINGERPRINT_LIMIT = 8192
+_stored_fingerprint_lock = threading.Lock()
+
+
+def _stored_fingerprint(data):
+    """(id, scope_id, receipt fingerprint) of a message row's stored JSON."""
+    digest = hashlib.sha256(data.encode('utf-8', 'surrogatepass')).digest()
+    with _stored_fingerprint_lock:
+        known = _STORED_FINGERPRINTS.get(digest)
+        if known is not None:
+            _STORED_FINGERPRINTS.move_to_end(digest)
+            return known
+    row = json.loads(data)
+    known = (row['id'], row.get('scope_id'), _delivery_fingerprint(row))
+    with _stored_fingerprint_lock:
+        _STORED_FINGERPRINTS[digest] = known
+        while len(_STORED_FINGERPRINTS) > _STORED_FINGERPRINT_LIMIT:
+            _STORED_FINGERPRINTS.popitem(last=False)
+    return known
 
 
 class DeliveryLedger:
@@ -58,12 +89,21 @@ class DeliveryLedger:
         record['context_source_ids']=list(dict.fromkeys(key for reference in references
             for name in ('source_ids','context_source_ids') for key in reference.get(name,[])))
         keys=self._snapshot_ids(record)
-        if keys is not None:
-            for row in self.store.ordered_messages(keys,scope_id=scope):
-                originals.setdefault(row['id'],row)
         record['snapshot_version']=1
-        record['message_fingerprints']={key:_delivery_fingerprint(row) for key,row in originals.items()
-            if keys is not None and key in keys and row.get('scope_id')==scope}
+        fingerprints={}
+        if keys is not None:
+            # The batch's own copies come first and win over the stored rows.
+            for key,row in originals.items():
+                if key in keys and row.get('scope_id')==scope:
+                    fingerprints[key]=_delivery_fingerprint(row)
+            seen=set(originals)
+            for _,data in self.store.ordered_message_rows(keys,scope_id=scope):
+                key,owner,fingerprint=_stored_fingerprint(data)
+                if key in seen:continue
+                seen.add(key)
+                if key in keys and owner==scope:
+                    fingerprints[key]=fingerprint
+        record['message_fingerprints']=fingerprints
         return self.save(record)
 
     @staticmethod

@@ -723,22 +723,54 @@ class Store:
     def get_message(self, id: str) -> dict:
         return self._get("messages", id)
 
+    # Ids resolved per statement by ordered_message_rows. The sources of one
+    # reply in a long private chat are over a thousand rows and tens of MB;
+    # read in one go they held the store lock, and so every reader on the
+    # event loop, for over half a second.
+    ROWS_PER_LOOKUP = 100
+
+    def ordered_message_rows(self, ids, *, scope_id):
+        """`(id, stored JSON)` of these messages of one chat, in list_messages order.
+
+        The JSON is left undecoded so a caller can recognise rows it has seen
+        before. The store lock is taken once per ROWS_PER_LOOKUP ids, and the
+        rows are put in order here: an ORDER BY made SQLite copy every row's
+        data into a temporary sort tree first (0.7 s for 65 MB, against 0.16 s).
+        """
+        keys = list(dict.fromkeys(ids))
+        found = []
+        for start in range(0, len(keys), self.ROWS_PER_LOOKUP):
+            part = keys[start:start + self.ROWS_PER_LOOKUP]
+            with self._lock:
+                # Lookups of a few known ids go through the primary key. With a plain
+                # `scope_id=?` SQLite (no ANALYZE statistics here) picks a scope index
+                # and walks every message of the chat to find them: 0.1-0.2 s per call
+                # in a group of 40,000 messages, with the event loop waiting. The unary
+                # `+` keeps scope_id out of index choice; it is still checked per row.
+                found.extend(self._conn.execute(
+                    "SELECT created_at,rowid,id,data FROM messages WHERE +scope_id=? AND id IN "
+                    "(SELECT value FROM json_each(?))", (scope_id, json.dumps(part))).fetchall())
+        found.sort(key=lambda row: (row[0], row[1]))   # ORDER BY created_at,rowid
+        return [(row[2], row[3]) for row in found]
+
     def ordered_messages(self, ids, *, scope_id):
         """Resolve canonical sources in the same order as list_messages."""
-        keys = list(dict.fromkeys(ids))
-        if not keys:
-            return []
+        return [json.loads(data) for _, data in self.ordered_message_rows(ids, scope_id=scope_id)]
+
+    def newest_user_message_id(self, scope_id, *, within=200):
+        """The newest user message among the chat's last `within` messages, or None.
+
+        The same answer as scanning list_messages(scope_id, within), which the
+        sticker check did: it decoded 200 messages, about 10 MB in a long
+        private chat, on the event loop for each check. The id and role
+        columns are written from the same record as the data, so the index
+        answers this without reading any message.
+        """
         with self._lock:
-            # Lookups of a few known ids go through the primary key. With a plain
-            # `scope_id=?` SQLite (no ANALYZE statistics here) picks a scope index
-            # and walks every message of the chat to find them: 0.1-0.2 s per call
-            # in a group of 40,000 messages, with the event loop waiting. The unary
-            # `+` keeps scope_id out of index choice; it is still checked per row.
             rows = self._conn.execute(
-                "SELECT data FROM messages WHERE +scope_id=? AND id IN "
-                "(SELECT value FROM json_each(?)) ORDER BY created_at,rowid",
-                (scope_id, json.dumps(keys))).fetchall()
-        return [json.loads(row[0]) for row in rows]
+                "SELECT id,role FROM messages WHERE scope_id=? ORDER BY created_at DESC,rowid DESC LIMIT ?",
+                (scope_id, _limit(within))).fetchall()
+        return next((row[0] for row in rows if row[1] == 'user'), None)
 
     def _prepare_memory(self, record: dict) -> dict:
         if record.get("episode") is not None:

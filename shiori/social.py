@@ -2067,8 +2067,7 @@ class ConversationFlow:
         if plan_dependencies and social.knowledge_current_fn and not social.knowledge_current_fn(scope_id, str(user_id), plan_dependencies):
             return 'planner_dependencies_changed'
         ids = {x['message']['id'] for x in batch['entries']}
-        if sticker and next((x['id'] for x in reversed(self.store.list_messages(scope_id, limit=200))
-                             if x.get('role') == 'user'), None) not in ids:
+        if sticker and self.store.newest_user_message_id(scope_id, within=200) not in ids:
             # A different member may have spoken while the old text was still
             # waiting for its QQ receipt, before any decoration task existed.
             return 'newer_message_for_sticker'
