@@ -139,6 +139,8 @@ def test_a_data_folder_extension_stays_off_until_confirmed(make_host):
     item = host.set_enabled('hello', True, confirm=True)
     assert item['enabled'] and item['loaded'] and item['tools'] == ['wave']
     # Restarted unchanged it comes back on; a changed file needs confirming again.
+    (root / 'extensions' / 'hello' / '.git').mkdir()
+    (root / 'extensions' / 'hello' / '.git' / 'FETCH_HEAD').write_text('fetched', 'utf-8')   # a cloned extension
     again = ExtensionHost(store, Config(), root)
     again.start()
     assert again.enabled('hello')

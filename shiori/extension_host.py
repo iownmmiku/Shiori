@@ -247,10 +247,12 @@ def read_manifest(root):
 
 
 def folder_digest(root):
-    """A digest of every file in an extension folder (bytecode caches aside)."""
+    """A digest of every file in an extension folder. Bytecode caches and
+    hidden folders such as .git (a cloned extension) are left out: they hold
+    nothing Shiori loads and change without the code changing."""
     digest, count, total = hashlib.sha256(), 0, 0
     for directory, names, files in os.walk(root, followlinks=False):
-        names[:] = sorted(name for name in names if name != '__pycache__')
+        names[:] = sorted(name for name in names if name != '__pycache__' and not name.startswith('.'))
         for name in sorted(files):
             path = Path(directory) / name
             if path.is_symlink():
