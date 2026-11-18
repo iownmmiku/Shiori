@@ -91,8 +91,11 @@ def source_files(root: Path) -> list[Path]:
                 relative = path.relative_to(base)
                 resource = tree == 'shiori' and relative.parts[0] == 'resources'
                 static = tree == 'shiori' and relative.parts[0] == 'static'
+                # Bundled extensions carry a manifest and their own pages.
+                extension = tree == 'shiori' and relative.parts[0] == 'extensions'
                 allowed = (path.suffix.casefold() in types
                            or (static and path.suffix.casefold() in STATIC_TYPES)
+                           or (extension and (path.suffix.casefold() in STATIC_TYPES or name == 'extension.json'))
                            or (resource and (path.suffix.casefold() in {'.md', '.ps1', '.cmd'} or name in RESOURCE_NOTICES))
                            or (tree == 'third_party/pystray' and name in {'COPYING', 'COPYING.LGPL'}))
                 if not allowed:

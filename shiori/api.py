@@ -149,6 +149,8 @@ def create_app(data_dir=None, *, start_workers=True, allow_remote=False):
     app.state.backup_restore = None
     from .auth_api import install_auth, local_peer, token_matches
     auth_http = install_auth(app, settings, data_dir, allow_remote=allow_remote)
+    from .extensions_api import install_extensions
+    install_extensions(app, chat.extensions, auth_http)
     from .life_schedule_api import install_character_schedule
     install_character_schedule(app, chat.character_schedule)
     from .catalog_api import install_catalog
@@ -289,7 +291,9 @@ def create_app(data_dir=None, *, start_workers=True, allow_remote=False):
                         request_gate.notify_all()
         result.headers['X-Content-Type-Options'] = 'nosniff'
         result.headers['Referrer-Policy'] = 'no-referrer'
-        result.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+        # Extension pages are embedded by the console itself; nothing else may frame anything.
+        ancestors = "'self'" if request.url.path.startswith('/extensions/') else "'none'"
+        result.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors " + ancestors
         if request.url.path.startswith('/api/'):
             result.headers['Cache-Control'] = 'no-store'
         elif request.url.path.startswith('/static/'):

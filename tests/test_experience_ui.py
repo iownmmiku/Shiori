@@ -80,3 +80,19 @@ def test_sticker_configuration_library_and_editing_interactions():
     result = subprocess.run([node, str(Path(__file__).with_name('frontend_stickers.cjs'))],
                             capture_output=True, text=True, encoding='utf-8', timeout=20)
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_extensions_page_trust_settings_and_embedded_pages():
+    node = shutil.which('node')
+    if not node: pytest.skip('Optional frontend regression requires Node.js')
+    result = subprocess.run([node, str(Path(__file__).with_name('frontend_extensions.cjs'))],
+                            capture_output=True, text=True, encoding='utf-8', timeout=20)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_image_generation_page_services_personas_and_test_picture():
+    node = shutil.which('node')
+    if not node: pytest.skip('Optional frontend regression requires Node.js')
+    result = subprocess.run([node, str(Path(__file__).with_name('frontend_imagegen.cjs'))],
+                            capture_output=True, text=True, encoding='utf-8', timeout=20)
+    assert result.returncode == 0, result.stdout + result.stderr

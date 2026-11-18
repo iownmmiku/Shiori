@@ -544,7 +544,7 @@ class OneBotBridge:
         await self.send(scope_id, '这次回复没能完成，请检查本地模型、预算与运行日志后再试。', metadata=dict(metadata, failure_feedback=True))
 
     async def _emit(self, scope_id, text, metadata):
-        if metadata.get('sticker'):
+        if metadata.get('sticker') or metadata.get('image'):
             return await self._send_part(scope_id,'',metadata=metadata)
         return await self.send(scope_id, text, metadata=metadata)
 
@@ -617,7 +617,7 @@ class OneBotBridge:
         return waited
 
     async def _send_part(self, scope_id, text, *, metadata=None):
-        sticker = (metadata or {}).get('sticker')
+        sticker = (metadata or {}).get('sticker') or (metadata or {}).get('image')
         if not self._allowed(scope_id) or self._socket is None or not str(text).strip() and not sticker:
             return False
         waited = await self._pace(scope_id)
@@ -660,6 +660,17 @@ class OneBotBridge:
                 _,raw=self.chat.stickers.payload(sticker['id'],scope_id,sticker['version'])
                 params['message']=[{'type':'image','data':{'file':'base64://'+base64.b64encode(raw).decode()}}]
             except (KeyError,ValueError,AttributeError,TypeError): return False
+        elif (metadata or {}).get('image'):
+            # A picture from an extension (image generation, say), sent on its own after the text.
+            guard = (metadata or {}).get('image_current')
+            if callable(guard) and not guard(): return False
+            try:
+                from .outgoing_image import onebot_image
+                raw = await asyncio.to_thread(onebot_image, metadata['image'])
+            except Exception as exc:
+                self.store.add_exception('qq_delivery', '生成的图片无法转换为可发送的格式', exc, scope_id=scope_id)
+                return False
+            params['message'] = [{'type': 'image', 'data': {'file': 'base64://' + base64.b64encode(raw).decode()}}]
         socket = self._socket
         echo = uuid.uuid4().hex
         future = asyncio.get_running_loop().create_future()

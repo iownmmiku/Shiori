@@ -156,11 +156,12 @@ TOOLS = [
 ]
 
 
-def _only_queued(actions):
-    """No tool in this turn had an effect yet: at most a sticker was queued,
-    and it goes out only with the reply. Such a turn may fail or start over
-    like one that used no tools."""
-    return all(x.get('tool') == 'send_sticker' for x in actions)
+def _only_queued(actions, queued=frozenset({'send_sticker'})):
+    """No tool in this turn had an effect yet: at most a sticker or an
+    extension's after-reply work (a picture, say) was queued, and it goes out
+    only after the reply. Such a turn may fail or start over like one that
+    used no tools."""
+    return all(x.get('tool') in queued for x in actions)
 
 
 def sticker_tool(categories, invited=False):
@@ -231,6 +232,11 @@ class ChatService:
         self.handle_platform_command = None
         from .life_schedule import CharacterSchedule
         self.character_schedule = CharacterSchedule(store, settings, provider, store.data_dir)
+        # Extensions run in this process and may add tools (extension_host.py).
+        from .extension_host import ExtensionHost
+        self.extensions = ExtensionHost(store, settings, store.data_dir,
+                                        reserved={item['function']['name'] for item in TOOLS} | {'send_sticker'})
+        self.extensions.start()
 
     def reset_engines(self):
         self.search.resume()
@@ -609,6 +615,8 @@ class ChatService:
             metadata = dict(metadata, source_ids=current_ids)
             if unreadable_images:
                 metadata['_unreadable_images'] = unreadable_images
+            # This turn's prepared pictures; extension tools may use them (image references).
+            metadata['_turn_images'] = [image for image in images if str(image).startswith('data:image/')]
             local_turn = self._local_turn(scope_id, user_id, metadata)
             turn_source_snapshot = {} if local_turn else None
             if local_turn:
@@ -841,8 +849,8 @@ class ChatService:
                     if not self._request_current(scope_id, user_id, metadata):
                         return self._interrupted(actions)
                     if (str(result.get('content') or '').strip() and actions[step_start:]
-                            and all(x['tool'] == 'send_sticker' and x['ok'] for x in actions[step_start:])):
-                        break   # the text came with the sticker call; a second model call adds nothing
+                            and all(x['tool'] in self._queued_tools() and x['ok'] for x in actions[step_start:])):
+                        break   # the text came with the queueing call; a second model call adds nothing
 
                     metadata['_context_source_ids'] = sorted(manifest['message_ids'])
                     try:
@@ -863,16 +871,19 @@ class ChatService:
                         with measure('reply_model_ms'), preview_filter(versions, user_text=text, output_options=output_config(self.settings.get(), scope)):
                             result = await self.provider.complete(messages, tools=continuation_tools, scope_id=scope_id, before_send=before_send)
                     except ProviderError:
-                        if _only_queued(actions): raise
+                        if _only_queued(actions, self._queued_tools()):
+                            self.extensions.discard_actions(actions)
+                            raise
                         result = {'content':'模型未能继续整理答复。已执行的工具结果保留在下方和 MCP 调用记录中，请核对后再决定下一步；不会自动重跑。', 'tool_calls':[], 'usage':usage}
                         break
                     usage = result['usage']
                 reply = strip_memory_citations(result.get('content', ''), versions, user_text=text).strip()
                 generated_reply = bool(reply)
                 if not reply:
-                    if not _only_queued(actions):
+                    if not _only_queued(actions, self._queued_tools()):
                         reply = '\n'.join(f"{x['tool']}：" + ('已执行，详细结果见下方工具记录。' if x['ok'] else x['error']) for x in actions)
                     else:
+                        self.extensions.discard_actions(actions)
                         raise ProviderError('模型未返回文本，请更换兼容的聊天模型后重试。')
                 if not self._request_current(scope_id, user_id, metadata):
                     return self._interrupted(actions)
@@ -891,8 +902,9 @@ class ChatService:
                 if (changed or resolved_identity(self.settings.get(), current) != identity_snapshot
                         or bool(context_cfg.get('enabled')) != bool(self.settings.get().get('context', {}).get('enabled'))
                         or any(scope.get(key) != current.get(key) for key in ('persona_id', 'dictionary_use', 'dictionary_understand', 'expression_use', 'context_compress', 'allow_tools','use_persona_knowledge'))):
-                    if not _only_queued(actions):
+                    if not _only_queued(actions, self._queued_tools()):
                         raise ValueError('执行过程中记忆或词典已变更，工具结果已保存，请查看记录后重新提问；不会自动重复执行。')
+                    self.extensions.discard_actions(actions)   # the turn starts over and may ask again
                     if retry == 0:
                         memories = await self._recall_context(scope_id, str(user_id), text,metadata.get('planner',{}).get('needed_info'))
                         jargon = self.social.match_jargon(scope_id, text, 6) if current.get('dictionary_understand', True) else []
@@ -1234,6 +1246,26 @@ class ChatService:
             metadata['_sticker_invited'] = invited
         return sticker_tool(categories, invited)
 
+    def _queued_tools(self):
+        return {'send_sticker'} | self.extensions.queued_names()
+
+    def _extension_turn(self, scope, user_id, metadata):
+        from .extension_host import Turn
+        return Turn(scope['id'], str(user_id), scope.get('persona_id', 'default'),
+                    tuple((metadata or {}).get('_turn_images') or ()), bool(self._group_request(scope['id'])))
+
+    def _extension_tools(self, scope, user_id, metadata):
+        """Extension tools for this turn. Merged group turns get none: their
+        work is done for one member, who has to ask on their own."""
+        if self._group_request(scope['id']):
+            return []
+        return self.extensions.tool_schemas(self._extension_turn(scope, user_id, metadata))
+
+    @staticmethod
+    def _account(scope_id, user_id):
+        return ('qqofficial' if scope_id.startswith('qqofficial:') else 'qq' if scope_id.startswith('qq:')
+                else scope_id.split(':', 1)[0]) + ':' + str(user_id)
+
     def _request_tools(self, scope, user_id, text, metadata):
         """Resolve the actual permitted schemas before allocating input space."""
         scope_id = scope['id']
@@ -1247,6 +1279,8 @@ class ChatService:
             tools = [item for item in tools if item.get('function', {}).get('name') != 'web_search']
         if sticker:
             tools.append(sticker)
+        if tools:
+            tools.extend(self._extension_tools(scope, user_id, metadata))
         harness = getattr(self, 'local_harness', None)
         if tools and harness and self._local_turn(scope_id, user_id, metadata):
             tools.extend(harness.tools(scope_id, str(user_id), metadata))
@@ -1303,6 +1337,8 @@ class ChatService:
         if any(item['function']['name'] == 'send_sticker' for item in tools or []):
             system += ('\n你有表情包，可以用 send_sticker 发，它会在文字之后单独发出；对方要表情包时就调用，不要说自己没有表情包。'
                        + ('这一轮如果情绪合适，可以顺手配一张，不合适就不发。' if metadata.get('_sticker_invited') else ''))
+        for hint in self.extensions.hints({item['function']['name'] for item in tools or []}):
+            system += '\n' + hint
         if local_chat:
             from .local_chat import instructions
             workspace = str(self.computer.workspace()) if self.computer and any(item['function']['name'] == 'read_file' for item in tools or []) else ''
@@ -1864,6 +1900,17 @@ class ChatService:
             # Sent by the connector after the text; this reply only queues it.
             return {'ok': True, 'status': 'queued', 'sticker': picked,
                     'message': '表情包已排队，会在你的文字回复之后发出；现在照常写回复，不用描述图片。'}
+        if self.extensions.has_tool(name):
+            offered = next((item for item in self._extension_tools(scope, user_id, metadata)
+                            if item['function']['name'] == name), None)
+            if offered is None:
+                raise ValueError('当前会话不能使用这个工具')
+            validate_arguments(offered['function']['parameters'], args)
+            from .extension_host import ToolCall
+            turn = self._extension_turn(scope, user_id, metadata)
+            return await self.extensions.call_tool(name, ToolCall(
+                scope_id, str(user_id), self._account(scope_id, user_id), turn.persona_id, dict(args),
+                admin=bool(self.access and self.access.is_admin(metadata.get('trusted_identity'))), images=turn.images))
         schema = next((x['function']['parameters'] for x in TOOLS if x['function']['name'] == name), None)
         if schema is None: raise ValueError('未知工具')
         validate_arguments(schema,args)
