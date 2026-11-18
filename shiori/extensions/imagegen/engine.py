@@ -30,9 +30,9 @@ from urllib.parse import quote, urlencode, urlsplit
 
 import httpx
 
-from ... import outgoing_image
-from ...settings import _protect, _unprotect
-from ...timezones import local_now
+from shiori import outgoing_image
+from shiori.settings import _protect, _unprotect
+from shiori.timezones import local_now
 
 KINDS = {'openai': 'OpenAI 兼容图像接口', 'gemini': 'Gemini 图像模型', 'novelai': 'NovelAI', 'comfyui': 'ComfyUI 工作流'}
 DEFAULT_ENDPOINTS = {'openai': 'https://api.openai.com/v1', 'gemini': 'https://generativelanguage.googleapis.com/v1beta',
@@ -415,7 +415,7 @@ async def _image_value(value):
     if not isinstance(value, str) or not value.strip():
         raise ImageGenError('生图接口的响应里没有图片')
     if value.startswith(('https://', 'http://')):
-        from ...stickers import download_image
+        from shiori.stickers import download_image
         try:
             raw, _ = await asyncio.to_thread(download_image, value, max_bytes=5 * 1024 * 1024)
         except Exception as exc:

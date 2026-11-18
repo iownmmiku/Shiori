@@ -327,3 +327,27 @@ async def test_a_qq_reply_runs_the_extension_work_after_its_text(tmp_path):
     call = chat.extensions.context('hello').state['calls'][0]
     assert (call.user_key, call.persona_id, call.admin) == ('qq:303', 'default', False)
     store.close()
+
+
+def test_the_image_extension_also_installs_from_the_data_folder(tmp_path):
+    # It is published on its own as well; the same folder must load as a data-folder extension.
+    import shutil
+    from pathlib import Path
+    source = Path(__file__).resolve().parents[1] / 'shiori' / 'extensions' / 'imagegen'
+    shutil.copytree(source, tmp_path / 'extensions' / 'imagegen', ignore=shutil.ignore_patterns('__pycache__'))
+    (tmp_path / 'bundled').mkdir()
+    store = Store(tmp_path)
+    try:
+        host = ExtensionHost(store, Config(), tmp_path, builtin_root=tmp_path / 'bundled')
+        host.start()
+        assert not host.enabled('imagegen')
+        item = host.set_enabled('imagegen', True, confirm=True)
+        assert item['loaded'] and not item['builtin'] and item['tools'] == ['generate_image'], item['error']
+        engine = host.context('imagegen').state['engine']
+        assert type(engine).__module__ == 'shiori_extension_imagegen.engine'
+        engine.update({'services': [{'id': 'main', 'kind': 'openai', 'api_key': 'sk-fixture', 'model': 'gpt-image-1'}],
+                       'service_id': 'main'})
+        assert [schema['function']['name'] for schema in host.tool_schemas(Turn(PRIVATE, '303'))] == ['generate_image']
+        assert (tmp_path / 'extension_data' / 'imagegen' / 'config.json').is_file()
+    finally:
+        store.close()

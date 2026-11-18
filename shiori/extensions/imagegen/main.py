@@ -5,7 +5,7 @@ to draw; the tool only reserves the picture, and the host runs `deliver`
 after the text reply went out (or `cancel`, which gives the count back, when
 it did not).
 """
-from ...extension_host import ToolResult
+from shiori.extension_host import ToolResult
 from .engine import ASPECTS, MAX_PROMPT, ImageGen, ImageGenError, chat_reason, decode_data_url
 
 HINT = ('你会画画和拍照，可以用 generate_image 生成图片，图要几十秒才画好，会在文字之后单独发出。'
