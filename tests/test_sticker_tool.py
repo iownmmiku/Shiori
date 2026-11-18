@@ -184,6 +184,22 @@ async def test_a_merged_group_turn_may_send_a_sticker(make):
 
 
 @pytest.mark.anyio
+async def test_someone_else_speaking_before_the_text_goes_out_keeps_the_sticker(make):
+    # Server, 23:41: in a busy group another member spoke while the reply was
+    # being written; the text said "发了" and the picture was dropped.
+    class Busy(Model):
+        async def complete(self, messages, **kwargs):
+            if kwargs.get('purpose', 'chat') == 'chat':
+                self.store.add_message(GROUP, '505', 'user', '这上面还是下面啊')
+            return await super().complete(messages, **kwargs)
+    model = Busy(answer('行吧，发了。', [call('开心')]))
+    store, config, chat = make(model)
+    model.store = store
+    segments = await over_qq(store, config, chat, '能不能发个表情包', GROUP)
+    assert [segment['type'] for segment in segments] == ['text', 'image']
+
+
+@pytest.mark.anyio
 async def test_text_written_with_the_sticker_call_needs_no_second_model_call(make):
     model = Model(answer('给你～', [call('开心')]))
     store, config, chat = make(model)

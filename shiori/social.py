@@ -1655,7 +1655,9 @@ class ConversationFlow:
         if self._closed:
             return {'accepted': False, 'code': 'interrupted'}
         metadata = dict(metadata, flow_trace_id=uuid4().hex)
-        self._cancel_sticker(scope_id)
+        # A sticker belongs to a reply whose text already went out; someone
+        # else speaking meanwhile does not take it back (in a busy group that
+        # left "发了" with no picture). The next reply still replaces it.
         observed = self.chat.observe(scope_id, user_id, text, images=images, metadata=metadata)
         message = await observed if inspect.isawaitable(observed) else observed
         actor_key = (scope_id, str(user_id))
@@ -1741,7 +1743,7 @@ class ConversationFlow:
             return (not self._closed and self._sticker_tasks.get(scope_id) is task
                     and social._allowed(scope_id)
                     and social.request_current(scope_id, user_id, batch.get('generation'))
-                    and self._may_answer(scope_id, user_id, batch, sticker=True))
+                    and self._may_answer(scope_id, user_id, batch))
         try:
             if not current():
                 return
@@ -2066,7 +2068,7 @@ class ConversationFlow:
             if self._planner_batches.get(scope_id) is batch: self._planner_batches.pop(scope_id,None)
             if not batch['future'].done(): batch['future'].set_result(result)
 
-    def _answer_reason(self, scope_id, user_id, batch, *, sticker=False):
+    def _answer_reason(self, scope_id, user_id, batch):
         scope = self.store.get_scope(scope_id)
         if not self.allowed(scope_id, user_id) or not scope.get('enabled', True):
             return 'permission_denied'
@@ -2080,10 +2082,6 @@ class ConversationFlow:
         if plan_dependencies and social.knowledge_current_fn and not social.knowledge_current_fn(scope_id, str(user_id), plan_dependencies):
             return 'planner_dependencies_changed'
         ids = {x['message']['id'] for x in batch['entries']}
-        if sticker and self.store.newest_user_message_id(scope_id, within=200) not in ids:
-            # A different member may have spoken while the old text was still
-            # waiting for its QQ receipt, before any decoration task existed.
-            return 'newer_message_for_sticker'
         if (not _snapshot_current(self.store, scope_id, [x['message'] for x in batch['entries']])
                 or ids & social._blocked_sources(scope_id)):
             return 'source_changed'
@@ -2122,8 +2120,8 @@ class ConversationFlow:
                 return 'conversation_no_longer_relevant'
         return ''
 
-    def _may_answer(self, scope_id, user_id, batch, *, sticker=False):
-        reason = self._answer_reason(scope_id, user_id, batch, sticker=sticker)
+    def _may_answer(self, scope_id, user_id, batch):
+        reason = self._answer_reason(scope_id, user_id, batch)
         batch['_answer_reason'] = reason
         return not reason
 

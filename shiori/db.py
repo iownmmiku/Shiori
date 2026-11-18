@@ -757,21 +757,6 @@ class Store:
         """Resolve canonical sources in the same order as list_messages."""
         return [json.loads(data) for _, data in self.ordered_message_rows(ids, scope_id=scope_id)]
 
-    def newest_user_message_id(self, scope_id, *, within=200):
-        """The newest user message among the chat's last `within` messages, or None.
-
-        The same answer as scanning list_messages(scope_id, within), which the
-        sticker check did: it decoded 200 messages, about 10 MB in a long
-        private chat, on the event loop for each check. The id and role
-        columns are written from the same record as the data, so the index
-        answers this without reading any message.
-        """
-        with self._lock:
-            rows = self._conn.execute(
-                "SELECT id,role FROM messages WHERE scope_id=? ORDER BY created_at DESC,rowid DESC LIMIT ?",
-                (scope_id, _limit(within))).fetchall()
-        return next((row[0] for row in rows if row[1] == 'user'), None)
-
     def _prepare_memory(self, record: dict) -> dict:
         if record.get("episode") is not None:
             if record.get("kind") != "event":

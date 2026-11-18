@@ -123,17 +123,19 @@ async def test_optional_selection_does_not_hold_text_future_or_next_turn(setup):
 
 
 @pytest.mark.anyio
-async def test_passive_message_from_another_member_invalidates_pending_sticker(setup):
+async def test_another_member_speaking_does_not_take_back_the_replys_sticker(setup):
+    # The sticker belongs to a reply whose text already went out (server,
+    # 2026-11-17: in a busy group the text said "发了" and no picture came).
     _, _, chat, flow, sent, _ = setup
     try:
         await send(flow)
         await chat.stickers.started.wait()
         guard = chat.stickers.guard
         await send(flow, '普通旁聊', user='404', direct=False)
+        assert guard()
         chat.stickers.release.set()
         await drain_stickers(flow)
-        assert not guard()
-        assert len(sent) == 1 and not chat.stickers.sent
+        assert [text for text, _ in sent] == ['回答：你好', ''] and len(chat.stickers.sent) == 1
     finally:
         await flow.close()
 
@@ -287,8 +289,9 @@ async def test_timing_write_failure_cannot_leave_turn_future_or_locks_hanging(se
 
 
 @pytest.mark.anyio
-async def test_message_received_during_old_text_ack_prevents_late_sticker_selection(setup):
+async def test_message_received_during_the_text_ack_keeps_the_replys_sticker(setup):
     _, _, chat, flow, sent, _ = setup
+    chat.stickers.release.set()
     entered, acknowledge = asyncio.Event(), asyncio.Event()
     async def emit(scope, text, metadata):
         sent.append((text, metadata))
@@ -304,8 +307,8 @@ async def test_message_received_during_old_text_ack_prevents_late_sticker_select
         acknowledge.set()
         await asyncio.wait_for(first, .5)
         await drain_stickers(flow)
-        assert not chat.stickers.started.is_set()
-        assert len(sent) == 1 and not chat.stickers.sent
+        assert chat.stickers.started.is_set()
+        assert [text for text, _ in sent] == ['回答：第一轮', ''] and len(chat.stickers.sent) == 1
     finally:
         acknowledge.set()
         await flow.close()

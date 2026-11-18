@@ -8,11 +8,10 @@ store lock while reading 45 MB of those rows and then spent seconds decoding
 and re-encoding them, and the loop's small reads waited for the lock and for
 the interpreter. The largest stalls were the reply's own history checks, run
 on the loop. The sticker check decoded the chat's last 200 messages on the loop
-to find one id.
+to find one id (that check is gone: a reply now carries its own sticker).
 """
 import asyncio
 import gc
-import json
 import sqlite3
 import threading
 from copy import deepcopy
@@ -142,21 +141,6 @@ def test_a_provenance_walk_is_freed_on_return_not_by_the_garbage_collector(store
     finally:
         gc.enable()
     assert after_walk < 20 and after_projection < 20, (after_walk, after_projection)
-
-
-def test_the_sticker_check_finds_the_newest_member_line_without_decoding_any(store, monkeypatch):
-    def newest_by_decoding(within):
-        return next((m['id'] for m in reversed(store.list_messages(SCOPE, limit=within)) if m.get('role') == 'user'), None)
-    member = store.add_message(SCOPE, USER, 'user', '最后一句')
-    for n in range(5):
-        store.add_message(SCOPE, 'assistant', 'assistant', f'回复 {n}', source_ids=[member['id']])
-    expected = {within: newest_by_decoding(within) for within in (3, 200)}
-    assert expected == {3: None, 200: member['id']}
-    decoded = []
-    real = json.loads
-    monkeypatch.setattr(json, 'loads', lambda *a, **k: decoded.append(1) or real(*a, **k))
-    assert {within: store.newest_user_message_id(SCOPE, within=within) for within in (3, 200)} == expected
-    assert decoded == []
 
 
 class Settings:
