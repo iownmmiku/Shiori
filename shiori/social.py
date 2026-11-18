@@ -86,6 +86,17 @@ def requested_sticker(result):
     return None
 
 
+def requested_images(result):
+    """Pictures a reply queued with the generate_image tool."""
+    jobs = []
+    for action in result.get('actions') or []:
+        output = action.get('result')
+        if (action.get('tool') == 'generate_image' and action.get('ok') and isinstance(output, dict)
+                and isinstance(output.get('image_job'), dict) and isinstance(output['image_job'].get('id'), str)):
+            jobs.append(output['image_job'])
+    return jobs
+
+
 def local_filter_kind(messages, *, pictures_described=False):
     """'picture', 'symbols' or 'reaction' when every message of a batch is that empty of content; None otherwise."""
     kinds = []
@@ -1646,6 +1657,8 @@ class ConversationFlow:
         self._sticker_tasks = {}
         self._sticker_jobs = set()
         self._sticker_timeout = 5.0
+        # Pictures take tens of seconds; a later message does not cancel them.
+        self._image_jobs = set()
         self._closed = False
         # A bridge that knows a group's send limit sets these: pace(scope)
         # waits for room, send_room(scope) is the free count or None.
@@ -1773,6 +1786,60 @@ class ConversationFlow:
             raise
         except Exception as exc:
             self.store.add_exception('sticker_send_error', '表情包未发送，文字回复不受影响', exc, scope_id=scope_id)
+
+    def _schedule_images(self, scope_id, user_id, metadata, batch):
+        """Draw, then send after the text, the pictures the reply queued with generate_image."""
+        imagegen = getattr(self.chat, 'imagegen', None)
+        if self._closed or imagegen is None:
+            return
+        for index, job in enumerate(batch.get('image_jobs') or []):
+            if len(self._image_jobs) >= 16:
+                break
+            job['scheduled'] = True
+            task = asyncio.create_task(self._send_image(scope_id, metadata, batch, imagegen, job['id'], index))
+            self._image_jobs.add(task)
+            task.add_done_callback(self._image_jobs.discard)
+
+    def _drop_images(self, batch):
+        """Give back the counts of pictures whose reply never went out."""
+        imagegen = getattr(self.chat, 'imagegen', None)
+        for job in batch.get('image_jobs') or []:
+            if not job.get('scheduled') and imagegen is not None:
+                imagegen.discard(job['id'])
+
+    async def _send_image(self, scope_id, metadata, batch, imagegen, job_id, index=0):
+        from .imagegen import ImageGenError, chat_reason
+        social = getattr(self.chat, 'social', None) or self._fallback
+        def current():
+            return not self._closed and social._allowed(scope_id)
+        # Official replies need a fresh msg_seq: after the text, a sticker and earlier pictures.
+        count = batch.get('confirmed_parts', 1) + 2 + index
+        part = {'index': count, 'total': count}
+        try:
+            try:
+                raw, mime = await imagegen.run(job_id)
+            except ImageGenError as exc:
+                if current():
+                    async with self._output_locks[scope_id]:
+                        await self.emit(scope_id, f'这张图没画出来（{chat_reason(exc)}），次数已经退回，稍后再试吧。',
+                                        dict(metadata, assistant_message_id=batch.get('logical_message_id'), output_part=part))
+                return
+            if not current():
+                self.store.add_event('imagegen_dropped', '图片已生成，但会话已停用或不再允许发送，没有发出', scope_id=scope_id)
+                return
+            async with self._output_locks[scope_id]:
+                if not current():
+                    return
+                sent = await self.emit(scope_id, '', dict(metadata, image=raw, image_mime=mime, image_current=current,
+                                                          assistant_message_id=batch.get('logical_message_id'), output_part=part))
+            if sent:
+                self.store.add_event('imagegen_sent', '图片已发送', scope_id=scope_id, bytes=len(raw))
+            else:
+                self.store.add_event('imagegen_unsent', '图片已生成，但发送没有得到确认', scope_id=scope_id)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            self.store.add_exception('imagegen_send_error', '图片没有发出，文字回复不受影响', exc, scope_id=scope_id)
 
     def _discard_debounce(self, key, user_id=None):
         if user_id is not None:
@@ -2292,6 +2359,7 @@ class ConversationFlow:
                     result = await self.chat.respond_group(scope_id, entries, metadata=metadata)
                 else:
                     result = await self.chat.respond(scope_id, user_id, text, images=images, metadata=metadata)
+                batch['image_jobs'] = requested_images(result)
                 batch['chat_timings'] = dict(result.get('timings') or {})
                 batch['logical_message_id'] = result.get('message_id')
                 batch['outcome'] = 'generated' if result.get('reply') else 'failed'
@@ -2316,6 +2384,7 @@ class ConversationFlow:
                             proactive=':group:' in scope_id and not batch.get('explicit')
                             and not (batch.get('planner') or {}).get('addressed_to_bot'))
                         self._schedule_sticker(scope_id, user_id, metadata, batch, requested_sticker(result))
+                        self._schedule_images(scope_id, user_id, metadata, batch)
                     else:
                         if batch.get('outcome') != 'suppressed':
                             self.store.add_event('qq_delivery', '群聊回复被平台拒收，未送达' if batch.get('outcome') == 'not_sent'
@@ -2347,6 +2416,7 @@ class ConversationFlow:
                 await self._emit_failure(scope_id, user_id, _failure_feedback(exc), entry['message'],
                                          batch.get('generation'), entry['metadata'], batch.get('identity'))
         finally:
+            self._drop_images(batch)
             timing = {'flow_ms': round((time.monotonic() - started) * 1000, 1),
                       'planner_ms': batch.get('planner', {}).get('planner_ms', 0),
                       'text_delivery_ms': batch.get('text_delivery_ms', 0),
@@ -2386,7 +2456,7 @@ class ConversationFlow:
 
     async def close(self):
         self._closed = True
-        tasks = self._jobs | self._sticker_jobs
+        tasks = self._jobs | self._sticker_jobs | self._image_jobs
         self._sticker_tasks.clear()
         for task in list(tasks):
             task.cancel()
@@ -2411,6 +2481,7 @@ class ConversationFlow:
         self._scope_jobs.clear()
         self._jobs.clear()
         self._sticker_jobs.clear()
+        self._image_jobs.clear()
         # Bridges reuse this flow after a disconnected transport is restarted.
         # During draining ingress is rejected; afterwards a fresh turn may run.
         self._closed = False

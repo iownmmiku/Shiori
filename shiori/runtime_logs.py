@@ -11,7 +11,7 @@ from fastapi.responses import Response
 
 
 CATEGORIES = {'qq': 'QQ 收发', 'planner': '回复判断', 'reply': '回复生成', 'model': '模型调用', 'memory': '记忆',
-              'learning': '黑话与表达', 'stickers': '表情包', 'schedule': '角色日程', 'knowledge': '人格知识', 'system': '系统'}
+              'learning': '黑话与表达', 'stickers': '表情包', 'imagegen': '生图', 'schedule': '角色日程', 'knowledge': '人格知识', 'system': '系统'}
 KIND_LABELS = {
     'qq_sent': '已发送', 'qq_delivery': '送达问题', 'qq_output': '分段发送', 'qq_outbox': '分段记录', 'qq_ingress': '收到消息',
     'qq_debounce': '消息合并', 'qq_suppressed': '停止发送', 'qq_reply_timing': '回复耗时', 'qq_rate_limited': '群限速',
@@ -24,9 +24,11 @@ KIND_LABELS = {
     'sticker_timeout': '选图超时', 'sticker_send_error': '发送失败', 'knowledge_exploration': '兴趣探索',
     'distillation_discovery': '蒸馏检索', 'settings': '设置变更', 'search_attempt': '联网搜索', 'admin_pairing': '管理员配对',
     'loop_stall': '主循环停顿', 'alert': '故障提醒',
+    'imagegen': '已生成图片', 'imagegen_failed': '生图失败', 'imagegen_sent': '图片已发送', 'imagegen_unsent': '图片未确认',
+    'imagegen_dropped': '图片未发送', 'imagegen_send_error': '图片发送失败', 'imagegen_config_error': '生图配置',
 }
 PREFIXES = (('qq', 'qq'), ('planner', 'planner'), ('chat', 'reply'), ('model', 'model'), ('memory', 'memory'),
-            ('social', 'learning'), ('jargon', 'learning'), ('expression', 'learning'), ('sticker', 'stickers'),
+            ('social', 'learning'), ('jargon', 'learning'), ('expression', 'learning'), ('sticker', 'stickers'), ('imagegen', 'imagegen'),
             ('schedule', 'schedule'), ('knowledge', 'knowledge'), ('distillation', 'knowledge'))
 OUTCOMES = {'reply': '回复', 'skip': '旁听', 'failed': '失败', 'cancelled': '已取消'}
 GATES = {'reply': '达到门槛', 'below_threshold': '低于门槛', 'addressed': '在对它说', 'addressed_only': '只回直接对它说的'}

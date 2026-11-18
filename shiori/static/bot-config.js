@@ -28,7 +28,7 @@
   };
   experience.renderPersonas=async()=>{
     const tab=state.botTab || "basic";
-    const tabs=[["basic","基本配置"],["models","模型"],["search","网页搜索"],["reply","回复与记忆"],["qq","QQ 连接"],["computer","电脑与管理员"],["personas","人格库"],["stickers","表情包"]];
+    const tabs=[["basic","基本配置"],["models","模型"],["search","网页搜索"],["reply","回复与记忆"],["qq","QQ 连接"],["computer","电脑与管理员"],["personas","人格库"],["stickers","表情包"],["imagegen","生图"]];
     let body;
     if(tab==="basic")body=await experience.profilePanel()+identitySection()+timeAwarenessSection()+`<section class="panel settings-section"><h2>默认聊天模型</h2><p>${e(configuredModel().model || "尚未配置")}</p>${button("配置模型与供应商","go-model-sources","primary","spark")}</section>`;
     else if(tab==="models")body=await window.ShioriBotModels.render();
@@ -37,6 +37,7 @@
       const settings=await settingsPage();
       body=window.ShioriFeatures.debounceSection()+outputSection()+`<details class="panel settings-section"><summary>高级 · 判断预算与记忆检索</summary>${plannerSection()+section(settings,"memory-settings-section")+section(settings,"context-section")+explorationSection()}</details>`;
     }else if(tab==="stickers")body=await window.ShioriStickers.render();
+    else if(tab==="imagegen")body=await window.ShioriImageGen.render();
     else if(tab==="personas")body=await library();
     else {
       const settings=enhanceQQ(await settingsPage());

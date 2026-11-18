@@ -155,6 +155,8 @@ def create_app(data_dir=None, *, start_workers=True, allow_remote=False):
     install_catalog(app, settings, provider, store)
     from .stickers_api import install_stickers
     install_stickers(app,chat)
+    from .imagegen_api import install_imagegen
+    install_imagegen(app,chat)
     from .runtime_logs import install_logs
     install_logs(app, settings, store, data_dir)
     request_gate = asyncio.Condition()

@@ -27,7 +27,7 @@ window.ShioriPages = (() => {
   }
   let logLines = [], logCursor = "", logLevel = "", logQuery = "", logCategory = "", logPaused = false, logTimer, logGeneration = 0, logQueryTimer;
   const logOpen = new Set();
-  const logCategories = [["","全部类别"],["qq","QQ 收发"],["planner","回复判断"],["reply","回复生成"],["model","模型调用"],["memory","记忆"],["learning","黑话与表达"],["stickers","表情包"],["schedule","角色日程"],["knowledge","人格知识"],["system","系统"]];
+  const logCategories = [["","全部类别"],["qq","QQ 收发"],["planner","回复判断"],["reply","回复生成"],["model","模型调用"],["memory","记忆"],["learning","黑话与表达"],["stickers","表情包"],["imagegen","生图"],["schedule","角色日程"],["knowledge","人格知识"],["system","系统"]];
   const logTime = value => { const date=new Date(value); if(Number.isNaN(date.getTime()))return String(value || ""); const pad=n=>String(n).padStart(2,"0"); return `${pad(date.getMonth()+1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`; };
   const key = value => encodeURIComponent(value);
   const routeId = value => value === "default" ? "" : value;

@@ -360,7 +360,7 @@ class OfficialBridge:
                          metadata=dict(metadata, failure_feedback=True))
 
     async def _emit(self, scope_id, text, metadata):
-        if metadata.get('sticker'):
+        if metadata.get('sticker') or metadata.get('image'):
             return await self._send_part(scope_id,'',msg_id=metadata.get('platform_message_id'),
                 msg_seq=(metadata.get('output_part') or {}).get('index',1),metadata=metadata)
         return await self._send(scope_id, text, msg_id=metadata.get('platform_message_id'),
@@ -391,7 +391,8 @@ class OfficialBridge:
 
     async def _send_part(self, scope_id: str, text: str, *, msg_id: str | None = None, msg_seq: int = 1, metadata=None) -> bool:
         sticker=(metadata or {}).get('sticker')
-        if not self._allowed(scope_id) or not self._connected or self._client is None or not str(text).strip() and not sticker:
+        image=(metadata or {}).get('image')   # a generated picture (shiori.imagegen)
+        if not self._allowed(scope_id) or not self._connected or self._client is None or not str(text).strip() and not (sticker or image):
             return False
         scope = self.store.get_scope(scope_id)
         if not scope.get("enabled", True):
@@ -418,6 +419,17 @@ class OfficialBridge:
                 upload=await asyncio.wait_for(api._http.request(route,json={'file_type':1,'file_data':base64.b64encode(output.getvalue()).decode(),'srv_send_msg':False}),timeout=20)
                 if not isinstance(upload,dict) or not upload.get('file_info'): return False
                 self.chat.stickers.payload(sticker['id'],scope_id,sticker['version'])
+                if not self._allowed(scope_id) or callable(guard) and not guard(): return False
+                kwargs.update(msg_type=7,content=' ',media={'file_info':upload['file_info']})
+            elif image:
+                from botpy.http import Route
+                from .imagegen import official_image
+                guard=(metadata or {}).get('image_current')
+                if callable(guard) and not guard(): return False
+                data=await asyncio.to_thread(official_image,image)
+                route=Route('POST','/v2/groups/{group_openid}/files',group_openid=target) if kind=='group' else Route('POST','/v2/users/{openid}/files',openid=target)
+                upload=await asyncio.wait_for(api._http.request(route,json={'file_type':1,'file_data':base64.b64encode(data).decode(),'srv_send_msg':False}),timeout=30)
+                if not isinstance(upload,dict) or not upload.get('file_info'): return False
                 if not self._allowed(scope_id) or callable(guard) and not guard(): return False
                 kwargs.update(msg_type=7,content=' ',media={'file_info':upload['file_info']})
             operation = api.post_group_message(group_openid=target, **kwargs) if kind == "group" else api.post_c2c_message(openid=target, **kwargs)
