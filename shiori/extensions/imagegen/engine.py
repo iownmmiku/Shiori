@@ -51,6 +51,13 @@ MAX_SERVICES = 8
 MAX_PERSONAS = 200
 MAX_REFERENCES = 3
 MAX_REFERENCE_BYTES = 5 * 1024 * 1024
+# A persona's own reference pictures, uploaded on the settings page; they are
+# kept small enough to go along with every self portrait.
+MAX_PERSONA_REFERENCES = 3
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+REFERENCE_SIDE, REFERENCE_LIMIT, THUMB_SIDE = 1536, 3 * 1024 * 1024, 256
+REFERENCE_NAME = re.compile(r'[0-9a-f]{16}\.(png|jpg)')
+MULTI_REFERENCE_KINDS = ('openai', 'gemini')   # the others take a single picture (img2img or one LoadImage)
 MAX_RESPONSE_BYTES = 48 * 1024 * 1024
 MAX_IMAGE_BYTES = outgoing_image.MAX_IMAGE_BYTES
 MAX_WORKFLOW_BYTES = 2 * 1024 * 1024
@@ -63,7 +70,7 @@ PENDING_TTL = 600.0      # a queued picture whose reply never went out is droppe
 CONFIG_DEFAULTS = {'service_id': '', 'services': [], 'personas': {}}
 SERVICE_DEFAULTS = {'id': '', 'name': '', 'kind': 'openai', 'endpoint': '', 'api_key': '', 'model': '',
                     'timeout_seconds': 180, 'negative_prompt': '', 'natural_negative': False, 'reference': True,
-                    'quality': '', 'steps': 28, 'scale': 5.0, 'sampler': 'k_euler_ancestral', 'strength': 0.6,
+                    'persona_reference': None, 'quality': '', 'steps': 28, 'scale': 5.0, 'sampler': 'k_euler_ancestral', 'strength': 0.6,
                     'extra_body': {}, 'workflow': {}, 'workflow_fields': {}, 'output_node': ''}
 _SERVICE_INPUT = frozenset(SERVICE_DEFAULTS) | {'api_key_set', 'clear_api_key'}
 
@@ -101,13 +108,13 @@ def image_info(data):
         raise ImageGenError('返回的' + str(exc) if str(exc).startswith('图片损坏') else str(exc)) from exc
 
 
-def decode_data_url(value):
-    """Bytes of a base64 data:image URL (the chat turn's prepared pictures)."""
+def decode_data_url(value, *, limit=MAX_REFERENCE_BYTES):
+    """Bytes of a base64 data:image URL (the chat turn's prepared pictures, an upload)."""
     prefix, separator, payload = str(value).partition(',')
     if not separator or not re.fullmatch(r'data:image/(png|jpeg|webp|gif);base64', prefix):
-        raise ImageGenError('参考图格式不受支持')
-    if len(payload) > 4 * ((MAX_REFERENCE_BYTES + 2) // 3):
-        raise ImageGenError('参考图超过 5 MB')
+        raise ImageGenError('参考图格式不受支持，请用 PNG、JPEG、WebP 或 GIF')
+    if len(payload) > 4 * ((limit + 2) // 3):
+        raise ImageGenError(f'参考图超过 {limit // (1024 * 1024)} MB')
     try:
         raw = base64.b64decode(payload, validate=True)
     except ValueError as exc:
@@ -241,7 +248,10 @@ def clean_service(item, previous=None):
         raise ValueError('请填写绘画模型名称')
     service['timeout_seconds'] = _integer(service['timeout_seconds'], '等待上限', 5, 600)
     service['negative_prompt'] = _text(service['negative_prompt'], '负面提示词', MAX_PERSONA_PROMPT)
-    for flag in ('natural_negative', 'reference'):
+    if service['persona_reference'] is None:
+        # NovelAI img2img and a plain LoadImage would copy the reference's composition.
+        service['persona_reference'] = kind in MULTI_REFERENCE_KINDS
+    for flag in ('natural_negative', 'reference', 'persona_reference'):
         if type(service[flag]) is not bool:
             raise ValueError('开关须为布尔值')
     if service['quality'] not in QUALITIES:
@@ -272,18 +282,38 @@ def clean_service(item, previous=None):
     return service
 
 
-def clean_personas(value):
+def clean_personas(value, *, references=True):
+    """Persona looks; reference picture names only from the saved file, the
+    page changes them through the upload and delete routes."""
     if not isinstance(value, dict) or len(value) > MAX_PERSONAS:
         raise ValueError('人格外貌设定格式无效')
+    allowed = {'prompt', 'negative_prompt'} | ({'references'} if references else set())
     result = {}
     for key, item in value.items():
-        if not isinstance(key, str) or not 1 <= len(key) <= 80 or not isinstance(item, dict) or set(item) - {'prompt', 'negative_prompt'}:
+        if not isinstance(key, str) or not 1 <= len(key) <= 80 or not isinstance(item, dict) or set(item) - allowed:
             raise ValueError('人格外貌设定格式无效')
         entry = {'prompt': _text(item.get('prompt', ''), '外貌提示词', MAX_PERSONA_PROMPT),
                  'negative_prompt': _text(item.get('negative_prompt', ''), '外貌负面提示词', MAX_PERSONA_PROMPT)}
-        if entry['prompt'] or entry['negative_prompt']:
+        names = item.get('references', [])
+        if (not isinstance(names, list) or len(names) > MAX_PERSONA_REFERENCES
+                or any(not isinstance(name, str) or not REFERENCE_NAME.fullmatch(name) for name in names)):
+            raise ValueError('人格参考图列表无效')
+        if names:
+            entry['references'] = list(dict.fromkeys(names))
+        if entry['prompt'] or entry['negative_prompt'] or names:
             result[key] = entry
     return result
+
+
+def prepare_reference(raw):
+    """(picture, thumbnail) bytes of an uploaded persona reference: PNG or
+    JPEG, at most REFERENCE_SIDE pixels on a side."""
+    try:
+        picture = outgoing_image.reencode(raw, max_side=REFERENCE_SIDE, limit=REFERENCE_LIMIT, keep=('image/png', 'image/jpeg'))
+        thumb = outgoing_image.reencode(picture, max_side=THUMB_SIDE, limit=256 * 1024, keep=())
+    except ValueError as exc:
+        raise ImageGenError('参考图' + str(exc).removeprefix('图片')) from exc
+    return picture, thumb
 
 
 def supports_reference(service):
@@ -296,12 +326,24 @@ def supports_reference(service):
     return bool(service['reference'])
 
 
-def compose(service, prompt, *, appearance='', appearance_negative=''):
-    """(prompt, negative) for one picture; the persona's look is added to a self portrait."""
+def compose(service, prompt, *, appearance='', appearance_negative='', user_images=0, persona_images=0):
+    """(prompt, negative) for one picture; the persona's look is added to a self portrait.
+
+    The persona's reference pictures come after the requester's, and models
+    that read the prompt as text are told which pictures are which."""
     prompt = str(prompt).strip()
     if appearance:
         prompt = (f'{appearance}, {prompt}' if service['kind'] in TAG_KINDS
                   else f'{prompt}\n\nCharacter appearance (keep it consistent): {appearance}')
+    if persona_images and service['kind'] not in TAG_KINDS:
+        if user_images:
+            first = 'The first reference image is' if user_images == 1 else f'The first {user_images} reference images are'
+            prompt += f'\n\n{first} from the request. '
+        else:
+            prompt += '\n\n'
+        last = 'The last reference image shows' if persona_images == 1 else f'The last {persona_images} reference images show'
+        prompt += (f'{last} the character to draw: keep the same face, hairstyle and colours; take the pose, scene '
+                   'and composition from the description above rather than copying that reference.')
     negative = ', '.join(part for part in (service['negative_prompt'], appearance_negative) if part)
     if negative and service['natural_negative'] and service['kind'] in ('openai', 'gemini'):
         prompt += f'\n\nAvoid: {negative}'
@@ -691,6 +733,7 @@ class Job:
     request: str
     references: list = field(default_factory=list)
     day: str = ''
+    persona_references: int = 0
     counted: bool = False
     created: float = field(default_factory=time.monotonic)
 
@@ -705,6 +748,7 @@ class ImageGen:
         self.root = Path(root)
         self.path = self.root / 'config.json'
         self.usage_path = self.root / 'usage.json'
+        self.reference_dir = self.root / 'references'
         self._lock = threading.RLock()
         self._jobs = {}
         self._running = 0
@@ -729,8 +773,15 @@ class ImageGen:
                 if item.get('api_key') and not stored['api_key']:
                     raise ValueError('密钥不能在当前账户读取')
                 services.append(clean_service(stored))
-            config.update(service_id=str(raw.get('service_id', '')), services=services[:MAX_SERVICES],
-                          personas=clean_personas(raw.get('personas') or {}))
+            personas = clean_personas(raw.get('personas') or {})
+            for key, item in list(personas.items()):
+                # A picture removed by hand from the folder is simply no longer used.
+                kept = [name for name in item.pop('references', []) if (self.reference_dir / name).is_file()]
+                if kept:
+                    item['references'] = kept
+                elif not item['prompt'] and not item['negative_prompt']:
+                    personas.pop(key)
+            config.update(service_id=str(raw.get('service_id', '')), services=services[:MAX_SERVICES], personas=personas)
         except Exception as exc:
             self.warning = '生图配置无法读取，已停用；请在生图设置页重新配置'
             config = copy.deepcopy(CONFIG_DEFAULTS)
@@ -793,6 +844,8 @@ class ImageGen:
         for item in config['services']:
             item['api_key_set'] = bool(item.pop('api_key', ''))
             item['supports_reference'] = supports_reference(item)
+        for look in config['personas'].values():
+            look['references'] = [{'id': name, 'thumb': self._thumb(name)} for name in look.get('references', [])]
         with self._lock:
             day, counts = self._counts()
             usage = {'day': day, 'counts': dict(counts), 'queued': len(self._jobs), 'running': self._running}
@@ -830,7 +883,11 @@ class ImageGen:
             if config['service_id'] and config['service_id'] not in {item['id'] for item in config['services']}:
                 raise ValueError('选择的生图服务不存在')
             if 'personas' in patch:
-                config['personas'] = clean_personas(patch['personas'])
+                personas = clean_personas(patch['personas'], references=False)
+                for key, item in config['personas'].items():
+                    if item.get('references'):
+                        personas.setdefault(key, {'prompt': '', 'negative_prompt': ''})['references'] = item['references']
+                config['personas'] = personas
             self._save(config)
             self._config = config
             self.warning = ''
@@ -851,7 +908,98 @@ class ImageGen:
 
     def appearance(self, persona_id):
         with self._lock:
-            return dict(self._config['personas'].get(persona_id) or {})
+            return copy.deepcopy(self._config['personas'].get(persona_id) or {})
+
+    # -- persona reference pictures --
+    def _thumb(self, name):
+        try:
+            data = (self.reference_dir / (name.rsplit('.', 1)[0] + '.thumb.jpg')).read_bytes()
+        except OSError:
+            return ''
+        return 'data:image/jpeg;base64,' + base64.b64encode(data).decode('ascii')
+
+    def persona_images(self, persona_id):
+        """Bytes of the persona's reference pictures that are still readable."""
+        images = []
+        for name in self.appearance(persona_id).get('references', []):
+            try:
+                images.append((self.reference_dir / name).read_bytes())
+            except OSError:
+                continue
+        return images
+
+    def add_reference(self, persona_id, raw):
+        """Store an uploaded picture as one of the persona's references (blocking)."""
+        try:
+            known = {item['id'] for item in self.store.list_personas()}
+        except Exception:
+            known = set()
+        if persona_id not in known:
+            raise ImageGenError('这个人格不存在，请刷新页面后重试')
+        if not isinstance(raw, (bytes, bytearray)) or not raw or len(raw) > MAX_UPLOAD_BYTES:
+            raise ImageGenError('参考图须为不超过 10 MB 的图片')
+        picture, thumb = prepare_reference(bytes(raw))
+        extension, _, _ = outgoing_image.image_info(picture)
+        name = f'{secrets.token_hex(8)}.{extension}'
+        with self._lock:
+            if len(self.appearance(persona_id).get('references', [])) >= MAX_PERSONA_REFERENCES:
+                raise ImageGenError(f'每个人格最多 {MAX_PERSONA_REFERENCES} 张参考图，请先移除一张')
+            self.reference_dir.mkdir(parents=True, exist_ok=True)
+            (self.reference_dir / name).write_bytes(picture)
+            (self.reference_dir / (name.rsplit('.', 1)[0] + '.thumb.jpg')).write_bytes(thumb)
+            config = self.config()
+            look = config['personas'].setdefault(persona_id, {'prompt': '', 'negative_prompt': ''})
+            look['references'] = look.get('references', []) + [name]
+            try:
+                self._save(config)
+            except Exception:
+                self._delete_files(name)
+                raise
+            self._config = config
+        return self.public()
+
+    def remove_reference(self, persona_id, name):
+        with self._lock:
+            config = self.config()
+            look = config['personas'].get(persona_id) or {}
+            if name not in look.get('references', []):
+                raise ImageGenError('这张参考图已经不在了，请刷新页面')
+            look['references'] = [item for item in look['references'] if item != name]
+            if not look['references']:
+                look.pop('references')
+                if not look['prompt'] and not look['negative_prompt']:
+                    config['personas'].pop(persona_id)
+            self._save(config)
+            self._config = config
+            self._delete_files(name)
+        return self.public()
+
+    def _delete_files(self, name):
+        for path in (self.reference_dir / name, self.reference_dir / (name.rsplit('.', 1)[0] + '.thumb.jpg')):
+            try:
+                path.unlink()
+            except OSError:
+                pass
+
+    def _plan(self, service, prompt, *, persona_id=None, self_portrait=False, references=()):
+        """The final prompt, negative and reference pictures of one request.
+
+        A self portrait gets the persona's look and, when the service is set
+        to use them, its reference pictures after the requester's: models
+        that take one picture only use the persona's when nobody sent one."""
+        look = self.appearance(persona_id) if self_portrait and persona_id else {}
+        mine = self.persona_images(persona_id) if look.get('references') and supports_reference(service) \
+            and service['persona_reference'] else []
+        limit = MAX_REFERENCES if service['kind'] in MULTI_REFERENCE_KINDS else 1
+        given = list(references)[:limit]
+        room = limit - len(given)
+        if mine and not room and limit > 1:
+            given, room = given[:limit - 1], 1
+        mine = mine[:room]
+        final, negative = compose(service, prompt, appearance=look.get('prompt', ''),
+                                  appearance_negative=look.get('negative_prompt', ''),
+                                  user_images=len(given), persona_images=len(mine))
+        return final, negative, given + mine, {'look': bool(look.get('prompt') or mine), 'given': len(given), 'persona': len(mine)}
 
     def remaining(self, user_key, admin=False):
         """Pictures left today for this user; None means unlimited."""
@@ -899,19 +1047,18 @@ class ImageGen:
             limit = self.daily_limit()
             if not admin and counts.get(user_key, 0) >= limit:
                 raise ImageGenError(f'今天的画图次数用完了（每人每天 {limit} 张），明天再来吧' if limit else '画图目前只对管理员开放')
-            look = self._config['personas'].get(persona_id) or {} if self_portrait else {}
-            final, negative = compose(service, prompt, appearance=look.get('prompt', ''),
-                                      appearance_negative=look.get('negative_prompt', ''))
+            final, negative, pictures, used = self._plan(service, prompt, persona_id=persona_id,
+                                                         self_portrait=self_portrait, references=references)
             job = Job(uuid.uuid4().hex, scope_id, user_key, admin, service['id'], final, negative,
-                      aspect if aspect in ASPECTS else 'square', prompt, list(references), day)
+                      aspect if aspect in ASPECTS else 'square', prompt, pictures, day, persona_references=used['persona'])
             if not admin:
                 counts[user_key] = counts.get(user_key, 0) + 1
                 job.counted = True
                 self._save_usage()
             self._jobs[job.id] = job
             remaining = None if admin else max(0, limit - counts.get(user_key, 0))
-        return {'id': job.id, 'aspect': job.aspect, 'self_portrait': bool(look.get('prompt')),
-                'reference': bool(references), 'remaining_today': remaining}
+        return {'id': job.id, 'aspect': job.aspect, 'self_portrait': used['look'],
+                'reference': bool(used['given']), 'remaining_today': remaining}
 
     def discard(self, job_id):
         """Drop a queued picture that will not be drawn and give the count back."""
@@ -958,30 +1105,34 @@ class ImageGen:
             with self._lock:
                 self._running -= 1
         self.store.add_event('imagegen', '图片已生成', scope_id=job.scope_id, user=job.user_key, service_id=job.service_id,
-                             request=job.request[:300], aspect=job.aspect, reference=bool(job.references),
-                             bytes=len(raw), elapsed_ms=round((time.monotonic() - started) * 1000))
+                             request=job.request[:300], aspect=job.aspect,
+                             reference=len(job.references) - job.persona_references,
+                             persona_reference=job.persona_references, bytes=len(raw), elapsed_ms=round((time.monotonic() - started) * 1000))
         return raw, mime
 
-    async def test(self, prompt, *, service_id=None, aspect='square'):
-        """A test picture from the management page; it uses no daily count."""
+    async def test(self, prompt, *, service_id=None, aspect='square', persona_id=None):
+        """A test picture from the management page; it uses no daily count.
+        With `persona_id` it is that persona's self portrait."""
         prompt = str(prompt or '').strip()
         if not prompt or len(prompt) > MAX_PROMPT:
             raise ImageGenError(f'画面描述须为 1—{MAX_PROMPT} 个字')
         service = self.service(service_id)
         if service is None:
             raise ImageGenError('请先保存一个生图服务')
-        final, negative = compose(service, prompt)
+        final, negative, pictures, used = await asyncio.to_thread(
+            self._plan, service, prompt, persona_id=persona_id, self_portrait=bool(persona_id))
         if self._slot is None:
             self._slot = asyncio.Semaphore(1)
         started = time.monotonic()
         async with self._slot:
             try:
-                raw, mime = await generate(service, final, negative, aspect, transport=self.transport)
+                raw, mime = await generate(service, final, negative, aspect, pictures, transport=self.transport)
             except ImageGenError as exc:
                 self.store.add_event('imagegen_failed', '测试图没有生成成功：' + str(exc), service_id=service['id'],
                                      detail=getattr(exc, 'detail', ''))
                 raise
         elapsed = round((time.monotonic() - started) * 1000)
-        self.store.add_event('imagegen', '测试图已生成', service_id=service['id'], request=prompt[:300], elapsed_ms=elapsed)
+        self.store.add_event('imagegen', '测试图已生成', service_id=service['id'], request=prompt[:300], elapsed_ms=elapsed,
+                             persona_reference=used['persona'])
         return {'image': f'data:{mime};base64,' + base64.b64encode(raw).decode(), 'mime': mime, 'elapsed_ms': elapsed,
-                'bytes': len(raw)}
+                'bytes': len(raw), 'persona_references': used['persona']}

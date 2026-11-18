@@ -6,3 +6,9 @@
 .record-card p{margin:4px 0;overflow-wrap:anywhere}
 .record-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
 .section-actions{margin-top:16px}
+.imagegen-references{margin:10px 0 4px}
+.imagegen-references .help-caption{margin:4px 0 8px}
+.imagegen-reference-list{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end}
+.imagegen-reference{margin:0;display:flex;flex-direction:column;align-items:center;gap:6px}
+.imagegen-reference img{width:96px;height:96px;object-fit:cover;border-radius:10px;display:block;border:1px solid var(--line, rgba(0,0,0,.12))}
+.imagegen-upload{cursor:pointer}

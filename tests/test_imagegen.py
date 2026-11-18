@@ -5,7 +5,9 @@ call generate_image. The text reply goes out first; the picture is drawn in
 the background and sent on its own. Services: OpenAI-compatible image APIs,
 Gemini, NovelAI and ComfyUI (adapters follow the owner's AstrBot plugin
 随想画卷). A persona's appearance prompt is added to self portraits, and a
-picture attached to the message can be used as the reference. Each QQ
+picture attached to the message can be used as the reference. A persona may
+also have up to three reference pictures of her own (uploaded on the settings
+page, owner request 2026-11-18) that go along with her self portraits. Each QQ
 account may draw a set number per day; administrators are not limited and a
 picture that fails gives its count back.
 """
@@ -380,6 +382,175 @@ async def test_the_management_test_uses_no_count(make_gen):
     assert json.loads(recorder.requests[-1].content)['size'] == '1536x1024'
 
 
+# ---------- persona reference pictures ----------
+
+def jpeg(color='red', size=(64, 64)):
+    out = io.BytesIO()
+    Image.new('RGB', size, color).save(out, format='JPEG')
+    return out.getvalue()
+
+
+def edit_images(request):
+    """(field name, file bytes) of each picture in a multipart /images/edits request."""
+    found, content = [], request.content
+    boundary = request.headers['Content-Type'].split('boundary=')[1].encode()
+    for part in content.split(b'--' + boundary):
+        head, _, body = part.partition(b'\r\n\r\n')
+        if b'filename=' in head:
+            name = head.split(b'name="')[1].split(b'"')[0].decode()
+            found.append((name, body.rstrip(b'\r\n')))
+    return found
+
+
+def test_a_persona_keeps_up_to_three_reference_pictures(make_gen):
+    gen, _, _ = make_gen()
+    big = io.BytesIO()
+    Image.new('RGB', (3000, 2000), 'teal').save(big, format='WEBP')
+    state = gen.add_reference('default', big.getvalue())
+    [item] = state['personas']['default']['references']
+    assert item['thumb'].startswith('data:image/jpeg;base64,')
+    stored = gen.reference_dir / item['id']
+    # A WebP becomes a JPEG no larger than 1536 pixels; a PNG stays a PNG.
+    assert item['id'].endswith('.jpg') and max(ig.image_info(stored.read_bytes())[2]) == 1536
+    gen.add_reference('default', png('red'))
+    state = gen.add_reference('default', jpeg('blue'))
+    assert [x['id'][-3:] for x in state['personas']['default']['references']] == ['jpg', 'png', 'jpg']
+    with pytest.raises(ig.ImageGenError, match='最多 3 张'):
+        gen.add_reference('default', png('green'))
+    with pytest.raises(ig.ImageGenError, match='人格不存在'):
+        gen.add_reference('nobody', png('green'))
+    with pytest.raises(ig.ImageGenError, match='损坏或无法识别'):
+        gen.add_reference('default', b'not a picture')
+    assert len(list(gen.reference_dir.glob('*.thumb.jpg'))) == 3
+
+
+def test_saving_the_looks_keeps_the_pictures_and_removing_one_deletes_its_files(make_gen):
+    gen, _, store = make_gen()
+    first = gen.add_reference('default', png('red'))['personas']['default']['references'][0]['id']
+    gen.add_reference('default', png('blue'))
+    # The page sends only the text fields; the pictures stay.
+    state = gen.update({'personas': {'default': {'prompt': 'short silver hair', 'negative_prompt': ''}}})
+    assert state['personas']['default']['prompt'] == 'short silver hair' and len(state['personas']['default']['references']) == 2
+    state = gen.update({'personas': {}})
+    assert len(state['personas']['default']['references']) == 2 and not state['personas']['default']['prompt']
+    with pytest.raises(ValueError, match='格式无效'):
+        gen.update({'personas': {'default': {'prompt': '', 'references': ['0123456789abcdef.png']}}})
+    state = gen.remove_reference('default', first)
+    assert [x['id'] for x in state['personas']['default']['references']] != [first]
+    assert not (gen.reference_dir / first).exists() and not (gen.reference_dir / (first[:-4] + '.thumb.jpg')).exists()
+    with pytest.raises(ig.ImageGenError, match='已经不在'):
+        gen.remove_reference('default', first)
+    # A picture deleted by hand from the folder is dropped on the next start.
+    remaining = state['personas']['default']['references'][0]['id']
+    (gen.reference_dir / remaining).unlink()
+    again = ig.ImageGen(store, Config(), gen.root, options=gen.options)
+    assert 'default' not in again.public()['personas'] and not again.warning
+
+
+def test_each_service_kind_has_its_own_default_for_persona_pictures():
+    assert service('openai')['persona_reference'] and service('gemini')['persona_reference']
+    assert not service('novelai')['persona_reference']
+    assert service('novelai', persona_reference=True)['persona_reference']
+    with pytest.raises(ValueError, match='布尔值'):
+        service('openai', persona_reference='yes')
+
+
+def test_the_model_is_told_which_pictures_show_the_character():
+    natural, tags = service('openai'), service('novelai')
+    prompt, _ = ig.compose(natural, 'a selfie at the beach', persona_images=2)
+    assert prompt.endswith("rather than copying that reference.") and 'The last 2 reference images show' in prompt
+    prompt, _ = ig.compose(natural, 'wear this dress', user_images=1, persona_images=1)
+    assert 'The first reference image is from the request. The last reference image shows' in prompt
+    assert ig.compose(tags, '1girl, beach', persona_images=1)[0] == '1girl, beach'
+
+
+@pytest.mark.anyio
+async def test_a_self_portrait_sends_the_persona_pictures_after_the_requesters(make_gen):
+    gen, recorder, _ = make_gen()
+    gen.update({'personas': {'default': {'prompt': 'long brown hair', 'negative_prompt': ''}}})
+    for color in ('red', 'blue'):
+        gen.add_reference('default', png(color))
+    stored = [(gen.reference_dir / x['id']).read_bytes() for x in gen.public()['personas']['default']['references']]
+    job = gen.queue(PRIVATE, 'qq:303', prompt='a selfie at the beach', self_portrait=True)
+    assert job['self_portrait'] and not job['reference']
+    await gen.run(job['id'])
+    request = recorder.requests[-1]
+    assert str(request.url).endswith('/images/edits')
+    assert [body for _, body in edit_images(request)] == stored
+    assert b'The last 2 reference images show the character' in request.content
+    event = next(item for item in gen.store.list_events(20) if item['kind'] == 'imagegen')
+    assert event['details']['persona_reference'] == 2 and event['details']['reference'] == 0
+    # Three pictures from the requester leave room for one of hers.
+    given = [jpeg('green'), jpeg('yellow'), jpeg('white')]
+    job = gen.queue(PRIVATE, 'qq:303', prompt='wear these', self_portrait=True, references=given)
+    await gen.run(job['id'])
+    assert [body for _, body in edit_images(recorder.requests[-1])] == given[:2] + stored[:1]
+    # Not a self portrait: only the requester's picture.
+    job = gen.queue(PRIVATE, 'qq:303', prompt='make it night', references=given[:1])
+    await gen.run(job['id'])
+    assert [body for _, body in edit_images(recorder.requests[-1])] == given[:1]
+    assert b'reference images show' not in recorder.requests[-1].content
+    # Without a reference picture the plain generation endpoint is used.
+    gen.update({'services': [{'id': 'main', 'kind': 'openai', 'model': 'gpt-image-1', 'persona_reference': False}]})
+    job = gen.queue(PRIVATE, 'qq:303', prompt='a selfie at the beach', self_portrait=True)
+    await gen.run(job['id'])
+    assert str(recorder.requests[-1].url).endswith('/images/generations')
+
+
+@pytest.mark.anyio
+async def test_a_single_picture_service_prefers_the_requesters_picture(make_gen):
+    def novelai_ok(request):
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, 'w') as bundle:
+            bundle.writestr('image_0.png', png('purple'))
+        return httpx.Response(200, content=archive.getvalue(), headers={'Content-Type': 'application/zip'})
+    gen, recorder, _ = make_gen(novelai_ok)
+    gen.update({'services': [{'id': 'main', 'kind': 'novelai', 'api_key': KEY, 'persona_reference': True}]})
+    gen.add_reference('default', png('red', (832, 1216)))
+    job = gen.queue(PRIVATE, 'qq:303', prompt='1girl, selfie', aspect='portrait', self_portrait=True)
+    await gen.run(job['id'])
+    body = json.loads(recorder.requests[-1].content)
+    assert body['action'] == 'img2img'
+    assert Image.open(io.BytesIO(base64.b64decode(body['parameters']['image']))).getpixel((5, 5))[:3] == (255, 0, 0)
+    job = gen.queue(PRIVATE, 'qq:303', prompt='1girl, wear this', self_portrait=True, references=[png('green', (832, 1216))])
+    await gen.run(job['id'])
+    body = json.loads(recorder.requests[-1].content)
+    assert Image.open(io.BytesIO(base64.b64decode(body['parameters']['image']))).getpixel((5, 5))[:3] == (0, 128, 0)
+
+
+@pytest.mark.anyio
+async def test_the_management_test_can_draw_a_personas_self_portrait(make_gen):
+    gen, recorder, _ = make_gen()
+    gen.update({'personas': {'default': {'prompt': 'long brown hair', 'negative_prompt': ''}}})
+    gen.add_reference('default', png('red'))
+    result = await gen.test('a selfie in a cafe', persona_id='default')
+    assert result['persona_references'] == 1 and str(recorder.requests[-1].url).endswith('/images/edits')
+    assert b'long brown hair' in recorder.requests[-1].content
+    result = await gen.test('a cat')
+    assert result['persona_references'] == 0 and str(recorder.requests[-1].url).endswith('/images/generations')
+
+
+@pytest.mark.anyio
+async def test_the_page_routes_upload_and_remove_pictures(make_chat):
+    store, config, chat, _ = make_chat(Model())
+    from shiori.extension_host import ExtensionRequest
+    host = chat.extensions
+
+    async def call(method, path, body):
+        result = host.api_handler('imagegen', method, path)(ExtensionRequest(method, path, {}, body))
+        return await result if asyncio.iscoroutine(result) else result
+    state = await call('POST', 'reference', {'persona_id': 'default', 'image': data_url(png('red'))})
+    [item] = state['personas']['default']['references']
+    with pytest.raises(ValueError, match='格式不受支持'):
+        await call('POST', 'reference', {'persona_id': 'default', 'image': 'data:text/plain;base64,aGk='})
+    with pytest.raises(ValueError, match='参数无效'):
+        await call('POST', 'reference', {'persona_id': 'default'})
+    with pytest.raises(ValueError, match='参数无效'):
+        await call('POST', 'test', {'prompt': 'x', 'persona_id': 3})
+    state = await call('DELETE', 'reference', {'persona_id': 'default', 'id': item['id']})
+    assert state['personas']['default']['references'] == []
+
+
 # ---------- chat and QQ ----------
 
 def answer(content='', calls=()):
@@ -506,6 +677,18 @@ async def test_a_picture_in_the_message_is_used_as_the_reference(make_chat):
     assert [segment['type'] for segment in segments] == ['text', 'image']
     request = recorder.requests[-1]
     assert str(request.url).endswith('/images/edits') and b'turn it into a night scene' in request.content
+
+
+@pytest.mark.anyio
+async def test_a_selfie_in_qq_carries_the_persona_pictures(make_chat):
+    model = Model(answer('拍好啦。', [draw(prompt='a selfie in a cafe', aspect='portrait', self_portrait=True)]))
+    store, config, chat, recorder = make_chat(model)
+    chat.imagegen.add_reference('default', png('red'))
+    segments = await over_qq(store, config, chat, '发张自拍')
+    assert [segment['type'] for segment in segments] == ['text', 'image']
+    request = recorder.requests[-1]
+    assert str(request.url).endswith('/images/edits') and len(edit_images(request)) == 1
+    assert b'long brown hair, amber eyes' in request.content
 
 
 @pytest.mark.anyio

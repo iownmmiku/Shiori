@@ -5,8 +5,10 @@ to draw; the tool only reserves the picture, and the host runs `deliver`
 after the text reply went out (or `cancel`, which gives the count back, when
 it did not).
 """
+import asyncio
+
 from shiori.extension_host import ToolResult
-from .engine import ASPECTS, MAX_PROMPT, ImageGen, ImageGenError, chat_reason, decode_data_url
+from .engine import ASPECTS, MAX_PROMPT, MAX_UPLOAD_BYTES, ImageGen, ImageGenError, chat_reason, decode_data_url
 
 HINT = ('你会画画和拍照，可以用 generate_image 生成图片，图要几十秒才画好，会在文字之后单独发出。'
         '对方请你画画、拍照、自拍或改图时，按你的性格和意愿决定，愿意就调用；不要只用文字描述画面假装已经发了图，'
@@ -20,7 +22,7 @@ def tool_schema(reference=False):
         'aspect': {'type': 'string', 'enum': list(ASPECTS),
                    'description': 'square 方图；portrait 竖图（人像、自拍）；landscape 横图（风景、场景）。'},
         'self_portrait': {'type': 'boolean',
-                          'description': '画的是你自己（自拍、你的照片、你穿某件衣服）时为 true，会自动加上你的外貌设定，prompt 里不用再写长相。'}}
+                          'description': '画的是你自己（自拍、你的照片、你穿某件衣服）时为 true，会自动加上你的外貌设定和参考图，prompt 里不用再写长相。'}}
     if reference:
         properties['use_reference'] = {'type': 'boolean',
                                        'description': '对方这条消息附了图片，要你照着它改、换风格或照着画时为 true。'}
@@ -80,15 +82,40 @@ def setup(ext):
 
     async def test(request):
         body = request.body if isinstance(request.body, dict) else {}
-        if set(body) - {'prompt', 'service_id', 'aspect'}:
+        if set(body) - {'prompt', 'service_id', 'aspect', 'persona_id'}:
             raise ValueError('测试参数无效')
-        service_id, aspect = body.get('service_id') or None, body.get('aspect', 'square')
-        if service_id is not None and not isinstance(service_id, str) or aspect not in ASPECTS:
+        service_id, aspect, persona_id = body.get('service_id') or None, body.get('aspect', 'square'), body.get('persona_id') or None
+        if (service_id is not None and not isinstance(service_id, str) or aspect not in ASPECTS
+                or persona_id is not None and not isinstance(persona_id, str)):
             raise ValueError('测试参数无效')
         try:
-            return await engine.test(body.get('prompt', ''), service_id=service_id, aspect=aspect)
+            return await engine.test(body.get('prompt', ''), service_id=service_id, aspect=aspect, persona_id=persona_id)
         except ImageGenError as exc:
             # The owner sees the reason; the redacted upstream excerpt helps fix the configuration.
             raise ValueError(str(exc) + (f'（接口说明：{exc.detail}）' if exc.detail else '')) from None
 
     ext.api('POST', 'test', test)
+
+    def reference_body(request, keys):
+        body = request.body if isinstance(request.body, dict) else {}
+        if set(body) != keys or not all(isinstance(body[key], str) for key in keys):
+            raise ValueError('参考图参数无效')
+        return body
+
+    async def add_reference(request):
+        body = reference_body(request, {'persona_id', 'image'})
+        try:
+            return await asyncio.to_thread(
+                lambda: engine.add_reference(body['persona_id'], decode_data_url(body['image'], limit=MAX_UPLOAD_BYTES)))
+        except ImageGenError as exc:
+            raise ValueError(str(exc)) from None
+
+    def remove_reference(request):
+        body = reference_body(request, {'persona_id', 'id'})
+        try:
+            return engine.remove_reference(body['persona_id'], body['id'])
+        except ImageGenError as exc:
+            raise ValueError(str(exc)) from None
+
+    ext.api('POST', 'reference', add_reference)
+    ext.api('DELETE', 'reference', remove_reference)
