@@ -23,7 +23,7 @@ window.ShioriSidebar = (() => {
   // Built-in baseline. Pages absent from a saved layout are appended back to
   // their default group, so a later release never loses a page.
   const DEFAULT_GROUPS = [
-    { id: "model", title: "拓展工具", icon: "spark", pages: ["tools", "plugins"] },
+    { id: "model", title: "拓展工具", icon: "spark", pages: ["tools", "plugins", "extensions"] },
     { id: "memory", title: "认知与表达", icon: "memory", pages: ["memory", "knowledge", "culture"] },
     { id: "automation", title: "自动化", icon: "clock", pages: ["characterSchedule", "tasks", "jobs"] },
     { id: "system", title: "数据与日志", icon: "settings", pages: ["groups", "logs", "statistics", "diagnostics"] },

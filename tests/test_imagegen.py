@@ -1,4 +1,4 @@
-"""Image generation in QQ chats (owner request, 2026-11-18).
+"""The bundled image generation extension (owner request, 2026-11-18).
 
 Asked to draw, take a photo, a selfie or edit a picture, the chat model may
 call generate_image. The text reply goes out first; the picture is drawn in
@@ -20,11 +20,12 @@ import httpx
 import pytest
 from PIL import Image
 
-from shiori import imagegen as ig
+from shiori import outgoing_image
+from shiori.extensions.imagegen import engine as ig
 from shiori.chat import ChatService
 from shiori.db import Store
 from shiori.settings import DEFAULTS
-from shiori.social import requested_images
+from shiori.social import requested_jobs
 
 PRIVATE, GROUP = 'qq:private:303', 'qq:group:404'
 KEY = 'sk-fixture-secret-123456'
@@ -84,13 +85,14 @@ def service(kind='openai', **extra):
 def make_gen(tmp_path):
     stores = []
 
-    def build(handler=openai_ok, **patch):
+    def build(handler=openai_ok, daily_per_user=5):
         store = Store(tmp_path / f'gen{len(stores)}')
         stores.append(store)
         recorder = Recorder(handler)
-        gen = ig.ImageGen(store, Config(), transport=recorder.transport())
-        gen.update(dict({'services': [{'id': 'main', 'kind': 'openai', 'api_key': KEY, 'model': 'gpt-image-1'}],
-                         'service_id': 'main', 'enabled': True}, **patch))
+        options = {'daily_per_user': daily_per_user}       # the extension setting
+        gen = ig.ImageGen(store, Config(), store.data_dir / 'imagegen', options=lambda: options, transport=recorder.transport())
+        gen.options_values = options
+        gen.update({'services': [{'id': 'main', 'kind': 'openai', 'api_key': KEY, 'model': 'gpt-image-1'}], 'service_id': 'main'})
         return gen, recorder, store
     yield build
     for store in stores:
@@ -110,7 +112,7 @@ def test_keys_are_kept_protected_and_never_shown(make_gen):
     gen.update({'services': [dict(item, name='改名')]})
     assert gen.service()['api_key'] == KEY and gen.service()['name'] == '改名'
     # A fresh instance reads the protected key back.
-    again = ig.ImageGen(store, Config())
+    again = ig.ImageGen(store, Config(), store.data_dir / 'imagegen')
     assert again.service()['api_key'] == KEY and again.service()['name'] == '改名' and again.available(PRIVATE)
     gen.update({'services': [dict(item, clear_api_key=True)]})
     assert gen.service()['api_key'] == ''
@@ -137,12 +139,14 @@ def test_invalid_services_are_refused_with_a_reason(item, message):
         ig.clean_service(item)
 
 
-def test_enabling_needs_a_selected_service(make_gen):
+def test_drawing_needs_a_selected_service(make_gen):
     gen, _, _ = make_gen()
-    with pytest.raises(ValueError, match='先添加并选择'):
-        gen.update({'service_id': ''})
     with pytest.raises(ValueError, match='不存在'):
         gen.update({'service_id': 'missing'})
+    gen.update({'service_id': ''})
+    assert not gen.available(PRIVATE)
+    with pytest.raises(ig.ImageGenError, match='还没有选择'):
+        gen.queue(PRIVATE, 'qq:303', prompt='a cat')
 
 
 def test_a_self_portrait_gets_the_persona_look_in_the_services_style():
@@ -305,14 +309,14 @@ async def test_a_comfyui_timeout_removes_only_its_own_queued_prompt():
 def test_pictures_are_converted_for_each_connector():
     big = io.BytesIO()
     Image.effect_noise((1800, 1800), 120).convert('RGB').save(big, format='PNG')
-    assert len(big.getvalue()) > ig.OFFICIAL_MAX_BYTES
-    official = ig.official_image(big.getvalue())
-    assert len(official) <= ig.OFFICIAL_MAX_BYTES and ig.image_info(official)[1] == 'image/jpeg'
+    assert len(big.getvalue()) > outgoing_image.OFFICIAL_MAX_BYTES
+    official = outgoing_image.official_image(big.getvalue())
+    assert len(official) <= outgoing_image.OFFICIAL_MAX_BYTES and ig.image_info(official)[1] == 'image/jpeg'
     small = png()
-    assert ig.onebot_image(small) == small                       # sent as-is when it fits
+    assert outgoing_image.onebot_image(small) == small           # sent as-is when it fits
     webp = io.BytesIO()
     Image.new('RGB', (32, 32), 'red').save(webp, format='WEBP')
-    assert ig.image_info(ig.onebot_image(webp.getvalue()))[1] == 'image/jpeg'
+    assert ig.image_info(outgoing_image.onebot_image(webp.getvalue()))[1] == 'image/jpeg'
 
 
 # ---------- queue and daily counts ----------
@@ -329,14 +333,15 @@ async def test_each_account_has_a_daily_count_and_administrators_have_none(make_
     assert gen.queue(PRIVATE, 'qq:505', prompt='a cat')['remaining_today'] == 1
     admin = gen.queue(PRIVATE, 'qq:303', admin=True, prompt='a cat')
     assert admin['remaining_today'] is None
-    gen.update({'daily_per_user': 0})
+    gen.options_values['daily_per_user'] = 0
     with pytest.raises(ig.ImageGenError, match='只对管理员开放'):
         gen.queue(PRIVATE, 'qq:606', prompt='a cat')
     # The counts survive a restart and start over the next day.
-    again = ig.ImageGen(store, Config())
+    options = {'daily_per_user': 2}
+    again = ig.ImageGen(store, Config(), store.data_dir / 'imagegen', options=lambda: options)
     assert again.remaining('qq:303') == 0
     again._usage['day'] = '2000-01-01'
-    assert again.update({'daily_per_user': 2}) and again.remaining('qq:303') == 2
+    assert again.remaining('qq:303') == 2
 
 
 @pytest.mark.anyio
@@ -358,14 +363,13 @@ async def test_a_failed_or_dropped_picture_gives_its_count_back(make_gen):
 
 def test_the_queue_is_bounded_and_only_qq_chats_may_queue(make_gen):
     gen, _, _ = make_gen(daily_per_user=100)
-    with pytest.raises(ig.ImageGenError, match='没有开启'):
+    with pytest.raises(ig.ImageGenError, match='还没有选择'):
         gen.queue('web:default', 'qq:303', prompt='a cat')
     for index in range(ig.QUEUE_LIMIT):
         gen.queue(GROUP, f'qq:{index}', prompt='a cat')
     with pytest.raises(ig.ImageGenError, match='太多'):
         gen.queue(GROUP, 'qq:999', prompt='a cat')
-    gen.update({'enabled': False})
-    assert not gen.available(PRIVATE)
+    assert gen.available(PRIVATE) and not gen.available('web:default')
 
 
 @pytest.mark.anyio
@@ -411,11 +415,14 @@ def make_chat(tmp_path):
             store.upsert_scope({'id': scope, 'auto_memory': False, 'merge_window_ms': 0, 'plan_enabled': False})
         chat = ChatService(store, config, model)
         recorder = Recorder(handler)
-        chat.imagegen.transport = recorder.transport()
-        chat.imagegen.update(dict({'services': [{'id': 'main', 'kind': 'openai', 'api_key': KEY, 'model': 'gpt-image-1'}],
-                                   'service_id': 'main', 'enabled': True, 'daily_per_user': 3,
-                                   'personas': {'default': {'prompt': 'long brown hair, amber eyes', 'negative_prompt': 'glasses'}}},
-                                  **patch))
+        engine = chat.extensions.context('imagegen').state['engine']
+        chat.imagegen = engine                                    # shorthand for the assertions below
+        engine.transport = recorder.transport()
+        chat.extensions.set_config('imagegen', {'daily_per_user': patch.pop('daily_per_user', 3)})
+        engine.update(dict({'services': [{'id': 'main', 'kind': 'openai', 'api_key': KEY, 'model': 'gpt-image-1'}],
+                            'service_id': 'main',
+                            'personas': {'default': {'prompt': 'long brown hair, amber eyes', 'negative_prompt': 'glasses'}}},
+                           **patch))
         made.append((store, chat))
         return store, config, chat, recorder
     yield build
@@ -441,8 +448,8 @@ async def over_qq(store, config, chat, text, scope=PRIVATE, images=(), user='303
     bridge._socket = Socket()
     try:
         await asyncio.wait_for(bridge._flow.handle(scope, user, text, list(images), {'at_bot': True}, direct=True), 10)
-        if bridge._flow._image_jobs:
-            await asyncio.wait_for(asyncio.gather(*list(bridge._flow._image_jobs)), 10)
+        if bridge._flow._extension_jobs:
+            await asyncio.wait_for(asyncio.gather(*list(bridge._flow._extension_jobs)), 10)
     finally:
         await bridge.stop()
     return [action['params']['message'][0] for action in sent]
@@ -455,12 +462,14 @@ def test_the_tool_is_offered_only_where_a_picture_can_be_sent(make_chat):
     assert '按你自己的意愿决定' in tool['description']
     with_picture = offered(chat._request_tools(store.get_scope(PRIVATE), '303', '改一下', {'_turn_images': [data_url(png())]}))
     assert 'use_reference' in with_picture['parameters']['properties']
-    assert chat._image_tool('web:default') is None
+    assert offered(chat._extension_tools(store.get_scope('web:default'), 'owner', {})) is None
     store.upsert_scope({'id': PRIVATE, 'allow_tools': False})
     assert chat._request_tools(store.get_scope(PRIVATE), '303', '画只猫', {}) is None
-    chat.imagegen.update({'enabled': False})
+    chat.extensions.set_enabled('imagegen', False)
     store.upsert_scope({'id': PRIVATE, 'allow_tools': True})
     assert offered(chat._request_tools(store.get_scope(PRIVATE), '303', '画只猫', {})) is None
+    chat.extensions.set_enabled('imagegen', True)
+    assert offered(chat._request_tools(store.get_scope(PRIVATE), '303', '画只猫', {}))
 
 
 @pytest.mark.anyio
@@ -544,12 +553,12 @@ async def test_a_merged_group_turn_does_not_draw(make_chat):
     assert not offered(model.seen[0]['tools'])
 
 
-def test_only_successful_generate_image_actions_are_taken():
-    job = {'id': 'abc', 'remaining_today': 1}
-    assert requested_images({'actions': [{'tool': 'generate_image', 'ok': True, 'result': {'image_job': job}}]}) == [job]
-    assert requested_images({'actions': [{'tool': 'generate_image', 'ok': False, 'error': '用完了'}]}) == []
-    assert requested_images({'actions': [{'tool': 'remember', 'ok': True, 'result': {'image_job': job}}]}) == []
-    assert requested_images({'reply': '好'}) == []
+def test_only_successful_actions_hand_back_work():
+    job = {'id': 'abc', 'extension': 'imagegen'}
+    assert requested_jobs({'actions': [{'tool': 'generate_image', 'ok': True, 'result': {'extension_job': job}}]}) == [job]
+    assert requested_jobs({'actions': [{'tool': 'generate_image', 'ok': False, 'error': '用完了'}]}) == []
+    assert requested_jobs({'actions': [{'tool': 'remember', 'ok': True, 'result': {'image_job': job}}]}) == []
+    assert requested_jobs({'reply': '好'}) == []
 
 
 @pytest.mark.anyio
@@ -597,4 +606,4 @@ async def test_a_picture_call_without_any_text_draws_nothing_and_keeps_the_count
     assert all(segment['type'] != 'image' for segment in segments) and not recorder.requests
     texts = [segment['data'].get('text', '') for segment in segments if segment['type'] == 'text']
     assert not any('generate_image' in text or '已执行' in text for text in texts)
-    assert chat.imagegen.remaining('qq:303') == 3 and not chat.imagegen._jobs
+    assert chat.imagegen.remaining('qq:303') == 3 and not chat.imagegen._jobs and not chat.extensions._jobs

@@ -86,14 +86,14 @@ def requested_sticker(result):
     return None
 
 
-def requested_images(result):
-    """Pictures a reply queued with the generate_image tool."""
+def requested_jobs(result):
+    """After-reply work handed back by extension tools (extension_host.py)."""
     jobs = []
     for action in result.get('actions') or []:
         output = action.get('result')
-        if (action.get('tool') == 'generate_image' and action.get('ok') and isinstance(output, dict)
-                and isinstance(output.get('image_job'), dict) and isinstance(output['image_job'].get('id'), str)):
-            jobs.append(output['image_job'])
+        job = output.get('extension_job') if isinstance(output, dict) else None
+        if action.get('ok') and isinstance(job, dict) and isinstance(job.get('id'), str):
+            jobs.append(job)
     return jobs
 
 
@@ -1657,8 +1657,9 @@ class ConversationFlow:
         self._sticker_tasks = {}
         self._sticker_jobs = set()
         self._sticker_timeout = 5.0
-        # Pictures take tens of seconds; a later message does not cancel them.
-        self._image_jobs = set()
+        # Extension work after a reply (a picture takes tens of seconds); a
+        # later message does not cancel it.
+        self._extension_jobs = set()
         self._closed = False
         # A bridge that knows a group's send limit sets these: pace(scope)
         # waits for room, send_room(scope) is the free count or None.
@@ -1787,59 +1788,61 @@ class ConversationFlow:
         except Exception as exc:
             self.store.add_exception('sticker_send_error', '表情包未发送，文字回复不受影响', exc, scope_id=scope_id)
 
-    def _schedule_images(self, scope_id, user_id, metadata, batch):
-        """Draw, then send after the text, the pictures the reply queued with generate_image."""
-        imagegen = getattr(self.chat, 'imagegen', None)
-        if self._closed or imagegen is None:
+    def _schedule_jobs(self, scope_id, metadata, batch):
+        """Run, after the text, the work extension tools handed back in this reply."""
+        host = getattr(self.chat, 'extensions', None)
+        if self._closed or host is None:
             return
-        for index, job in enumerate(batch.get('image_jobs') or []):
-            if len(self._image_jobs) >= 16:
+        for job in batch.get('extension_jobs') or []:
+            if len(self._extension_jobs) >= 32:
                 break
             job['scheduled'] = True
-            task = asyncio.create_task(self._send_image(scope_id, metadata, batch, imagegen, job['id'], index))
-            self._image_jobs.add(task)
-            task.add_done_callback(self._image_jobs.discard)
+            task = asyncio.create_task(self._run_job(scope_id, metadata, batch, host, job['id']))
+            self._extension_jobs.add(task)
+            task.add_done_callback(self._extension_jobs.discard)
 
-    def _drop_images(self, batch):
-        """Give back the counts of pictures whose reply never went out."""
-        imagegen = getattr(self.chat, 'imagegen', None)
-        for job in batch.get('image_jobs') or []:
-            if not job.get('scheduled') and imagegen is not None:
-                imagegen.discard(job['id'])
+    def _drop_jobs(self, batch):
+        """The reply never went out: extensions give back what they reserved."""
+        host = getattr(self.chat, 'extensions', None)
+        for job in batch.get('extension_jobs') or []:
+            if not job.get('scheduled') and host is not None:
+                host.discard(job['id'])
 
-    async def _send_image(self, scope_id, metadata, batch, imagegen, job_id, index=0):
-        from .imagegen import ImageGenError, chat_reason
+    async def _run_job(self, scope_id, metadata, batch, host, job_id):
+        flow = self
         social = getattr(self.chat, 'social', None) or self._fallback
+
         def current():
-            return not self._closed and social._allowed(scope_id)
-        # Official replies need a fresh msg_seq: after the text, a sticker and earlier pictures.
-        count = batch.get('confirmed_parts', 1) + 2 + index
-        part = {'index': count, 'total': count}
-        try:
-            try:
-                raw, mime = await imagegen.run(job_id)
-            except ImageGenError as exc:
-                if current():
-                    async with self._output_locks[scope_id]:
-                        await self.emit(scope_id, f'这张图没画出来（{chat_reason(exc)}），次数已经退回，稍后再试吧。',
-                                        dict(metadata, assistant_message_id=batch.get('logical_message_id'), output_part=part))
-                return
-            if not current():
-                self.store.add_event('imagegen_dropped', '图片已生成，但会话已停用或不再允许发送，没有发出', scope_id=scope_id)
-                return
-            async with self._output_locks[scope_id]:
+            return not flow._closed and social._allowed(scope_id)
+
+        class Sender:
+            """Lets the extension send into this chat, after the reply."""
+
+            async def _emit(self, text, extra):
                 if not current():
-                    return
-                sent = await self.emit(scope_id, '', dict(metadata, image=raw, image_mime=mime, image_current=current,
-                                                          assistant_message_id=batch.get('logical_message_id'), output_part=part))
-            if sent:
-                self.store.add_event('imagegen_sent', '图片已发送', scope_id=scope_id, bytes=len(raw))
-            else:
-                self.store.add_event('imagegen_unsent', '图片已生成，但发送没有得到确认', scope_id=scope_id)
+                    return False
+                async with flow._output_locks[scope_id]:
+                    if not current():
+                        return False
+                    # Official replies need a fresh msg_seq after the text and a possible sticker.
+                    batch['extra_parts'] = batch.get('extra_parts', 1) + 1
+                    count = batch.get('confirmed_parts', 1) + batch['extra_parts']
+                    return bool(await flow.emit(scope_id, text, dict(metadata, assistant_message_id=batch.get('logical_message_id'),
+                                                                     output_part={'index': count, 'total': count}, **extra)))
+
+            async def image(self, raw):
+                return await self._emit('', {'image': bytes(raw), 'image_current': current})
+
+            async def text(self, text):
+                text = str(text).strip()[:1000]
+                return bool(text) and await self._emit(text, {})
+
+        try:
+            await host.run_job(job_id, Sender())
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            self.store.add_exception('imagegen_send_error', '图片没有发出，文字回复不受影响', exc, scope_id=scope_id)
+            self.store.add_exception('extension_error', '扩展的回复后任务没有完成，文字回复不受影响', exc, scope_id=scope_id)
 
     def _discard_debounce(self, key, user_id=None):
         if user_id is not None:
@@ -2359,7 +2362,7 @@ class ConversationFlow:
                     result = await self.chat.respond_group(scope_id, entries, metadata=metadata)
                 else:
                     result = await self.chat.respond(scope_id, user_id, text, images=images, metadata=metadata)
-                batch['image_jobs'] = requested_images(result)
+                batch['extension_jobs'] = requested_jobs(result)
                 batch['chat_timings'] = dict(result.get('timings') or {})
                 batch['logical_message_id'] = result.get('message_id')
                 batch['outcome'] = 'generated' if result.get('reply') else 'failed'
@@ -2384,7 +2387,7 @@ class ConversationFlow:
                             proactive=':group:' in scope_id and not batch.get('explicit')
                             and not (batch.get('planner') or {}).get('addressed_to_bot'))
                         self._schedule_sticker(scope_id, user_id, metadata, batch, requested_sticker(result))
-                        self._schedule_images(scope_id, user_id, metadata, batch)
+                        self._schedule_jobs(scope_id, metadata, batch)
                     else:
                         if batch.get('outcome') != 'suppressed':
                             self.store.add_event('qq_delivery', '群聊回复被平台拒收，未送达' if batch.get('outcome') == 'not_sent'
@@ -2416,7 +2419,7 @@ class ConversationFlow:
                 await self._emit_failure(scope_id, user_id, _failure_feedback(exc), entry['message'],
                                          batch.get('generation'), entry['metadata'], batch.get('identity'))
         finally:
-            self._drop_images(batch)
+            self._drop_jobs(batch)
             timing = {'flow_ms': round((time.monotonic() - started) * 1000, 1),
                       'planner_ms': batch.get('planner', {}).get('planner_ms', 0),
                       'text_delivery_ms': batch.get('text_delivery_ms', 0),
@@ -2456,7 +2459,7 @@ class ConversationFlow:
 
     async def close(self):
         self._closed = True
-        tasks = self._jobs | self._sticker_jobs | self._image_jobs
+        tasks = self._jobs | self._sticker_jobs | self._extension_jobs
         self._sticker_tasks.clear()
         for task in list(tasks):
             task.cancel()
@@ -2481,7 +2484,7 @@ class ConversationFlow:
         self._scope_jobs.clear()
         self._jobs.clear()
         self._sticker_jobs.clear()
-        self._image_jobs.clear()
+        self._extension_jobs.clear()
         # Bridges reuse this flow after a disconnected transport is restarted.
         # During draining ingress is rejected; afterwards a fresh turn may run.
         self._closed = False

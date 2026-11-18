@@ -661,11 +661,11 @@ class OneBotBridge:
                 params['message']=[{'type':'image','data':{'file':'base64://'+base64.b64encode(raw).decode()}}]
             except (KeyError,ValueError,AttributeError,TypeError): return False
         elif (metadata or {}).get('image'):
-            # A generated picture (shiori.imagegen), sent as its own message after the text.
+            # A picture from an extension (image generation, say), sent on its own after the text.
             guard = (metadata or {}).get('image_current')
             if callable(guard) and not guard(): return False
             try:
-                from .imagegen import onebot_image
+                from .outgoing_image import onebot_image
                 raw = await asyncio.to_thread(onebot_image, metadata['image'])
             except Exception as exc:
                 self.store.add_exception('qq_delivery', '生成的图片无法转换为可发送的格式', exc, scope_id=scope_id)

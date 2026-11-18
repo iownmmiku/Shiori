@@ -391,7 +391,7 @@ class OfficialBridge:
 
     async def _send_part(self, scope_id: str, text: str, *, msg_id: str | None = None, msg_seq: int = 1, metadata=None) -> bool:
         sticker=(metadata or {}).get('sticker')
-        image=(metadata or {}).get('image')   # a generated picture (shiori.imagegen)
+        image=(metadata or {}).get('image')   # a picture from an extension, sent after the text
         if not self._allowed(scope_id) or not self._connected or self._client is None or not str(text).strip() and not (sticker or image):
             return False
         scope = self.store.get_scope(scope_id)
@@ -423,7 +423,7 @@ class OfficialBridge:
                 kwargs.update(msg_type=7,content=' ',media={'file_info':upload['file_info']})
             elif image:
                 from botpy.http import Route
-                from .imagegen import official_image
+                from .outgoing_image import official_image
                 guard=(metadata or {}).get('image_current')
                 if callable(guard) and not guard(): return False
                 data=await asyncio.to_thread(official_image,image)

@@ -40,11 +40,12 @@ const paths = {
   logs:'<path d="M5 3h11l3 3v15H5V3ZM8 8h8M8 12h8M8 16h5"/>',
   statistics:'<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
   plugins:'<path d="M9 3v4H5a2 2 0 0 0-2 2v4h4a2 2 0 1 1 0 4H3v4a2 2 0 0 0 2 2h4v-4a2 2 0 1 1 4 0v4h4a2 2 0 0 0 2-2v-4h-4a2 2 0 1 1 0-4h4V9a2 2 0 0 0-2-2h-4V3H9Z"/>',
+  extensions:'<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><path d="M17.5 14v7M14 17.5h7"/>',
   diagnostics:'<path d="M3 12h4l2-5 3 10 2-5h7"/>',
 };
 const icon = name => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name] || paths.spark}</svg>`;
 paths.qqChats = paths.groups;
-const pageNames = {overview:"运行概览",chat:"Chat 工作台",qqChats:"QQ 聊天管理",models:"模型供应商",memory:"记忆档案",culture:"群语言与表达",knowledge:"知识与检索",personaKnowledge:"人格知识",characterSchedule:"角色日程",tasks:"任务与提醒",tools:"MCP",persona:"机器人配置",groups:"群与会话",logs:"运行日志",statistics:"数据统计",plugins:"插件",diagnostics:"自检与诊断",settings:"系统设置",jobs:"后台任务",help:"使用指南"};
+const pageNames = {overview:"运行概览",chat:"Chat 工作台",qqChats:"QQ 聊天管理",models:"模型供应商",memory:"记忆档案",culture:"群语言与表达",knowledge:"知识与检索",personaKnowledge:"人格知识",characterSchedule:"角色日程",tasks:"任务与提醒",tools:"MCP",persona:"机器人配置",groups:"群与会话",logs:"运行日志",statistics:"数据统计",plugins:"插件",extensions:"扩展",diagnostics:"自检与诊断",settings:"系统设置",jobs:"后台任务",help:"使用指南"};
 // Keep old model links working without restoring a second configuration page.
 const sidebarPageNames = Object.fromEntries(Object.entries(pageNames).filter(([page]) => page !== "models"));
 // Retain browser preferences from previous product names on this origin.
@@ -282,7 +283,7 @@ async function renderPage() {
     const page = state.page;
     await window.ShioriAssets?.ensure(page);
     if (id !== state.renderId || page !== state.page) return;
-    const html = await ({overview:window.ShioriExperience.renderOverview,chat:window.ShioriExperience.renderChat,qqChats:window.ShioriQQMonitor?.render,models:window.ShioriPages.renderModels,logs:window.ShioriPages.renderLogs,statistics:window.ShioriStatistics?.render,plugins:window.ShioriPlugins?.render,memory:renderMemory,culture:renderCulture,knowledge:renderKnowledge,personaKnowledge:renderPersonaKnowledge,characterSchedule:window.ShioriCharacterSchedule?.render,tasks:renderTasks,tools:renderTools,persona:window.ShioriExperience.renderPersonas,groups:renderGroups,diagnostics:renderDiagnostics,settings:window.ShioriExperience.renderSettings,jobs:window.ShioriExperience.renderJobs,help:window.ShioriExperience.renderHelp}[state.page])();
+    const html = await ({overview:window.ShioriExperience.renderOverview,chat:window.ShioriExperience.renderChat,qqChats:window.ShioriQQMonitor?.render,models:window.ShioriPages.renderModels,logs:window.ShioriPages.renderLogs,statistics:window.ShioriStatistics?.render,plugins:window.ShioriPlugins?.render,extensions:window.ShioriExtensions?.render,memory:renderMemory,culture:renderCulture,knowledge:renderKnowledge,personaKnowledge:renderPersonaKnowledge,characterSchedule:window.ShioriCharacterSchedule?.render,tasks:renderTasks,tools:renderTools,persona:window.ShioriExperience.renderPersonas,groups:renderGroups,diagnostics:renderDiagnostics,settings:window.ShioriExperience.renderSettings,jobs:window.ShioriExperience.renderJobs,help:window.ShioriExperience.renderHelp}[state.page])();
     if (id !== state.renderId) return;
     main.innerHTML = `<div class="animate-in">${html}</div>`;
     window.ShioriFormDrafts?.restore();

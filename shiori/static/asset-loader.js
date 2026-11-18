@@ -7,6 +7,7 @@ window.ShioriAssets = (() => {
     qqChats: {script:'qq-monitor.js',css:'qq-monitor.css',global:'ShioriQQMonitor'},
     statistics: {script:'statistics.js',css:'statistics.css',global:'ShioriStatistics',beforeTheme:true},
     plugins: {script:'plugins.js',global:'ShioriPlugins'},
+    extensions: {script:'extensions.js',global:'ShioriExtensions'},
     characterSchedule: {script:'character-schedule.js',css:'character-schedule.css',global:'ShioriCharacterSchedule'},
   });
   const suffix = new URL(document.currentScript.src).search;

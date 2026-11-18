@@ -32,4 +32,4 @@ desktop = ["pystray==0.19.5; sys_platform == 'win32'", "pywebview==6.2.1; sys_pl
 include = ["shiori*", "mikubot*", "qunyu*"]
 
 [tool.setuptools.package-data]
-shiori = ["static/*", "static/assets/brand/*", "static/assets/character/*","resources/*.ps1", "resources/*.cmd", "resources/csp/*", "resources/csp/references/*"]
+shiori = ["static/*", "extensions/*/extension.json", "extensions/*/pages/*/*", "static/assets/brand/*", "static/assets/character/*","resources/*.ps1", "resources/*.cmd", "resources/csp/*", "resources/csp/references/*"]

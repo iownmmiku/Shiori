@@ -1,9 +1,9 @@
-"""Image generation for QQ chats.
+"""The image generation extension's engine: services, daily counts, queue.
 
 The chat model queues a picture with the `generate_image` tool; it is drawn
-in the background and the QQ connector sends it after the text reply. The
-adapters for OpenAI-compatible image APIs, Gemini, NovelAI and ComfyUI follow
-the owner's AstrBot plugin 随想画卷 (persona_canvas).
+in the background and sent after the text reply (see main.py). The adapters
+for OpenAI-compatible image APIs, Gemini, NovelAI and ComfyUI follow the
+owner's AstrBot plugin 随想画卷 (persona_canvas).
 
 Prompts, reference pictures and upstream bodies are untrusted data. Service
 keys are stored protected like the other settings secrets and never leave
@@ -23,7 +23,6 @@ import secrets
 import threading
 import time
 import uuid
-import warnings
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -31,8 +30,9 @@ from urllib.parse import quote, urlencode, urlsplit
 
 import httpx
 
-from .settings import _protect, _unprotect
-from .timezones import local_now
+from ... import outgoing_image
+from ...settings import _protect, _unprotect
+from ...timezones import local_now
 
 KINDS = {'openai': 'OpenAI 兼容图像接口', 'gemini': 'Gemini 图像模型', 'novelai': 'NovelAI', 'comfyui': 'ComfyUI 工作流'}
 DEFAULT_ENDPOINTS = {'openai': 'https://api.openai.com/v1', 'gemini': 'https://generativelanguage.googleapis.com/v1beta',
@@ -52,16 +52,15 @@ MAX_PERSONAS = 200
 MAX_REFERENCES = 3
 MAX_REFERENCE_BYTES = 5 * 1024 * 1024
 MAX_RESPONSE_BYTES = 48 * 1024 * 1024
-MAX_IMAGE_BYTES = 32 * 1024 * 1024
-MAX_IMAGE_PIXELS = 36_000_000
+MAX_IMAGE_BYTES = outgoing_image.MAX_IMAGE_BYTES
 MAX_WORKFLOW_BYTES = 2 * 1024 * 1024
 MAX_EXTRA_CHARS = 8000
 QUEUE_LIMIT = 6          # pictures waiting or being drawn
 PENDING_TTL = 600.0      # a queued picture whose reply never went out is dropped
-ONEBOT_MAX_BYTES = 4 * 1024 * 1024
-OFFICIAL_MAX_BYTES = 2 * 1024 * 1024
 
-CONFIG_DEFAULTS = {'enabled': False, 'service_id': '', 'daily_per_user': 5, 'services': [], 'personas': {}}
+# Switching the extension on and the daily count are extension settings
+# (extension.json); the services and the persona looks are kept here.
+CONFIG_DEFAULTS = {'service_id': '', 'services': [], 'personas': {}}
 SERVICE_DEFAULTS = {'id': '', 'name': '', 'kind': 'openai', 'endpoint': '', 'api_key': '', 'model': '',
                     'timeout_seconds': 180, 'negative_prompt': '', 'natural_negative': False, 'reference': True,
                     'quality': '', 'steps': 28, 'scale': 5.0, 'sampler': 'k_euler_ancestral', 'strength': 0.6,
@@ -96,26 +95,10 @@ def chat_reason(exc):
 
 def image_info(data):
     """(extension, mime, (width, height)) from the actual pixels."""
-    if not isinstance(data, (bytes, bytearray)) or not data or len(data) > MAX_IMAGE_BYTES:
-        raise ImageGenError('图片为空或超过 32 MB')
-    from PIL import Image
-    formats = {'PNG': ('png', 'image/png'), 'JPEG': ('jpg', 'image/jpeg'), 'WEBP': ('webp', 'image/webp'),
-               'GIF': ('gif', 'image/gif')}
     try:
-        with warnings.catch_warnings():
-            warnings.simplefilter('error', Image.DecompressionBombWarning)
-            with Image.open(io.BytesIO(data)) as picture:
-                size, kind = picture.size, picture.format
-                if kind not in formats or min(size) < 1 or size[0] * size[1] > MAX_IMAGE_PIXELS:
-                    raise ImageGenError('图片格式或尺寸不受支持')
-                picture.verify()
-            with Image.open(io.BytesIO(data)) as picture:
-                picture.load()
-    except ImageGenError:
-        raise
-    except Exception as exc:
-        raise ImageGenError('返回的图片损坏或无法识别') from exc
-    return formats[kind][0], formats[kind][1], size
+        return outgoing_image.image_info(data)
+    except ValueError as exc:
+        raise ImageGenError('返回的' + str(exc) if str(exc).startswith('图片损坏') else str(exc)) from exc
 
 
 def decode_data_url(value):
@@ -146,37 +129,6 @@ def _b64_image(value):
         return base64.b64decode(encoded, validate=True)
     except ValueError as exc:
         raise ImageGenError('接口返回的图片不是有效 Base64') from exc
-
-
-def _reencode(raw, *, max_side, limit, keep=('image/png', 'image/jpeg', 'image/gif')):
-    """The picture as-is when it fits; otherwise a smaller JPEG."""
-    _, mime, size = image_info(raw)
-    if mime in keep and len(raw) <= limit and max(size) <= max_side:
-        return raw
-    from PIL import Image
-    with Image.open(io.BytesIO(raw)) as picture:
-        picture.seek(0)
-        frame = picture.convert('RGBA')
-    background = Image.new('RGB', frame.size, (255, 255, 255))
-    background.paste(frame, mask=frame.split()[-1])
-    background.thumbnail((max_side, max_side))
-    for quality in (90, 82, 74, 66, 58):
-        output = io.BytesIO()
-        background.save(output, format='JPEG', quality=quality, optimize=True)
-        if output.tell() <= limit:
-            return output.getvalue()
-        background.thumbnail((int(background.width * .85), int(background.height * .85)))
-    raise ImageGenError('图片压缩后仍然太大，无法发送')
-
-
-def onebot_image(raw):
-    """A picture OneBot connectors accept as a base64 image segment."""
-    return _reencode(raw, max_side=4096, limit=ONEBOT_MAX_BYTES)
-
-
-def official_image(raw):
-    """A picture the official bot's rich media upload accepts."""
-    return _reencode(raw, max_side=2048, limit=OFFICIAL_MAX_BYTES)
 
 
 # ---------- configuration ----------
@@ -463,7 +415,7 @@ async def _image_value(value):
     if not isinstance(value, str) or not value.strip():
         raise ImageGenError('生图接口的响应里没有图片')
     if value.startswith(('https://', 'http://')):
-        from .stickers import download_image
+        from ...stickers import download_image
         try:
             raw, _ = await asyncio.to_thread(download_image, value, max_bytes=5 * 1024 * 1024)
         except Exception as exc:
@@ -746,10 +698,11 @@ class Job:
 class ImageGen:
     """Configuration, per-user daily counts and the background drawing queue."""
 
-    def __init__(self, store, settings, *, transport=None):
+    def __init__(self, store, settings, root, *, options=None, transport=None):
         self.store, self.settings = store, settings
+        self.options = options or (lambda: {'daily_per_user': 5})   # the extension's settings
         self.transport = transport          # tests replace the HTTP transport
-        self.root = Path(store.data_dir) / 'imagegen'
+        self.root = Path(root)
         self.path = self.root / 'config.json'
         self.usage_path = self.root / 'usage.json'
         self._lock = threading.RLock()
@@ -776,11 +729,10 @@ class ImageGen:
                 if item.get('api_key') and not stored['api_key']:
                     raise ValueError('密钥不能在当前账户读取')
                 services.append(clean_service(stored))
-            config.update(enabled=raw.get('enabled', False) is True, service_id=str(raw.get('service_id', '')),
-                          daily_per_user=_integer(raw.get('daily_per_user', 5), '每人每日张数', 0, 1000),
-                          services=services[:MAX_SERVICES], personas=clean_personas(raw.get('personas') or {}))
+            config.update(service_id=str(raw.get('service_id', '')), services=services[:MAX_SERVICES],
+                          personas=clean_personas(raw.get('personas') or {}))
         except Exception as exc:
-            self.warning = '生图配置无法读取，已停用；请在「生图」页重新配置'
+            self.warning = '生图配置无法读取，已停用；请在生图设置页重新配置'
             config = copy.deepcopy(CONFIG_DEFAULTS)
             try:
                 self.store.add_exception('imagegen_config_error', self.warning, exc)
@@ -824,6 +776,13 @@ class ImageGen:
         temporary.write_text(json.dumps(self._usage, ensure_ascii=False), 'utf-8')
         temporary.replace(self.usage_path)
 
+    def daily_limit(self):
+        try:
+            value = self.options().get('daily_per_user', 5)
+        except Exception:
+            value = 5
+        return value if type(value) is int and value >= 0 else 5
+
     # -- configuration --
     def config(self):
         with self._lock:
@@ -842,7 +801,7 @@ class ImageGen:
             personas = [{'id': item['id'], 'name': item.get('name') or item['id']} for item in self.store.list_personas()]
         except Exception:
             pass
-        return dict(config, kinds=KINDS, default_endpoints=DEFAULT_ENDPOINTS, usage=usage,
+        return dict(config, kinds=KINDS, default_endpoints=DEFAULT_ENDPOINTS, usage=usage, daily_per_user=self.daily_limit(),
                     persona_list=personas, warning=self.warning)
 
     def update(self, patch):
@@ -850,12 +809,6 @@ class ImageGen:
             raise ValueError('生图设置包含不支持的字段')
         with self._lock:
             config = self.config()
-            if 'enabled' in patch:
-                if type(patch['enabled']) is not bool:
-                    raise ValueError('开关须为布尔值')
-                config['enabled'] = patch['enabled']
-            if 'daily_per_user' in patch:
-                config['daily_per_user'] = _integer(patch['daily_per_user'], '每人每日张数', 0, 1000)
             if 'services' in patch:
                 items = patch['services']
                 if not isinstance(items, list) or len(items) > MAX_SERVICES:
@@ -878,8 +831,6 @@ class ImageGen:
                 raise ValueError('选择的生图服务不存在')
             if 'personas' in patch:
                 config['personas'] = clean_personas(patch['personas'])
-            if config['enabled'] and not config['service_id']:
-                raise ValueError('开启生图前请先添加并选择一个生图服务')
             self._save(config)
             self._config = config
             self.warning = ''
@@ -893,7 +844,7 @@ class ImageGen:
 
     def available(self, scope_id):
         with self._lock:
-            return bool(self._config['enabled'] and scope_id.startswith(SCOPES) and self.service())
+            return bool(scope_id.startswith(SCOPES) and self.service())
 
     def reference_supported(self):
         return supports_reference(self.service())
@@ -908,7 +859,7 @@ class ImageGen:
             return None
         with self._lock:
             _, counts = self._counts()
-            return max(0, self._config['daily_per_user'] - counts.get(user_key, 0))
+            return max(0, self.daily_limit() - counts.get(user_key, 0))
 
     # -- queue --
     def _refund(self, job):
@@ -938,14 +889,14 @@ class ImageGen:
         with self._lock:
             self._sweep()
             service = self.service()
-            if not self._config['enabled'] or not service or not scope_id.startswith(SCOPES):
-                raise ImageGenError('生图功能没有开启')
+            if not service or not scope_id.startswith(SCOPES):
+                raise ImageGenError('还没有选择生图服务')
             if references and not supports_reference(service):
                 raise ImageGenError('当前生图服务不支持参考图改图')
             if len(self._jobs) + self._running >= QUEUE_LIMIT:
                 raise ImageGenError('现在排队画的图太多了，请稍后再试')
             day, counts = self._counts()
-            limit = self._config['daily_per_user']
+            limit = self.daily_limit()
             if not admin and counts.get(user_key, 0) >= limit:
                 raise ImageGenError(f'今天的画图次数用完了（每人每天 {limit} 张），明天再来吧' if limit else '画图目前只对管理员开放')
             look = self._config['personas'].get(persona_id) or {} if self_portrait else {}
@@ -987,7 +938,7 @@ class ImageGen:
                 self._slot = asyncio.Semaphore(1)
             async with self._slot:
                 service = self.service(job.service_id)
-                if service is None or not self._config['enabled']:
+                if service is None:
                     raise ImageGenError('生图服务已被停用或删除')
                 raw, mime = await generate(service, job.prompt, job.negative, job.aspect, job.references,
                                            transport=self.transport)

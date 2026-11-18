@@ -1,0 +1,8 @@
+.imagegen-preview{margin:16px 0 0}
+.imagegen-preview img{max-width:100%;max-height:480px;border-radius:12px;display:block}
+.imagegen-persona h3{margin:18px 0 8px;font-size:15px}
+.imagegen-add{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+.record-card h3{margin:0 0 6px;font-size:15px}
+.record-card p{margin:4px 0;overflow-wrap:anywhere}
+.record-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.section-actions{margin-top:16px}

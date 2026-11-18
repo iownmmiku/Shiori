@@ -25,7 +25,7 @@ KIND_LABELS = {
     'distillation_discovery': '蒸馏检索', 'settings': '设置变更', 'search_attempt': '联网搜索', 'admin_pairing': '管理员配对',
     'loop_stall': '主循环停顿', 'alert': '故障提醒',
     'imagegen': '已生成图片', 'imagegen_failed': '生图失败', 'imagegen_sent': '图片已发送', 'imagegen_unsent': '图片未确认',
-    'imagegen_dropped': '图片未发送', 'imagegen_send_error': '图片发送失败', 'imagegen_config_error': '生图配置',
+    'imagegen_dropped': '图片未发送', 'imagegen_send_error': '图片发送失败', 'imagegen_config_error': '生图配置', 'extension_error': '扩展出错',
 }
 PREFIXES = (('qq', 'qq'), ('planner', 'planner'), ('chat', 'reply'), ('model', 'model'), ('memory', 'memory'),
             ('social', 'learning'), ('jargon', 'learning'), ('expression', 'learning'), ('sticker', 'stickers'), ('imagegen', 'imagegen'),
