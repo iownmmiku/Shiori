@@ -3,7 +3,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 import re
 
-from .output import strip_memory_citations
+from .output import strip_context_labels, strip_memory_citations
 
 
 _sink = ContextVar('shiori_chat_preview', default=None)
@@ -76,7 +76,8 @@ class _PublicText:
             if tag:
                 self.hidden = tag.group(1).casefold()
             else:
-                public.append(strip_memory_citations(marker, self.memory_ids, user_text=self.user_text))
+                public.append(strip_context_labels(strip_memory_citations(marker, self.memory_ids, user_text=self.user_text),
+                                                   user_text=self.user_text, line_start=False))
         return ''.join(public)
 
 

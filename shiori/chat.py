@@ -30,7 +30,7 @@ from .conversation_history import align_rounds, time_history, continuity_history
 from .settings import resolve_model, resolved_identity
 from .knowledge import PersonaKnowledge
 from .tool_actions import ToolActions, validate_arguments, bounded_result
-from .output import strip_memory_citations, model_reply_parts, generation_instructions, output_config, prepare_reply
+from .output import strip_context_labels, strip_memory_citations, model_reply_parts, generation_instructions, output_config, prepare_reply
 from .chat_preview import preview_filter
 
 
@@ -877,7 +877,8 @@ class ChatService:
                         result = {'content':'模型未能继续整理答复。已执行的工具结果保留在下方和 MCP 调用记录中，请核对后再决定下一步；不会自动重跑。', 'tool_calls':[], 'usage':usage}
                         break
                     usage = result['usage']
-                reply = strip_memory_citations(result.get('content', ''), versions, user_text=text).strip()
+                reply = strip_context_labels(strip_memory_citations(result.get('content', ''), versions, user_text=text),
+                                             user_text=text).strip()
                 generated_reply = bool(reply)
                 if not reply:
                     if not _only_queued(actions, self._queued_tools()):
@@ -1420,6 +1421,8 @@ class ChatService:
                 if role == 'assistant':
                     old_meta = m.get('metadata') or {}
                     content = strip_memory_citations(content, [*(old_meta.get('memory_versions') or {}), *(old_meta.get('memory_ids') or [])], user_text=user_literals)
+                    # A label stored before it was cleaned would otherwise teach the next replies to copy it.
+                    content = strip_context_labels(content, user_text=user_literals)
                 if role == 'user' and scope['id'].startswith(('qq:group:', 'qqofficial:group:')):
                     meta = m.get('metadata') or {}
                     content = f"[消息 {m['id'][:8]}，说话人 {m.get('user_id')}，称呼 {str(meta.get('sender_name') or meta.get('nickname') or '')[:40]}] {content}"

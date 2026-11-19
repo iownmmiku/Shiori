@@ -97,6 +97,36 @@ def strip_memory_citations(text, memory_ids, *, user_text=''):
     return ''.join(result)
 
 
+# The context labels a model sees on every history line and on the current
+# request. Models sometimes copy them into a reply; once one is stored, the
+# next turns see it in their own history and copy it more.
+_ECHOED_LABEL = (r'[【\[](?:历史消息(?:\s*[·・]|（)|当前请求人|说话人\s|消息\s*[0-9a-fA-F]{8})'
+                 r'[^【】\[\]\n]{0,200}[】\]]')
+# Shortened copies such as 【接收】 or 【回复】 only count at the start of a line.
+_BARE_LABEL = r'【(?:接收|发送|录入|回复)[^【】\n]{0,12}】'
+_LABEL_LINE = re.compile(r'(?m)^[ \t]*(?:' + _ECHOED_LABEL + '|' + _BARE_LABEL + r')[ \t]*(?:\r?\n)?')
+_LABEL_ANYWHERE = re.compile(_ECHOED_LABEL)
+
+
+def strip_context_labels(text, *, user_text='', line_start=True):
+    """Remove copies of the context's own labels from a model reply, before
+    storage and pacing. A label the user typed themselves is kept, and so are
+    code, links and URLs."""
+    def remove(match):
+        return match.group() if match.group().strip() in user_text else ''
+
+    def clean(segment):
+        if line_start:
+            segment = _LABEL_LINE.sub(remove, segment)
+        return _LABEL_ANYWHERE.sub(remove, segment)
+    result, position = [], 0
+    for start, end in _protected_spans(text):
+        result.extend((clean(text[position:start]), text[start:end]))
+        position = end
+    result.append(clean(text[position:]))
+    return ''.join(result)
+
+
 def transport_limit(config, scope=None):
     scope_id = str((scope or {}).get('id', ''))
     section = 'qq_official' if scope_id.startswith('qqofficial:') else 'onebot'
