@@ -196,11 +196,16 @@ async def _receive_chat(client, url, payload, headers, *, first_token_seconds, c
                                 raise ValueError()
                             if identifier != target['id']:
                                 target['id'] += identifier
-                        if part.get('type', 'function') != 'function':
+                        # Relays often repeat the fields of a call's later
+                        # fragments as null ("type": null, "name": null);
+                        # null means "not sent here", never a different kind.
+                        if part.get('type') not in (None, 'function'):
                             raise ValueError()
                         function = part.get('function') or {}
                         for key in ('name', 'arguments'):
-                            fragment = function.get(key, '')
+                            fragment = function.get(key)
+                            if fragment is None:
+                                fragment = ''
                             if not isinstance(fragment, str):
                                 raise ValueError()
                             target['function'][key] += fragment

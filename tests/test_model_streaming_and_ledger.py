@@ -68,6 +68,32 @@ def test_sse_tools_are_assembled_only_after_complete_arguments(setup_provider):
     assert len(store.list_usage())==1
 
 
+TOOLS=[{'type':'function','function':{'name':'calculate','parameters':{'type':'object'}}}]
+
+
+def test_sse_tool_fragments_whose_fields_are_null_still_assemble(setup_provider):
+    # An OpenAI-compatible relay repeats a call's id, type and name as null in its later fragments.
+    provider, _, store, transport = setup_provider
+    raw=sse({'content':None,'tool_calls':[{'index':0,'id':'call-1','type':'function','function':{'name':'calculate','arguments':''}}]})
+    raw+=sse({'content':None,'tool_calls':[{'index':0,'id':None,'type':None,'function':{'name':'','arguments':'{"expression"'}}]})
+    raw+=sse({'content':None,'tool_calls':[{'index':0,'id':None,'type':None,'function':{'name':None,'arguments':':"1+1"}'}}]},'tool_calls')
+    raw+=b'data: [DONE]\n\n'
+    transport(lambda request:httpx.Response(200,headers={'content-type':'text/event-stream'},stream=Chunks([raw])))
+    result=asyncio.run(provider.complete([{'role':'user','content':'hi'}],tools=TOOLS))
+    call=result['tool_calls'][0]
+    assert call['id']=='call-1' and call['type']=='function' and call['function']['name']=='calculate'
+    assert json.loads(call['function']['arguments'])=={'expression':'1+1'}
+
+
+def test_sse_tool_fragment_of_another_kind_is_still_rejected(setup_provider):
+    provider, _, store, transport = setup_provider
+    raw=sse({'tool_calls':[{'index':0,'id':'call-1','type':'function','function':{'name':'calculate','arguments':'{}'}}]})
+    raw+=sse({'tool_calls':[{'index':0,'type':'custom','function':{'arguments':''}}]},'tool_calls')+b'data: [DONE]\n\n'
+    transport(lambda request:httpx.Response(200,headers={'content-type':'text/event-stream'},stream=Chunks([raw])))
+    with pytest.raises(ProviderError, match='无效事件'):
+        asyncio.run(provider.complete([{'role':'user','content':'hi'}],tools=TOOLS))
+
+
 def test_partial_stream_is_not_returned_or_treated_as_free(setup_provider):
     provider, _, store, transport=setup_provider
     transport(lambda request:httpx.Response(200,headers={'content-type':'text/event-stream'},stream=Chunks([sse({'content':'partial'})])))
