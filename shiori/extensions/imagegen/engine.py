@@ -54,6 +54,10 @@ MAX_REFERENCE_BYTES = 5 * 1024 * 1024
 # A persona's own reference pictures, uploaded on the settings page; they are
 # kept small enough to go along with every self portrait.
 MAX_PERSONA_REFERENCES = 3
+# What a persona wears: a default per persona, and the outfit she last changed
+# into in each chat, which later self portraits keep.
+MAX_OUTFIT = 300
+MAX_OUTFIT_ENTRIES = 500
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 REFERENCE_SIDE, REFERENCE_LIMIT, THUMB_SIDE = 1536, 3 * 1024 * 1024, 256
 REFERENCE_NAME = re.compile(r'[0-9a-f]{16}\.(png|jpg)')
@@ -287,22 +291,31 @@ def clean_personas(value, *, references=True):
     page changes them through the upload and delete routes."""
     if not isinstance(value, dict) or len(value) > MAX_PERSONAS:
         raise ValueError('人格外貌设定格式无效')
-    allowed = {'prompt', 'negative_prompt'} | ({'references'} if references else set())
+    allowed = {'prompt', 'negative_prompt', 'outfit'} | ({'references'} if references else set())
     result = {}
     for key, item in value.items():
         if not isinstance(key, str) or not 1 <= len(key) <= 80 or not isinstance(item, dict) or set(item) - allowed:
             raise ValueError('人格外貌设定格式无效')
         entry = {'prompt': _text(item.get('prompt', ''), '外貌提示词', MAX_PERSONA_PROMPT),
                  'negative_prompt': _text(item.get('negative_prompt', ''), '外貌负面提示词', MAX_PERSONA_PROMPT)}
+        outfit = clean_outfit(item.get('outfit', ''), '默认服装')
+        if outfit:
+            entry['outfit'] = outfit
         names = item.get('references', [])
         if (not isinstance(names, list) or len(names) > MAX_PERSONA_REFERENCES
                 or any(not isinstance(name, str) or not REFERENCE_NAME.fullmatch(name) for name in names)):
             raise ValueError('人格参考图列表无效')
         if names:
             entry['references'] = list(dict.fromkeys(names))
-        if entry['prompt'] or entry['negative_prompt'] or names:
+        if entry['prompt'] or entry['negative_prompt'] or outfit or names:
             result[key] = entry
     return result
+
+
+def clean_outfit(value, label='服装'):
+    """One line describing clothes."""
+    text = _text(value, label, MAX_OUTFIT)
+    return ' '.join(text.split())
 
 
 def prepare_reference(raw):
@@ -326,15 +339,21 @@ def supports_reference(service):
     return bool(service['reference'])
 
 
-def compose(service, prompt, *, appearance='', appearance_negative='', user_images=0, persona_images=0):
-    """(prompt, negative) for one picture; the persona's look is added to a self portrait.
+def compose(service, prompt, *, appearance='', appearance_negative='', outfit='', user_images=0, persona_images=0):
+    """(prompt, negative) for one picture; the persona's look and outfit are
+    added to a self portrait.
 
     The persona's reference pictures come after the requester's, and models
-    that read the prompt as text are told which pictures are which."""
+    that read the prompt as text are told which pictures are which and that
+    the clothes come from the outfit, not from her reference."""
     prompt = str(prompt).strip()
-    if appearance:
-        prompt = (f'{appearance}, {prompt}' if service['kind'] in TAG_KINDS
-                  else f'{prompt}\n\nCharacter appearance (keep it consistent): {appearance}')
+    if service['kind'] in TAG_KINDS:
+        prompt = ', '.join(part for part in (appearance, outfit, prompt) if part)
+    else:
+        if appearance:
+            prompt += f'\n\nCharacter appearance (keep it consistent): {appearance}'
+        if outfit:
+            prompt += f'\n\nOutfit in this picture: {outfit}'
     if persona_images and service['kind'] not in TAG_KINDS:
         if user_images:
             first = 'The first reference image is' if user_images == 1 else f'The first {user_images} reference images are'
@@ -342,8 +361,9 @@ def compose(service, prompt, *, appearance='', appearance_negative='', user_imag
         else:
             prompt += '\n\n'
         last = 'The last reference image shows' if persona_images == 1 else f'The last {persona_images} reference images show'
-        prompt += (f'{last} the character to draw: keep the same face, hairstyle and colours; take the pose, scene '
-                   'and composition from the description above rather than copying that reference.')
+        prompt += (f'{last} the character to draw: keep the same face, hairstyle, hair colour and eye colour; '
+                   + ('dress her in the outfit above, not the clothes in that reference; ' if outfit else '')
+                   + 'take the pose, scene and composition from the description above rather than copying that reference.')
     negative = ', '.join(part for part in (service['negative_prompt'], appearance_negative) if part)
     if negative and service['natural_negative'] and service['kind'] in ('openai', 'gemini'):
         prompt += f'\n\nAvoid: {negative}'
@@ -749,6 +769,7 @@ class ImageGen:
         self.path = self.root / 'config.json'
         self.usage_path = self.root / 'usage.json'
         self.reference_dir = self.root / 'references'
+        self.outfits_path = self.root / 'outfits.json'
         self._lock = threading.RLock()
         self._jobs = {}
         self._running = 0
@@ -756,6 +777,7 @@ class ImageGen:
         self.warning = ''
         self._config = self._load()
         self._usage = self._load_usage()
+        self._outfits = self._load_outfits()
 
     # -- storage --
     def _load(self):
@@ -847,6 +869,12 @@ class ImageGen:
         for look in config['personas'].values():
             look['references'] = [{'id': name, 'thumb': self._thumb(name)} for name in look.get('references', [])]
         with self._lock:
+            worn = {persona for _, persona in self._outfits}
+        for key in worn:
+            config['personas'].setdefault(key, {'prompt': '', 'negative_prompt': '', 'references': []})
+        for key, look in config['personas'].items():
+            look['outfits'] = self.outfits(key)
+        with self._lock:
             day, counts = self._counts()
             usage = {'day': day, 'counts': dict(counts), 'queued': len(self._jobs), 'running': self._running}
         personas = []
@@ -905,6 +933,58 @@ class ImageGen:
 
     def reference_supported(self):
         return supports_reference(self.service())
+
+    # -- what a persona wears in each chat --
+    def _load_outfits(self):
+        try:
+            raw = json.loads(self.outfits_path.read_text('utf-8'))
+            items = raw.get('items') if isinstance(raw, dict) else None
+            outfits = {}
+            for item in items if isinstance(items, list) else []:
+                if (isinstance(item, dict) and isinstance(item.get('scope_id'), str) and isinstance(item.get('persona_id'), str)
+                        and isinstance(item.get('updated'), str)):
+                    outfit = clean_outfit(item.get('outfit', ''))
+                    if outfit:
+                        outfits[(item['scope_id'], item['persona_id'])] = {'outfit': outfit, 'updated': item['updated']}
+            return outfits
+        except (OSError, ValueError, AttributeError, TypeError):
+            return {}
+
+    def _save_outfits(self):
+        self.root.mkdir(parents=True, exist_ok=True)
+        items = [{'scope_id': scope, 'persona_id': persona, **value} for (scope, persona), value in self._outfits.items()]
+        temporary = self.outfits_path.with_name(self.outfits_path.name + '.tmp')
+        temporary.write_text(json.dumps({'items': items}, ensure_ascii=False, indent=1), 'utf-8')
+        temporary.replace(self.outfits_path)
+
+    def current_outfit(self, scope_id, persona_id):
+        """The outfit the persona changed into in this chat; '' means her default."""
+        with self._lock:
+            return (self._outfits.get((scope_id, persona_id)) or {}).get('outfit', '')
+
+    def set_outfit(self, scope_id, persona_id, outfit):
+        """Remember what the persona now wears in this chat; '' or her default
+        outfit forgets it. Returns the outfit she wears now."""
+        outfit = clean_outfit(outfit)
+        with self._lock:
+            default = (self._config['personas'].get(persona_id) or {}).get('outfit', '')
+            key = (scope_id, persona_id)
+            if not outfit or outfit == default:
+                changed = self._outfits.pop(key, None) is not None
+            else:
+                self._outfits.pop(key, None)
+                self._outfits[key] = {'outfit': outfit, 'updated': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}
+                while len(self._outfits) > MAX_OUTFIT_ENTRIES:
+                    self._outfits.pop(next(iter(self._outfits)))
+                changed = True
+            if changed:
+                self._save_outfits()
+            return outfit or default
+
+    def outfits(self, persona_id):
+        with self._lock:
+            return [{'scope_id': scope, **value} for (scope, persona), value in reversed(self._outfits.items())
+                    if persona == persona_id]
 
     def appearance(self, persona_id):
         with self._lock:
@@ -981,13 +1061,18 @@ class ImageGen:
             except OSError:
                 pass
 
-    def _plan(self, service, prompt, *, persona_id=None, self_portrait=False, references=()):
+    def _plan(self, service, prompt, *, persona_id=None, self_portrait=False, references=(), scope_id=None, outfit=''):
         """The final prompt, negative and reference pictures of one request.
 
-        A self portrait gets the persona's look and, when the service is set
-        to use them, its reference pictures after the requester's: models
-        that take one picture only use the persona's when nobody sent one."""
+        A self portrait gets the persona's look, what she wears (the outfit
+        asked for, else the one she changed into in this chat, else her
+        default) and, when the service is set to use them, her reference
+        pictures after the requester's: models that take one picture only use
+        hers when nobody sent one."""
         look = self.appearance(persona_id) if self_portrait and persona_id else {}
+        wear = ''
+        if self_portrait and persona_id:
+            wear = outfit or (self.current_outfit(scope_id, persona_id) if scope_id else '') or look.get('outfit', '')
         mine = self.persona_images(persona_id) if look.get('references') and supports_reference(service) \
             and service['persona_reference'] else []
         limit = MAX_REFERENCES if service['kind'] in MULTI_REFERENCE_KINDS else 1
@@ -997,9 +1082,10 @@ class ImageGen:
             given, room = given[:limit - 1], 1
         mine = mine[:room]
         final, negative = compose(service, prompt, appearance=look.get('prompt', ''),
-                                  appearance_negative=look.get('negative_prompt', ''),
+                                  appearance_negative=look.get('negative_prompt', ''), outfit=wear,
                                   user_images=len(given), persona_images=len(mine))
-        return final, negative, given + mine, {'look': bool(look.get('prompt') or mine), 'given': len(given), 'persona': len(mine)}
+        return final, negative, given + mine, {'look': bool(look.get('prompt') or mine or wear), 'given': len(given),
+                                               'persona': len(mine), 'outfit': wear}
 
     def remaining(self, user_key, admin=False):
         """Pictures left today for this user; None means unlimited."""
@@ -1028,7 +1114,7 @@ class ImageGen:
                 self._refund(job)
 
     def queue(self, scope_id, user_key, *, admin=False, persona_id='default', prompt='', aspect='square',
-              self_portrait=False, references=()):
+              self_portrait=False, references=(), outfit=''):
         """Reserve one of today's pictures and hold the request until the
         reply that announced it has gone out; returns the job summary."""
         prompt = str(prompt).strip()
@@ -1047,8 +1133,10 @@ class ImageGen:
             limit = self.daily_limit()
             if not admin and counts.get(user_key, 0) >= limit:
                 raise ImageGenError(f'今天的画图次数用完了（每人每天 {limit} 张），明天再来吧' if limit else '画图目前只对管理员开放')
+            outfit = clean_outfit(outfit)
             final, negative, pictures, used = self._plan(service, prompt, persona_id=persona_id,
-                                                         self_portrait=self_portrait, references=references)
+                                                         self_portrait=self_portrait or bool(outfit), references=references,
+                                                         scope_id=scope_id, outfit=outfit)
             job = Job(uuid.uuid4().hex, scope_id, user_key, admin, service['id'], final, negative,
                       aspect if aspect in ASPECTS else 'square', prompt, pictures, day, persona_references=used['persona'])
             if not admin:
@@ -1057,7 +1145,7 @@ class ImageGen:
                 self._save_usage()
             self._jobs[job.id] = job
             remaining = None if admin else max(0, limit - counts.get(user_key, 0))
-        return {'id': job.id, 'aspect': job.aspect, 'self_portrait': used['look'],
+        return {'id': job.id, 'aspect': job.aspect, 'self_portrait': used['look'], 'outfit': used['outfit'],
                 'reference': bool(used['given']), 'remaining_today': remaining}
 
     def discard(self, job_id):

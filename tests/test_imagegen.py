@@ -7,7 +7,10 @@ Gemini, NovelAI and ComfyUI (adapters follow the owner's AstrBot plugin
 随想画卷). A persona's appearance prompt is added to self portraits, and a
 picture attached to the message can be used as the reference. A persona may
 also have up to three reference pictures of her own (uploaded on the settings
-page, owner request 2026-11-18) that go along with her self portraits. Each QQ
+page, owner request 2026-11-18) that go along with her self portraits. She has
+a default outfit, and the outfit she changes into in a chat is remembered for
+her later self portraits there (owner request 2026-11-19: changing clothes did
+not work, the default clothes and her reference won). Each QQ
 account may draw a set number per day; administrators are not limited and a
 picture that fails gives its count back.
 """
@@ -551,6 +554,71 @@ async def test_the_page_routes_upload_and_remove_pictures(make_chat):
     assert state['personas']['default']['references'] == []
 
 
+# ---------- outfits ----------
+
+LOOK = {'prompt': 'long brown hair, amber eyes', 'negative_prompt': '', 'outfit': 'white sailor school uniform'}
+
+
+def test_the_outfit_replaces_the_clothes_of_the_reference():
+    natural, tags = service('openai'), service('novelai')
+    prompt, _ = ig.compose(natural, 'a selfie in the bedroom', appearance='long brown hair', outfit='black maid outfit',
+                           persona_images=1)
+    assert 'Character appearance (keep it consistent): long brown hair\n\nOutfit in this picture: black maid outfit' in prompt
+    assert 'dress her in the outfit above, not the clothes in that reference' in prompt
+    assert 'sailor' not in prompt
+    prompt, _ = ig.compose(natural, 'a selfie', appearance='long brown hair', persona_images=1)
+    assert 'dress her' not in prompt and 'hair colour and eye colour' in prompt
+    assert ig.compose(tags, '1girl, selfie', appearance='long brown hair', outfit='maid outfit')[0] == \
+        'long brown hair, maid outfit, 1girl, selfie'
+
+
+def test_a_self_portrait_wears_the_outfit_asked_for_else_the_one_she_changed_into_else_her_default(make_gen):
+    gen, _, store = make_gen()
+    gen.update({'personas': {'default': LOOK}})
+    plan = lambda **extra: gen._plan(gen.service(), 'a selfie', persona_id='default', self_portrait=True, **extra)
+    assert plan(scope_id=PRIVATE)[3]['outfit'] == 'white sailor school uniform'
+    assert gen.set_outfit(PRIVATE, 'default', '  pink   pajamas ') == 'pink pajamas'
+    assert plan(scope_id=PRIVATE)[3]['outfit'] == 'pink pajamas'
+    assert plan(scope_id=GROUP)[3]['outfit'] == 'white sailor school uniform'      # each chat on its own
+    assert plan(scope_id=PRIVATE, outfit='swimsuit')[3]['outfit'] == 'swimsuit'
+    assert 'Outfit in this picture: pink pajamas' in plan(scope_id=PRIVATE)[0]
+    # Not a self portrait: no clothes are added.
+    assert gen._plan(gen.service(), 'a cat', persona_id='default', scope_id=PRIVATE)[3]['outfit'] == ''
+    # Remembered across a restart, listed on the page, and forgotten when she changes back.
+    again = ig.ImageGen(store, Config(), gen.root, options=gen.options)
+    assert again.current_outfit(PRIVATE, 'default') == 'pink pajamas'
+    [item] = again.public()['personas']['default']['outfits']
+    assert item['scope_id'] == PRIVATE and item['outfit'] == 'pink pajamas' and item['updated'].endswith('Z')
+    assert again.set_outfit(PRIVATE, 'default', 'white sailor school uniform') == 'white sailor school uniform'
+    assert again.current_outfit(PRIVATE, 'default') == '' and again.public()['personas']['default']['outfits'] == []
+    assert again.set_outfit(GROUP, 'default', '') == 'white sailor school uniform'
+
+
+def test_the_looks_keep_a_default_outfit_and_the_remembered_ones_are_bounded(make_gen, monkeypatch):
+    gen, _, _ = make_gen()
+    state = gen.update({'personas': {'default': dict(LOOK, outfit=' white  sailor uniform ')}})
+    assert state['personas']['default']['outfit'] == 'white sailor uniform'
+    with pytest.raises(ValueError, match='默认服装'):
+        gen.update({'personas': {'default': dict(LOOK, outfit='x' * 301)}})
+    monkeypatch.setattr(ig, 'MAX_OUTFIT_ENTRIES', 3)
+    for index in range(5):
+        gen.set_outfit(f'qq:private:{index}', 'default', f'outfit {index}')
+    assert [item['outfit'] for item in gen.outfits('default')] == ['outfit 4', 'outfit 3', 'outfit 2']
+    # A persona with only a remembered outfit still shows on the page.
+    gen.set_outfit(PRIVATE, 'other', 'raincoat')
+    assert gen.public()['personas']['other']['outfits'][0]['outfit'] == 'raincoat'
+
+
+@pytest.mark.anyio
+async def test_the_management_test_wears_the_default_outfit(make_gen):
+    gen, recorder, _ = make_gen()
+    gen.update({'personas': {'default': LOOK}})
+    gen.set_outfit(PRIVATE, 'default', 'pink pajamas')
+    await gen.test('a selfie', persona_id='default')
+    body = json.loads(recorder.requests[-1].content)
+    assert 'Outfit in this picture: white sailor school uniform' in body['prompt'] and 'pajamas' not in body['prompt']
+
+
 # ---------- chat and QQ ----------
 
 def answer(content='', calls=()):
@@ -689,6 +757,65 @@ async def test_a_selfie_in_qq_carries_the_persona_pictures(make_chat):
     request = recorder.requests[-1]
     assert str(request.url).endswith('/images/edits') and len(edit_images(request)) == 1
     assert b'long brown hair, amber eyes' in request.content
+
+
+def call(name, call_id='call-2', **arguments):
+    return {'id': call_id, 'type': 'function', 'function': {'name': name, 'arguments': json.dumps(arguments, ensure_ascii=False)}}
+
+
+def tool_named(tools, name):
+    return next((tool['function'] for tool in tools or [] if tool['function']['name'] == name), None)
+
+
+@pytest.mark.anyio
+async def test_asked_to_change_clothes_for_a_photo_she_wears_them_and_keeps_them(make_chat):
+    model = Model(answer('换好啦，拍给你看。', [draw(prompt='a selfie in the bedroom', self_portrait=True, outfit='black maid outfit')]),
+                  answer('再来一张。', [draw(prompt='a selfie by the window', self_portrait=True)]))
+    store, config, chat, recorder = make_chat(model, personas={'default': LOOK})
+    tool = tool_named(model.seen and model.seen[0]['tools'] or chat._request_tools(store.get_scope(PRIVATE), '303', '', {}), 'generate_image')
+    assert 'outfit' in tool['parameters']['properties']
+    assert '你现在穿着平时的衣服：white sailor school uniform' in tool['parameters']['properties']['outfit']['description']
+    segments = await over_qq(store, config, chat, '换上女仆装拍一张')
+    assert [segment['type'] for segment in segments] == ['text', 'image']
+    prompt = json.loads(recorder.requests[-1].content)['prompt']
+    assert 'Outfit in this picture: black maid outfit' in prompt and 'sailor' not in prompt
+    assert chat.imagegen.current_outfit(PRIVATE, 'default') == 'black maid outfit'
+    # The next selfie keeps the maid outfit, and the model is told she wears it.
+    await over_qq(store, config, chat, '再拍一张')
+    description = tool_named(model.seen[-1]['tools'], 'generate_image')['parameters']['properties']['outfit']['description']
+    assert '你现在穿着：black maid outfit（平时穿：white sailor school uniform）' in description
+    assert 'Outfit in this picture: black maid outfit' in json.loads(recorder.requests[-1].content)['prompt']
+
+
+@pytest.mark.anyio
+async def test_changing_clothes_without_a_photo_is_remembered_after_the_reply(make_chat):
+    model = Model(answer('好，换上睡衣了。', [call('change_outfit', outfit='pink pajamas')]),
+                  answer('嗯，换回来了。', [call('change_outfit', back_to_default=True)]),
+                  answer('', [call('change_outfit', outfit='raincoat')]), answer(''), answer(''), answer(''))
+    store, config, chat, recorder = make_chat(model, personas={'default': LOOK})
+    tool = tool_named(chat._request_tools(store.get_scope(PRIVATE), '303', '', {}), 'change_outfit')
+    assert '换衣服但不拍照' in tool['description'] and 'back_to_default' in tool['parameters']['properties']
+    segments = await over_qq(store, config, chat, '换上睡衣吧')
+    assert [segment['type'] for segment in segments] == ['text'] and not recorder.requests
+    assert chat.imagegen.current_outfit(PRIVATE, 'default') == 'pink pajamas'
+    assert any(event['kind'] == 'imagegen_outfit' for event in store.list_events(limit=20))
+    await over_qq(store, config, chat, '还是穿回校服吧')
+    assert chat.imagegen.current_outfit(PRIVATE, 'default') == ''
+    # A reply that never went out changes nothing.
+    await over_qq(store, config, chat, '穿雨衣')
+    assert chat.imagegen.current_outfit(PRIVATE, 'default') == ''
+
+
+@pytest.mark.anyio
+async def test_the_page_resets_a_remembered_outfit(make_chat):
+    store, config, chat, _ = make_chat(Model(), personas={'default': LOOK})
+    from shiori.extension_host import ExtensionRequest
+    chat.imagegen.set_outfit(GROUP, 'default', 'raincoat')
+    handler = chat.extensions.api_handler('imagegen', 'DELETE', 'outfit')
+    state = handler(ExtensionRequest('DELETE', 'outfit', {}, {'persona_id': 'default', 'scope_id': GROUP}))
+    assert state['personas']['default']['outfits'] == [] and chat.imagegen.current_outfit(GROUP, 'default') == ''
+    with pytest.raises(ValueError, match='服装参数无效'):
+        handler(ExtensionRequest('DELETE', 'outfit', {}, {'persona_id': 'default'}))
 
 
 @pytest.mark.anyio

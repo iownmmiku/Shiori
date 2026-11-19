@@ -12,3 +12,7 @@
 .imagegen-reference{margin:0;display:flex;flex-direction:column;align-items:center;gap:6px}
 .imagegen-reference img{width:96px;height:96px;object-fit:cover;border-radius:10px;display:block;border:1px solid var(--line, rgba(0,0,0,.12))}
 .imagegen-upload{cursor:pointer}
+.imagegen-outfits{margin:12px 0 4px}
+.imagegen-outfits .help-caption{margin:4px 0 6px}
+.imagegen-outfits ul{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+.imagegen-outfits li{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;overflow-wrap:anywhere}

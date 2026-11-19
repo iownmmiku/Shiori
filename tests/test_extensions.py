@@ -125,7 +125,7 @@ def test_the_bundled_image_extension_is_on_with_its_page_and_setting(make_host):
     assert item['pages'] == [{'id': 'main', 'title': '生图设置', 'entry': 'pages/main/index.html',
                               'url': '/extensions/imagegen/pages/main/'}]
     assert item['config'] == {'daily_per_user': 5} and item['config_schema']['daily_per_user']['type'] == 'int'
-    assert item['tools'] == ['generate_image']
+    assert item['tools'] == ['change_outfit', 'generate_image']
     # No service yet: the tool is not offered.
     assert host.tool_schemas(Turn(PRIVATE, '303')) == []
 
@@ -197,7 +197,7 @@ async def test_tools_hand_back_work_that_runs_after_the_reply_or_is_cancelled(ma
     host.set_enabled('hello', True, confirm=True)
     assert host.tool_schemas(Turn('web:default', 'owner')) == []
     assert [item['function']['name'] for item in host.tool_schemas(Turn(PRIVATE, '303'))] == ['wave']
-    assert host.hints({'wave'}) == ['你可以用 wave 挥手。'] and host.queued_names() == {'wave', 'generate_image'}
+    assert host.hints({'wave'}) == ['你可以用 wave 挥手。'] and host.queued_names() == {'wave', 'generate_image', 'change_outfit'}
     call = ToolCall(PRIVATE, '303', 'qq:303', 'default', {'to': '小明'})
     output = await host.call_tool('wave', call)
     job = output['extension_job']
@@ -344,12 +344,12 @@ def test_the_image_extension_also_installs_from_the_data_folder(tmp_path):
         host.start()
         assert not host.enabled('imagegen')
         item = host.set_enabled('imagegen', True, confirm=True)
-        assert item['loaded'] and not item['builtin'] and item['tools'] == ['generate_image'], item['error']
+        assert item['loaded'] and not item['builtin'] and item['tools'] == ['change_outfit', 'generate_image'], item['error']
         engine = host.context('imagegen').state['engine']
         assert type(engine).__module__ == 'shiori_extension_imagegen.engine'
         engine.update({'services': [{'id': 'main', 'kind': 'openai', 'api_key': 'sk-fixture', 'model': 'gpt-image-1'}],
                        'service_id': 'main'})
-        assert [schema['function']['name'] for schema in host.tool_schemas(Turn(PRIVATE, '303'))] == ['generate_image']
+        assert [schema['function']['name'] for schema in host.tool_schemas(Turn(PRIVATE, '303'))] == ['generate_image', 'change_outfit']
         assert (tmp_path / 'extension_data' / 'imagegen' / 'config.json').is_file()
     finally:
         store.close()

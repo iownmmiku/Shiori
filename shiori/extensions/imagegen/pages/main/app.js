@@ -49,9 +49,9 @@
     if (!list.length) return "";
     const rows = list.map(persona => {
       const look = looks[persona.id] || {};
-      return `<div class="imagegen-persona"><h3>${e(persona.name)}</h3>${ui.textarea(`prompt__${persona.id}`, "外貌提示词", look.prompt || "", "发型、发色、瞳色、脸型、身材、常穿的衣服等。NovelAI / ComfyUI 建议用英文标签，例如 1girl, long brown hair, amber eyes。", 'maxlength="2000" rows="3"')}${ui.textarea(`negative__${persona.id}`, "外貌负面提示词", look.negative_prompt || "", "自拍时不想出现的特征，例如 short hair, glasses。", 'maxlength="2000" rows="2"')}${referenceRow(persona, look.references || [])}</div>`;
+      return `<div class="imagegen-persona"><h3>${e(persona.name)}</h3>${ui.textarea(`prompt__${persona.id}`, "外貌提示词", look.prompt || "", "发型、发色、瞳色、脸型、身材等，不要写衣服（衣服写在下面的默认服装里，换装时才换得掉）。NovelAI / ComfyUI 建议用英文标签，例如 1girl, long brown hair, amber eyes。", 'maxlength="2000" rows="3"')}${ui.textarea(`outfit__${persona.id}`, "默认服装", look.outfit || "", "平时穿的衣服和配饰，例如 white sailor school uniform, red ribbon。没换过衣服时自拍穿这身。", 'maxlength="300" rows="2"')}${ui.textarea(`negative__${persona.id}`, "外貌负面提示词", look.negative_prompt || "", "自拍时不想出现的特征，例如 short hair, glasses。", 'maxlength="2000" rows="2"')}${referenceRow(persona, look.references || [])}${outfitRow(persona, look.outfits || [])}</div>`;
     }).join("");
-    return `<section class="panel settings-section"><h2>人格外貌</h2><p>角色画自己（自拍、发自己的照片）时，会自动把当前人格的外貌提示词加进画面描述，负面提示词并入服务的负面提示词；上传了参考图的，还会把参考图一起交给生图服务，让每张图里的她长得一样。画别的东西时都不会加。</p><form data-form="personas">${rows}<div class="section-actions"><button type="submit" class="btn primary">保存人格外貌</button></div></form></section>`;
+    return `<section class="panel settings-section"><h2>人格外貌</h2><p>角色画自己（自拍、发自己的照片）时，会自动把当前人格的外貌提示词和她现在穿的衣服加进画面描述，负面提示词并入服务的负面提示词；上传了参考图的，还会把参考图一起交给生图服务，让每张图里的她长得一样。画别的东西时都不会加。在聊天里换了衣服，会按会话记住，之后的自拍穿换上的那身。</p><form data-form="personas">${rows}<div class="section-actions"><button type="submit" class="btn primary">保存人格外貌</button></div></form></section>`;
   }
 
   function referenceRow(persona, references) {
@@ -59,6 +59,12 @@
     const full = references.length >= MAX_PERSONA_REFERENCES;
     const add = full ? "" : `<label class="btn ghost small imagegen-upload">添加参考图<input type="file" accept="image/png,image/jpeg,image/webp" data-upload="${e(persona.id)}" hidden></label>`;
     return `<div class="imagegen-references"><strong>参考图</strong><p class="help-caption">最多 ${MAX_PERSONA_REFERENCES} 张，选清楚的正脸或半身图，上传后立即保存。只有打开了「自拍时带上人格参考图」的服务会用；OpenAI 兼容接口（gpt-image）和 Gemini 效果最好。</p><div class="imagegen-reference-list">${items}${add}</div></div>`;
+  }
+
+  function outfitRow(persona, outfits) {
+    if (!outfits.length) return "";
+    const items = outfits.map(item => `<li><span><strong>${e(item.scope_id)}</strong> · ${e(item.outfit)}</span>${ui.button("换回默认", "forget-outfit", "ghost small", `data-persona="${e(persona.id)}" data-scope="${e(item.scope_id)}"`)}</li>`).join("");
+    return `<div class="imagegen-outfits"><strong>聊天里换上的衣服</strong><p class="help-caption">这些会话里她换过衣服，之后的自拍会穿这身，直到她在聊天里换回来或者你在这里换回默认。</p><ul>${items}</ul></div>`;
   }
 
   function readFile(file) {
@@ -154,6 +160,11 @@
 
   async function action(name, target) {
     if (name === "add") return serviceForm({ kind: target.dataset.kind });
+    if (name === "forget-outfit") {
+      view.config = await ext.api("outfit", { method: "DELETE", body: { persona_id: target.dataset.persona, scope_id: target.dataset.scope } });
+      ext.toast("已换回默认服装");
+      return render();
+    }
     if (name === "remove-reference") {
       const persona = (view.config.persona_list || []).find(x => x.id === target.dataset.persona);
       return ext.confirm("移除这张参考图？", `${persona ? persona.name : "这个人格"}以后自拍不再参考它，图片文件会一起删除。`, async () => {
@@ -186,7 +197,8 @@
       const personas = {};
       for (const persona of view.config.persona_list || []) {
         const prompt = String(data["prompt__" + persona.id] || "").trim(), negative = String(data["negative__" + persona.id] || "").trim();
-        if (prompt || negative) personas[persona.id] = { prompt, negative_prompt: negative };
+        const outfit = String(data["outfit__" + persona.id] || "").trim();
+        if (prompt || negative || outfit) personas[persona.id] = { prompt, negative_prompt: negative, ...(outfit ? { outfit } : {}) };
       }
       view.config = await ext.api("config", { method: "PUT", body: { personas } });
       ext.toast("人格外貌已保存");
