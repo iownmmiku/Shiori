@@ -728,6 +728,46 @@ async def test_asked_for_a_picture_the_text_goes_first_and_the_picture_follows(m
     assert 'imagegen' in kinds and 'imagegen_sent' in kinds
 
 
+class Remembering(Model):
+    """Also keeps every chat prompt, to read what a later turn was told."""
+
+    def __init__(self, *turns):
+        super().__init__(*turns)
+        self.prompts = []
+
+    async def complete(self, messages, **kwargs):
+        if kwargs.get('purpose', 'chat') == 'chat':
+            self.prompts.append('\n'.join(str(message['content']) for message in messages))
+        return await super().complete(messages, **kwargs)
+
+
+@pytest.mark.anyio
+async def test_the_next_turn_knows_the_picture_was_sent(make_chat):
+    # On the server she answered “好看” with “还没看到就说好看”: nothing told her the picture had arrived.
+    model = Remembering(answer('行吧，就一张。', [draw(prompt='a selfie in a cafe', aspect='portrait', self_portrait=True,
+                                                         outfit='black gothic lolita dress')]),
+                        answer('哼，算你有眼光。'))
+    store, config, chat, _ = make_chat(model)
+    await over_qq(store, config, chat, '换上洛丽塔来张自拍')
+    reply = next(m for m in store.list_messages(PRIVATE) if m['role'] == 'assistant')
+    event = next(e for e in store.list_events(limit=30) if e['kind'] == 'reply_image_sent')
+    assert event['details']['assistant_message_id'] == reply['id']
+    assert model.prompts[0].count('【已发出的图片】') == 0
+    await over_qq(store, config, chat, '好看')
+    told = model.prompts[1]
+    assert '【已发出的图片】' in told and '你说“行吧，就一张。”之后：你的自拍；穿着 black gothic lolita dress；a selfie in a cafe' in told
+
+
+@pytest.mark.anyio
+async def test_a_picture_that_did_not_go_out_is_not_announced(make_chat):
+    model = Remembering(answer('等我一下。', [draw(prompt='an orange cat')]), answer('嗯。'))
+    store, config, chat, _ = make_chat(model, handler=lambda request: httpx.Response(500, json={'error': {'message': 'down'}}))
+    await over_qq(store, config, chat, '画只猫')
+    await over_qq(store, config, chat, '好看吗')
+    assert '【已发出的图片】' not in model.prompts[1]
+    assert not [e for e in store.list_events(limit=30) if e['kind'] == 'reply_image_sent']
+
+
 @pytest.mark.anyio
 async def test_a_selfie_uses_the_persona_look(make_chat):
     model = Model(answer('拍好啦。', [draw(prompt='a selfie in a cafe', aspect='portrait', self_portrait=True)]))

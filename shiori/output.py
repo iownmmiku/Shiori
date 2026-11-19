@@ -100,7 +100,7 @@ def strip_memory_citations(text, memory_ids, *, user_text=''):
 # The context labels a model sees on every history line and on the current
 # request. Models sometimes copy them into a reply; once one is stored, the
 # next turns see it in their own history and copy it more.
-_ECHOED_LABEL = (r'[【\[](?:历史消息(?:\s*[·・]|（)|当前请求人|说话人\s|消息\s*[0-9a-fA-F]{8})'
+_ECHOED_LABEL = (r'[【\[](?:历史消息(?:\s*[·・]|（)|当前请求人|说话人\s|消息\s*[0-9a-fA-F]{8}|已发出的图片)'
                  r'[^【】\[\]\n]{0,200}[】\]]')
 # Shortened copies such as 【接收】 or 【回复】 only count at the start of a line.
 _BARE_LABEL = r'【(?:接收|发送|录入|回复)[^【】\n]{0,12}】'

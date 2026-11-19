@@ -1055,6 +1055,19 @@ class ChatService:
                 item['event_context'] = episode_prompt_text(item, item['excerpt'])
         return memories
 
+    def _sent_pictures(self, scope_id, history, included):
+        """One line per picture an extension sent after a reply still in this prompt's history."""
+        replies = [m for m in history if m.get('role') == 'assistant' and m['id'] in included]
+        if not replies:
+            return []
+        found = self.store.reply_images(scope_id, [m['id'] for m in replies], since=min(m['created_at'] for m in replies))
+        lines = []
+        for reply in replies:
+            said = ' '.join(strip_context_labels(reply['content']).split())
+            said = said if len(said) <= 40 else said[:40] + '……'
+            lines.extend(f'- 你说“{said}”之后：{description or "一张图"}' for description in found.get(reply['id'], []))
+        return lines
+
     def _history(self, scope_id, limit=24, user_id=None, *, for_compression=False):
         # The raw summarizer batch is separate from the final prompt window.
         # Otherwise a small prompt limit can make the trigger unreachable.
@@ -1446,6 +1459,10 @@ class ChatService:
                     manifest['memory_versions'].update(meta.get('memory_versions', {}))
                     manifest['jargon_versions'].update(meta.get('jargon_versions', {}))
                     manifest['knowledge_refs'].update(meta.get('knowledge_refs', {}))
+        sent_pictures = self._sent_pictures(scope['id'], history, {message_id for _, message_id in history_prompts})
+        if sent_pictures:
+            messages.append({'role': 'system', 'content': '【已发出的图片】这些图在你对应的那条回复之后已经单独发给对方，对方看得到；'
+                             '对方夸图或说起图时，说的就是它们：\n' + '\n'.join(sent_pictures)})
         # The stored text stays verbatim; only the model's view of an old
         # picture-only placeholder line is neutral.
         content = '\n'.join(plain_text(line) for line in text.split('\n')) if text else '请描述这张图片。'

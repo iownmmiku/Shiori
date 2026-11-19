@@ -1832,8 +1832,14 @@ class ConversationFlow:
                     return bool(await flow.emit(scope_id, text, dict(metadata, assistant_message_id=batch.get('logical_message_id'),
                                                                      output_part={'index': count, 'total': count}, **extra)))
 
-            async def image(self, raw):
-                return await self._emit('', {'image': bytes(raw), 'image_current': current})
+            async def image(self, raw, description=''):
+                sent = await self._emit('', {'image': bytes(raw), 'image_current': current})
+                if sent:
+                    # Later turns learn the picture arrived from this record; the stored reply never changes.
+                    flow.store.add_event('reply_image_sent', '回复之后的图片已发出', scope_id=scope_id,
+                                         assistant_message_id=batch.get('logical_message_id'),
+                                         description=' '.join(str(description or '').split())[:300])
+                return sent
 
             async def text(self, text):
                 text = str(text).strip()[:1000]

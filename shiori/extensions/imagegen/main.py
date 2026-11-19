@@ -7,6 +7,7 @@ it did not). change_outfit remembers what she changed into without a
 picture; both tools take effect only once the reply went out.
 """
 import asyncio
+import inspect
 
 from shiori.extension_host import ToolResult
 from .engine import (ASPECTS, MAX_OUTFIT, MAX_PROMPT, MAX_UPLOAD_BYTES, ImageGen, ImageGenError, chat_reason,
@@ -56,6 +57,15 @@ def outfit_schema(wearing='', default=''):
             'additionalProperties': False}}}
 
 
+def picture_note(args, outfit=''):
+    """What a sent picture shows, so her later replies know what the other side is looking at."""
+    parts = ['你的自拍' if args.get('self_portrait') is True else '你画的图']
+    if outfit:
+        parts.append('穿着 ' + outfit)
+    parts.append(args['prompt'])
+    return '；'.join(parts)
+
+
 def setup(ext):
     engine = ImageGen(ext.store, ext.settings, ext.data_dir, options=ext.config)
     ext.state['engine'] = engine
@@ -95,7 +105,10 @@ def setup(ext):
             except ImageGenError as exc:
                 await send.text(f'这张图没画出来（{chat_reason(exc)}），次数已经退回，稍后再试吧。')
                 return
-            sent = await send.image(raw)
+            # Later turns are told what she sent; an older Shiori takes the picture alone.
+            note = picture_note(call.args, outfit or (job.get('outfit') if job.get('self_portrait') else ''))
+            sent = await (send.image(raw, description=note) if 'description' in inspect.signature(send.image).parameters
+                          else send.image(raw))
             ext.store.add_event('imagegen_sent' if sent else 'imagegen_unsent',
                                 '图片已发送' if sent else '图片已生成，但没有发出或没有得到送达确认',
                                 scope_id=call.scope_id, bytes=len(raw))
