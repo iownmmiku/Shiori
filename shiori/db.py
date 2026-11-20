@@ -2132,22 +2132,26 @@ class Store:
         with self._lock:
             return self._list("events", clauses, params, f"rowid DESC LIMIT {_limit(limit, 1000)}")
 
-    def reply_images(self, scope_id: str, message_ids, since: str | None = None) -> dict[str, list[str]]:
-        """Pictures sent after the given replies: {reply id: [descriptions]}, oldest first."""
+    def reply_images(self, scope_id: str, message_ids, since: str | None = None) -> dict[str, list[dict]]:
+        """Pictures sent, or promised and not drawn, after the given replies:
+        {reply id: [{sent, description, reason}]}, oldest first."""
         wanted = set(message_ids)
         if not wanted:
             return {}
-        clauses, params = ["kind=?", "json_extract(data,'$.details.scope_id')=?"], ["reply_image_sent", scope_id]
+        clauses = ["kind IN (?, ?)", "json_extract(data,'$.details.scope_id')=?"]
+        params = ["reply_image_sent", "reply_image_failed", scope_id]
         if since:
             clauses.append("created_at>=?")
             params.append(since)
         with self._lock:
             events = self._list("events", clauses, params, "created_at, rowid LIMIT 200")
-        found: dict[str, list[str]] = {}
+        found: dict[str, list[dict]] = {}
         for event in events:
             details = event.get("details") or {}
             if details.get("assistant_message_id") in wanted:
-                found.setdefault(details["assistant_message_id"], []).append(str(details.get("description") or ""))
+                found.setdefault(details["assistant_message_id"], []).append(
+                    {"sent": event.get("kind") == "reply_image_sent", "description": str(details.get("description") or ""),
+                     "reason": str(details.get("reason") or "")})
         return found
 
     def record_memory_use(self, scope_id: str, user_id: str, versions: dict[str, int], request_id: str, *, scope_allowed=None) -> dict:

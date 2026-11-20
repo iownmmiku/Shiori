@@ -1841,6 +1841,14 @@ class ConversationFlow:
                                          description=' '.join(str(description or '').split())[:300])
                 return sent
 
+            def image_failed(self, description='', reason=''):
+                """The picture this reply promised never came; later turns are told so she neither
+                pretends it arrived nor keeps asking again for one the service refuses."""
+                flow.store.add_event('reply_image_failed', '回复之后的图片没有画出来', scope_id=scope_id,
+                                     assistant_message_id=batch.get('logical_message_id'),
+                                     description=' '.join(str(description or '').split())[:300],
+                                     reason=' '.join(str(reason or '').split())[:80])
+
             async def text(self, text):
                 text = str(text).strip()[:1000]
                 return bool(text) and await self._emit(text, {})

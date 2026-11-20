@@ -79,6 +79,12 @@ SERVICE_DEFAULTS = {'id': '', 'name': '', 'kind': 'openai', 'endpoint': '', 'api
 _SERVICE_INPUT = frozenset(SERVICE_DEFAULTS) | {'api_key_set', 'clear_api_key'}
 
 
+# A service refusing a picture under its content rules, in the words services use for it.
+REFUSAL = re.compile(r'content[ _-]?polic|safety[ _-]?(?:system|filter|polic)|moderation|内容政策|违反|性化|色情|裸露|'
+                     r'不适当|无法生成涉及', re.I)
+REFUSED = '生图服务按内容政策拒绝了这张图'
+
+
 class ImageGenError(Exception):
     """A failure whose message is shown to the owner and the chat model;
     `detail` is a redacted upstream excerpt meant for the event log only."""
@@ -93,6 +99,8 @@ def chat_reason(exc):
     text = str(exc)
     if '超时' in text or '没有完成' in text:
         return '画得太久，超时了'
+    if '内容政策' in text:
+        return '被生图服务的内容政策拒绝了'
     if '安全策略' in text:
         return '被生图服务的安全策略拦下了'
     if '限流' in text or '额度' in text:
@@ -433,10 +441,13 @@ async def _send(http, service, method, url, *, limit=MAX_RESPONSE_BYTES, **kwarg
                 chunks.append(chunk)
             raw = b''.join(chunks)
             if not 200 <= response.status_code < 300:
+                detail = _detail(service, raw)
+                if response.status_code in (400, 403, 422) and (REFUSAL.search(detail) or REFUSAL.search(raw[:4000].decode('utf-8', 'replace'))):
+                    raise ImageGenError(REFUSED, detail=detail)
                 hint = ('请检查密钥、权限和模型名称' if response.status_code in (401, 403)
                         else '接口限流或额度不足，请稍后再试' if response.status_code in (402, 429)
                         else '请检查接口地址和参数')
-                raise ImageGenError(f'生图接口返回 HTTP {response.status_code}，{hint}', detail=_detail(service, raw))
+                raise ImageGenError(f'生图接口返回 HTTP {response.status_code}，{hint}', detail=detail)
             return raw, response.headers.get('Content-Type', '')
     except ImageGenError:
         raise

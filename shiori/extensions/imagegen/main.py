@@ -100,13 +100,17 @@ def setup(ext):
             if outfit:
                 # She said she would wear it; later self portraits keep it even if this picture fails.
                 engine.set_outfit(call.scope_id, call.persona_id, outfit)
+            # Later turns are told what she sent or failed to; an older Shiori takes the picture alone.
+            note = picture_note(call.args, outfit or (job.get('outfit') if job.get('self_portrait') else ''))
             try:
                 raw, _ = await engine.run(job['id'])
             except ImageGenError as exc:
-                await send.text(f'这张图没画出来（{chat_reason(exc)}），次数已经退回，稍后再试吧。')
+                reason = chat_reason(exc)
+                # A refusal comes back the same way next time; only other failures are worth retrying.
+                await send.text(f'这张图没画出来（{reason}），次数已经退回' + ('。' if '内容政策' in reason else '，稍后再试吧。'))
+                if callable(getattr(send, 'image_failed', None)):
+                    send.image_failed(note, reason)
                 return
-            # Later turns are told what she sent; an older Shiori takes the picture alone.
-            note = picture_note(call.args, outfit or (job.get('outfit') if job.get('self_portrait') else ''))
             sent = await (send.image(raw, description=note) if 'description' in inspect.signature(send.image).parameters
                           else send.image(raw))
             ext.store.add_event('imagegen_sent' if sent else 'imagegen_unsent',

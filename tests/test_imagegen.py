@@ -752,20 +752,50 @@ async def test_the_next_turn_knows_the_picture_was_sent(make_chat):
     reply = next(m for m in store.list_messages(PRIVATE) if m['role'] == 'assistant')
     event = next(e for e in store.list_events(limit=30) if e['kind'] == 'reply_image_sent')
     assert event['details']['assistant_message_id'] == reply['id']
-    assert model.prompts[0].count('【已发出的图片】') == 0
+    assert model.prompts[0].count('【回复之后的图片】') == 0
     await over_qq(store, config, chat, '好看')
     told = model.prompts[1]
-    assert '【已发出的图片】' in told and '你说“行吧，就一张。”之后：你的自拍；穿着 black gothic lolita dress；a selfie in a cafe' in told
+    assert '【回复之后的图片】' in told and '你说“行吧，就一张。”之后发出了：你的自拍；穿着 black gothic lolita dress；a selfie in a cafe' in told
 
 
 @pytest.mark.anyio
-async def test_a_picture_that_did_not_go_out_is_not_announced(make_chat):
+async def test_a_picture_that_failed_is_announced_as_not_drawn(make_chat):
     model = Remembering(answer('等我一下。', [draw(prompt='an orange cat')]), answer('嗯。'))
     store, config, chat, _ = make_chat(model, handler=lambda request: httpx.Response(500, json={'error': {'message': 'down'}}))
-    await over_qq(store, config, chat, '画只猫')
+    segments = await over_qq(store, config, chat, '画只猫')
+    assert segments[-1]['data']['text'] == '这张图没画出来（生图服务出错了），次数已经退回，稍后再试吧。'
     await over_qq(store, config, chat, '好看吗')
-    assert '【已发出的图片】' not in model.prompts[1]
+    assert '你说“等我一下。”之后想画但没画出来（生图服务出错了）：你画的图；an orange cat' in model.prompts[1]
+    assert '发出了' not in model.prompts[1]
     assert not [e for e in store.list_events(limit=30) if e['kind'] == 'reply_image_sent']
+
+
+@pytest.mark.anyio
+async def test_a_content_policy_refusal_is_named_and_remembered(make_chat):
+    # On the server six refusals read “HTTP 400，请检查接口地址和参数”, and she kept asking again.
+    refusal = {'error': {'message': '非常抱歉，生成的图片可能违反了我们的内容政策。如果你认为此判断有误，请重试或修改提示语。'}}
+    model = Remembering(answer('好吧。', [draw(prompt='a swimsuit picture', self_portrait=True)]), answer('画不了。'))
+    store, config, chat, _ = make_chat(model, handler=lambda request: httpx.Response(400, json=refusal))
+    segments = await over_qq(store, config, chat, '来一张')
+    assert segments[-1]['data']['text'] == '这张图没画出来（被生图服务的内容政策拒绝了），次数已经退回。'
+    failed = next(e for e in store.list_events(limit=30) if e['kind'] == 'imagegen_failed')
+    assert failed['message'] == '图片没有生成成功，已退回次数：生图服务按内容政策拒绝了这张图' and '内容政策' in failed['details']['detail']
+    await over_qq(store, config, chat, '再来一张')
+    assert '想画但没画出来（被生图服务的内容政策拒绝了）' in model.prompts[1] and '换个说法也会被拒' in model.prompts[1]
+
+
+@pytest.mark.parametrize('status, body, refused', [
+    (400, {'error': {'message': '抱歉，我无法生成涉及未成年高中生穿着带有性化意味的学校泳装的图像。'}}, True),
+    (400, {'error': {'message': 'Your request was rejected by the safety system.', 'code': 'moderation_blocked'}}, True),
+    (400, {'error': {'message': 'Invalid size: must be one of 1024x1024, 1024x1536'}}, False),
+    (403, {'error': {'message': 'invalid api key'}}, False),
+])
+def test_refusals_are_told_apart_from_other_errors(status, body, refused):
+    service = ig.clean_service({'id': 'main', 'kind': 'openai', 'api_key': KEY, 'model': 'gpt-image-1'})
+    transport = httpx.MockTransport(lambda request: httpx.Response(status, json=body))
+    with pytest.raises(ig.ImageGenError) as caught:
+        asyncio.run(ig.generate(service, 'a cat', transport=transport))
+    assert (str(caught.value) == ig.REFUSED) is refused
 
 
 @pytest.mark.anyio

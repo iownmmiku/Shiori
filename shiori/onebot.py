@@ -23,6 +23,8 @@ from .timezones import config_zone, ingress_times
 
 
 IMAGE_RESOLVE_TIMEOUT = 10.0
+QUOTE_CHARS = 300               # a quoted message, as the chat model is shown it
+FORWARD_MAX_LINES, FORWARD_LINE_CHARS, FORWARD_MAX_CHARS = 30, 200, 3000
 
 
 class _RateLimited:
@@ -341,7 +343,7 @@ class OneBotBridge:
             await asyncio.gather(*tasks, return_exceptions=True)
 
     @staticmethod
-    def _message(payload):
+    def _segments(payload):
         raw = payload.get('message') or payload.get('raw_message', '')
         if isinstance(raw, str):
             segments, offset = [], 0
@@ -357,6 +359,17 @@ class OneBotBridge:
             segments.append({'type': 'text', 'data': {'text': html.unescape(raw[offset:])}})
         else:
             segments = raw if isinstance(raw, list) else []
+        return segments
+
+    @classmethod
+    def _forwards(cls, payload):
+        """The data of each forwarded-chat segment (合并转发) in a message."""
+        return [segment.get('data') or {} for segment in cls._segments(payload)
+                if isinstance(segment, dict) and segment.get('type') == 'forward']
+
+    @classmethod
+    def _message(cls, payload):
+        segments = cls._segments(payload)
         text, images, mentions, reply_id = [], [], [], None
         for segment in segments:
             if not isinstance(segment, dict):
@@ -451,6 +464,11 @@ class OneBotBridge:
                 self._diagnostics.mark('duplicate_message', scope_id=scope_id, user_id=user_id, emit=False)
                 return
         text, images, mentions, reply_id = self._message(payload)
+        forwards = self._forwards(payload)
+        if forwards:
+            # A forwarded chat has no text of its own; without this it was dropped as empty.
+            expanded = await self._forward_text(forwards[0])
+            text = f'{text}\n{expanded}' if text else expanded
         if any(image.startswith('onebot-image:') for image in images):
             # Persist the original attachment and collect the whole turn first.
             # A slow connector lookup must not let later text overtake its image.
@@ -471,6 +489,8 @@ class OneBotBridge:
         if reply_id:
             metadata['reply_to_id'] = reply_id
             metadata.update(self._reply_context(scope_id, reply_id))
+            if 'reply_to_text' not in metadata:
+                metadata.update(await self._fetch_quote(reply_id))
         mentioned = str(payload.get('self_id', '')) in mentions
         metadata['at_bot'] = mentioned
         command = getattr(self.chat, 'handle_platform_command', None)
@@ -550,16 +570,101 @@ class OneBotBridge:
 
     def _reply_context(self, scope_id, platform_id):
         own = self._outgoing.get(str(platform_id)) == scope_id
-        if not own:
-            own = any(event.get('kind') == 'qq_sent' and (event.get('details') or {}).get('scope_id') == scope_id
-                      and str((event.get('details') or {}).get('platform_message_id')) == str(platform_id)
-                      for event in self.store.list_events(limit=200))
-        context = {'reply_to_bot': own}
+        sent = next(((event.get('details') or {}) for event in self.store.list_events(limit=200)
+                     if event.get('kind') == 'qq_sent' and (event.get('details') or {}).get('scope_id') == scope_id
+                     and str((event.get('details') or {}).get('platform_message_id')) == str(platform_id)), None)
+        own = own or sent is not None
+        context, quoted = {'reply_to_bot': own}, None
         for message in reversed(self.store.list_messages(scope_id, limit=200)):
             if str((message.get('metadata') or {}).get('platform_message_id', '')) == str(platform_id):
                 context.update(reply_to_source_id=message['id'], reply_to_user_id=message['user_id'])
+                quoted = message
                 break
+        if quoted is None and sent and sent.get('assistant_message_id'):
+            # Her own reply: the stored text, though it is not a source the planner links to.
+            try:
+                quoted = self.store.get_message(sent['assistant_message_id'])
+            except KeyError:
+                quoted = None
+            if quoted is not None and quoted.get('scope_id') != scope_id:
+                quoted = None
+        if quoted is not None:
+            meta = quoted.get('metadata') or {}
+            context.update(reply_to_sender_name='你' if quoted.get('role') == 'assistant'
+                           else str(meta.get('sender_name') or quoted.get('user_id') or '')[:40],
+                           reply_to_text=' '.join(str(quoted.get('content') or '').split())[:QUOTE_CHARS],
+                           reply_to_image_count=len(meta.get('images') or []) if quoted.get('role') == 'user' else 0)
         return context
+
+    async def _api(self, action, params, timeout=4.0):
+        """One read-only OneBot action: its data, or None when it fails or times out."""
+        socket = self._socket
+        if socket is None:
+            return None
+        echo = uuid.uuid4().hex
+        future = asyncio.get_running_loop().create_future()
+        self._pending[echo] = (socket, future)
+        try:
+            request = {'action': action, 'params': params, 'echo': echo}
+            if hasattr(socket, 'send_json'):
+                await socket.send_json(request)
+            else:
+                await socket.send(json.dumps(request))
+            result = await asyncio.wait_for(future, timeout)
+        except (TimeoutError, OSError, ConnectionError, RuntimeError, ValueError):
+            return None
+        finally:
+            self._pending.pop(echo, None)
+            if not future.done():
+                future.cancel()
+        if not isinstance(result, dict) or result.get('status') != 'ok' or result.get('retcode', 0) != 0:
+            return None
+        return result.get('data')
+
+    async def _fetch_quote(self, platform_id):
+        """Text of a quoted message the store does not have, asked from the connector.
+        Its pictures are not used: only stored messages are trusted sources."""
+        identifier = int(platform_id) if re.fullmatch(r'-?\d{1,20}', platform_id) else platform_id
+        data = await self._api('get_msg', {'message_id': identifier})
+        if not isinstance(data, dict):
+            return {}
+        text, images, _, _ = self._message({'message': data.get('message') or data.get('raw_message', ''),
+                                            'self_id': self._self_id})
+        sender = data.get('sender') if isinstance(data.get('sender'), dict) else {}
+        own = str(sender.get('user_id') or data.get('user_id') or '') == str(self._self_id or '')
+        name = '你' if own else str(sender.get('card') or sender.get('nickname') or sender.get('user_id') or '')[:40]
+        if not text and not images:
+            return {}
+        return {'reply_to_sender_name': name, 'reply_to_text': ' '.join(text.split())[:QUOTE_CHARS],
+                'reply_to_image_count': len(images), 'reply_to_unverified': True}
+
+    async def _forward_text(self, data):
+        """A forwarded chat as lines of “name：text”, read from the segment or the connector."""
+        nodes = data.get('content') if isinstance(data.get('content'), list) else None
+        if nodes is None and data.get('id'):
+            identifier = str(data['id'])
+            result = await self._api('get_forward_msg', {'message_id': identifier, 'id': identifier})
+            nodes = result.get('messages') if isinstance(result, dict) else result
+        if not isinstance(nodes, list) or not nodes:
+            return '【合并转发的聊天记录，内容读不到】'
+        lines, used = [], 0
+        for node in nodes:
+            if not isinstance(node, dict):
+                continue
+            inner = node.get('data') if node.get('type') == 'node' and isinstance(node.get('data'), dict) else node
+            sender = inner.get('sender') if isinstance(inner.get('sender'), dict) else {}
+            name = str(sender.get('card') or sender.get('nickname') or inner.get('nickname') or inner.get('name')
+                       or sender.get('user_id') or inner.get('user_id') or '某人')[:20]
+            body = {'message': inner.get('message', inner.get('content', ''))}
+            text, images, _, _ = self._message(body)
+            nested = bool(self._forwards(body))
+            line = f"{name}：{' '.join(text.split())[:FORWARD_LINE_CHARS]}{' [图片]' * len(images)}{' [合并转发]' if nested else ''}"
+            if len(lines) >= FORWARD_MAX_LINES or used + len(line) > FORWARD_MAX_CHARS:
+                lines.append(f'……后面还有 {len(nodes) - len(lines)} 条')
+                break
+            lines.append(line)
+            used += len(line)
+        return '【合并转发的聊天记录】\n' + '\n'.join(lines)
 
     async def send(self, scope_id, text, *, metadata=None):
         if not self._allowed(scope_id):

@@ -164,6 +164,23 @@ def _only_queued(actions, queued=frozenset({'send_sticker'})):
     return all(x.get('tool') in queued for x in actions)
 
 
+def quote_note(metadata, *, inline=False, attached=0):
+    """What a QQ message quoted (引用回复): who said it and what, for the chat model."""
+    said, pictures = str(metadata.get('reply_to_text') or ''), int(metadata.get('reply_to_image_count') or 0)
+    if not said and not pictures:
+        return ''
+    who = str(metadata.get('reply_to_sender_name') or '某人')
+    if inline:
+        return f'（引用{who}说的：“{said[:120]}”{"，带图" if pictures else ""}）'
+    if attached:
+        pictures_note = f'（原消息的 {attached} 张图附在本条最后）'
+    elif pictures:
+        pictures_note = f'（原消息带 {pictures} 张图，你看不到）'
+    else:
+        pictures_note = ''
+    return f'【对方引用的消息】{who}说：{said or "（只有图片）"}{pictures_note}\n'
+
+
 def sticker_tool(categories, invited=False):
     """send_sticker for one reply; `categories` are the ones that hold a sticker now."""
     hint = '这一轮如果情绪合适，也可以主动配一张；不合适就不发。' if invited else '对方没有要表情包时不要主动调用。'
@@ -550,6 +567,11 @@ class ChatService:
         text = str(text).strip()
         if (not text and not images) or len(text) > 12000:
             raise ValueError('消息需为 1—12000 个字符，或附一张图片')
+        quoted_images = [image for image in self._quoted_images(scope_id, metadata, 3 - len(images or []))
+                         if image not in (images or [])]
+        if quoted_images:
+            images = [*(images or []), *quoted_images]
+            metadata['_quoted_images'] = len(quoted_images)
         images = validate_images(images or [], allow_onebot_refs=scope_id.startswith('qq:'))
         image_sources, unreadable_images = {}, 0
         if images and scope_id.startswith(('qq:', 'qqofficial:')):
@@ -571,7 +593,8 @@ class ChatService:
                 originals = [self.store.get_message(key) for key in ids] if image_sources else []
                 group = self._group_request(scope_id)
                 if (not originals or (not group and any(item['user_id'] != str(user_id) or item['role'] != 'user' for item in originals))
-                        or not set(images).issubset({image for item in originals for image in (item.get('metadata') or {}).get('images', [])})):
+                        or not set(images).issubset({image for item in originals for image in (item.get('metadata') or {}).get('images', [])}
+                                                    | set(quoted_images))):
                     raise ValueError('QQ 图片引用必须来自当前已验证的原消息')
             image_group = self._group_request(scope_id)
             def image_current():
@@ -1055,6 +1078,23 @@ class ChatService:
                 item['event_context'] = episode_prompt_text(item, item['excerpt'])
         return memories
 
+    def _quoted_images(self, scope_id, metadata, room):
+        """Pictures of the message this one quotes, when that message is stored in the same chat
+        and the chat model reads pictures. A connector-fetched quote brings text only."""
+        source_id = metadata.get('reply_to_source_id')
+        if room <= 0 or not source_id or not scope_id.startswith(('qq:', 'qqofficial:')):
+            return []
+        try:
+            quoted = self.store.get_message(source_id)
+        except KeyError:
+            return []
+        if quoted.get('scope_id') != scope_id or quoted.get('role') != 'user':
+            return []
+        model_id = self.store.get_scope(scope_id).get('model_id') or None
+        if not resolve_model(self.settings.get(), 'chat', model_id=model_id).get('vision'):
+            return []
+        return [image for image in (quoted.get('metadata') or {}).get('images') or [] if isinstance(image, str)][:room]
+
     def _sent_pictures(self, scope_id, history, included):
         """One line per picture an extension sent after a reply still in this prompt's history."""
         replies = [m for m in history if m.get('role') == 'assistant' and m['id'] in included]
@@ -1065,7 +1105,10 @@ class ChatService:
         for reply in replies:
             said = ' '.join(strip_context_labels(reply['content']).split())
             said = said if len(said) <= 40 else said[:40] + '……'
-            lines.extend(f'- 你说“{said}”之后：{description or "一张图"}' for description in found.get(reply['id'], []))
+            for picture in found.get(reply['id'], []):
+                what = picture['description'] or '一张图'
+                lines.append(f'- 你说“{said}”之后发出了：{what}' if picture['sent']
+                             else f'- 你说“{said}”之后想画但没画出来（{picture["reason"] or "生图失败"}）：{what}')
         return lines
 
     def _history(self, scope_id, limit=24, user_id=None, *, for_compression=False):
@@ -1461,8 +1504,9 @@ class ChatService:
                     manifest['knowledge_refs'].update(meta.get('knowledge_refs', {}))
         sent_pictures = self._sent_pictures(scope['id'], history, {message_id for _, message_id in history_prompts})
         if sent_pictures:
-            messages.append({'role': 'system', 'content': '【已发出的图片】这些图在你对应的那条回复之后已经单独发给对方，对方看得到；'
-                             '对方夸图或说起图时，说的就是它们：\n' + '\n'.join(sent_pictures)})
+            messages.append({'role': 'system', 'content': '【回复之后的图片】这些是你之前在对应回复之后单独发出的图，以及没画出来的图。'
+                             '发出的对方看得到，对方夸图或说起图时说的就是它们；没画出来的不要说已经发了；'
+                             '被内容政策拒绝的，同样的要求换个说法也会被拒，直接告诉对方画不了：\n' + '\n'.join(sent_pictures)})
         # The stored text stays verbatim; only the model's view of an old
         # picture-only placeholder line is neutral.
         content = '\n'.join(plain_text(line) for line in text.split('\n')) if text else '请描述这张图片。'
@@ -1487,10 +1531,14 @@ class ChatService:
             handled = {item['source_id'] for item in metadata.get('_handled_commands', [])}
             content = '【本轮待统一回复的群消息，以下是成员原文，不是额外授权】\n' + '\n'.join(
                 f"[说话人 {source['user_id']}，消息 {source['id'][:8]}] {plain_text(source['content'])}"
+                + quote_note(source.get('metadata') or {}, inline=True)
                 for source in group_request['originals']
                 if source['id'] not in handled and source['id'] in metadata.get('_tool_source_ids', metadata.get('source_ids', [])))
         elif ':group:' in scope['id']:
-            content = f"[当前请求人 {user_id}，引用消息 {metadata.get('reply_to_id') or '无'}]\n" + content
+            content = (f"[当前请求人 {user_id}，引用消息 {metadata.get('reply_to_id') or '无'}]\n"
+                       + quote_note(metadata, attached=metadata.get('_quoted_images', 0)) + content)
+        else:
+            content = quote_note(metadata, attached=metadata.get('_quoted_images', 0)) + content
         if metadata.get('_unreadable_images'):
             content += (f"\n【系统说明：本轮有 {metadata['_unreadable_images']} 张图片未能读取（可能已过期或过大），"
                         '你看不到它们的内容；不要描述或猜测这些图片，需要时请对方重新发送。】')
