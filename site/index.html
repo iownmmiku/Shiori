@@ -4,10 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Shiori · 本机运行的 AI 聊天伙伴</title>
-<meta name="description" content="Shiori 是装在你自己电脑上的 AI 聊天伙伴：网页聊天、QQ 群聊、长期记忆、表情包和电脑任务。看板娘：佐藤栞。">
+<meta name="description" content="Shiori 是装在你自己电脑上的 AI 聊天伙伴：网页聊天、QQ 群聊、长期记忆、表情包、生图自拍和电脑任务。看板娘：佐藤栞。">
 <meta property="og:type" content="website">
 <meta property="og:title" content="Shiori · 本机运行的 AI 聊天伙伴">
-<meta property="og:description" content="网页聊天 · QQ 群聊 · 长期记忆 · 表情包 · 电脑任务。看板娘：佐藤栞。">
+<meta property="og:description" content="网页聊天 · QQ 群聊 · 长期记忆 · 表情包 · 生图自拍 · 电脑任务。看板娘：佐藤栞。">
 <meta property="og:image" content="https://iownmmiku.github.io/Shiori/assets/banner.jpg">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="theme-color" content="#f8f1ea">
@@ -117,7 +117,7 @@ h2{font:900 clamp(34px,4.6vw,54px)/1.2 var(--serif);letter-spacing:-.01em;margin
   -webkit-mask-image:linear-gradient(#000 88%,#0000);mask-image:linear-gradient(#000 88%,#0000);transition:transform .6s cubic-bezier(.2,.7,.2,1)}
 .feature:hover .art img{transform:translateY(-6px)}
 .art.full img{-webkit-mask-image:none;mask-image:none;height:92%}
-.art.chat{--tone:#f6dcd5}.art.memory{--tone:#efe1cf}.art.stickers{--tone:#f4d7dc}.art.local{--tone:#e3e0ea}
+.art.chat{--tone:#f6dcd5}.art.memory{--tone:#efe1cf}.art.stickers{--tone:#f4d7dc}.art.local{--tone:#e3e0ea}.art.selfie{--tone:#f6e3cc}
 .copy .num{display:flex;align-items:baseline;gap:14px;margin:0 0 6px}
 .copy .num b{font:900 64px/1 var(--serif);color:transparent;-webkit-text-stroke:1.5px var(--chestnut-2)}
 .copy .num span{font:700 26px/1 var(--hand);color:var(--coral)}
@@ -125,7 +125,7 @@ h2{font:900 clamp(34px,4.6vw,54px)/1.2 var(--serif);letter-spacing:-.01em;margin
 .copy p{color:var(--ink-2);font-size:16.5px;margin:0}
 .chips{display:flex;flex-wrap:wrap;gap:8px;margin:24px 0 0;padding:0;list-style:none}
 .chips li{padding:5px 14px;border-radius:999px;background:var(--card);border:1px solid var(--line);font-size:13.5px;color:var(--ink-2)}
-.more{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:112px}
+.more{display:grid;grid-template-columns:repeat(4,1fr);gap:18px;margin-top:112px}
 .more article{background:var(--card);border:1px solid var(--line);border-radius:22px;padding:26px 26px 24px;box-shadow:var(--shadow);transition:transform .25s}
 .more article:hover{transform:translateY(-4px)}
 .more svg{width:30px;height:30px;color:var(--chestnut);margin-bottom:12px}
@@ -222,6 +222,7 @@ footer a{color:var(--ink-2)}
   .meet-copy .sec-head{order:-1;margin-bottom:0}
   .stand img{height:min(640px,76vh)}
   .peek{display:none}
+  .more{grid-template-columns:repeat(2,1fr)}
 }
 @media (max-width:860px){
   section{padding:84px 0}
@@ -316,7 +317,7 @@ footer a{color:var(--ink-2)}
       <p class="kicker"><i></i><span id="hero-kicker">开源 · MIT 许可 · Windows / 源码</span></p>
       <h1>Shiori<span>.</span></h1>
       <p class="tagline">本机运行的 AI 聊天伙伴</p>
-      <p class="intro">装在你自己的电脑上。在网页里和她聊天，也能带她进 QQ 群；她会记住重要的事，学会群里的说法，挑合适的表情包。聊天和记忆都留在你的电脑上。</p>
+      <p class="intro">装在你自己的电脑上。在网页里和她聊天，也能带她进 QQ 群；她会记住重要的事，学会群里的说法，挑合适的表情包，还会给你发自拍。聊天和记忆都留在你的电脑上。</p>
       <div class="cta">
         <a class="btn primary" id="hero-download" href="https://github.com/iownmmiku/Shiori/releases/latest">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 19h14"/></svg>
@@ -336,7 +337,7 @@ footer a{color:var(--ink-2)}
       <header class="sec-head reveal">
         <p class="eyebrow">what she does</p>
         <h2>她能做什么</h2>
-        <p class="lead">第一次用只需要一个模型服务的地址和密钥。QQ、记忆检索、电脑能力和更细的模型分工，都可以以后慢慢打开。</p>
+        <p class="lead">第一次用只需要一个模型服务的地址和密钥。QQ、记忆检索、生图、电脑能力和更细的模型分工，都可以以后慢慢打开。</p>
       </header>
 
       <article class="feature reveal">
@@ -344,8 +345,8 @@ footer a{color:var(--ink-2)}
         <div class="copy">
           <p class="num"><b>01</b><span>in your group chat</span></p>
           <h3>在群里，接得上话</h3>
-          <p>接入 NapCat、SnowLuma 或 QQ 官方机器人。她会先判断一句话是不是在对她说、值不值得接，再决定开不开口；群友之间的话不会被当成在问她。发言有限速，接话积极度可以调，不会刷屏。</p>
-          <ul class="chips"><li>对话对象判断</li><li>接话积极度</li><li>发言限速</li><li>本地预筛省调用</li></ul>
+          <p>接入 NapCat、SnowLuma 或 QQ 官方机器人。她会先判断一句话是不是在对她说、值不值得接，再决定开不开口；群友之间的话不会被当成在问她。引用的消息（连同里面的图）和合并转发的聊天记录，她也看得懂。发言有限速，接话积极度可以调，不会刷屏。</p>
+          <ul class="chips"><li>对话对象判断</li><li>看懂引用和转发</li><li>接话积极度</li><li>发言限速</li><li>本地预筛省调用</li></ul>
         </div>
       </article>
 
@@ -364,15 +365,25 @@ footer a{color:var(--ink-2)}
         <div class="copy">
           <p class="num"><b>03</b><span>stickers</span></p>
           <h3>会挑表情包</h3>
-          <p>上传你自己的表情包（图片或压缩包都行），或者让她在群里收集。识图模型给每张写好含义、分类和图里的字，聊天时按语境挑一张合适的发；同一个聊天里最近发过的不会马上重复。</p>
+          <p>上传你自己的表情包（图片或压缩包都行），或者让她在群里收集。识图模型给每张写好含义、分类和图里的字；聊天时她自己决定要不要配一张、配哪一类，同一个聊天里最近发过的不会马上重复。</p>
           <ul class="chips"><li>16 个固定分类</li><li>图片 / ZIP 上传</li><li>手动语义分析</li><li>动图也能识别</li></ul>
+        </div>
+      </article>
+
+      <article class="feature reveal">
+        <div class="art selfie"><img src="assets/art/feature-selfie.webp" width="880" height="1024" loading="lazy" decoding="async" alt="佐藤栞捂着嘴害羞地举起三张拍立得，照片里是她穿水手服、卫衣和连衣裙的样子"></div>
+        <div class="copy">
+          <p class="num"><b>04</b><span>selfies &amp; drawings</span></p>
+          <h3>会画画，也会自拍</h3>
+          <p>请她画画、拍照或者来张自拍，她会按自己的性格决定画不画，画好的图跟在文字回复后面发出来。人格可以设外貌、默认服装和最多 3 张参考图，自拍里的脸和发型都对得上；换上的衣服会记住，之后的自拍接着穿。生图服务需要自己配置，支持 OpenAI 兼容接口、Gemini、NovelAI 和 ComfyUI，每人每天有次数上限。</p>
+          <ul class="chips"><li>四种生图服务</li><li>参考图与换装</li><li>引用图片改图</li><li>每日次数上限</li></ul>
         </div>
       </article>
 
       <article class="feature reveal">
         <div class="art local full"><img src="assets/art/feature-local.webp" width="900" height="972" loading="lazy" decoding="async" alt="佐藤栞盘腿坐着用笔记本电脑，身边放着冰美式、栗子玩偶和贝斯琴包"></div>
         <div class="copy">
-          <p class="num"><b>04</b><span>on your own PC</span></p>
+          <p class="num"><b>05</b><span>on your own PC</span></p>
           <h3>装在你自己的电脑上</h3>
           <p>Windows 安装版和便携版无需 Python，打开就是独立窗口。聊天、记忆和设置都存放在运行 Shiori 的电脑上。管理员授权后，她还能帮你在本机处理文件、运行命令；权限默认关闭，随时可以收回。</p>
           <ul class="chips"><li>数据留在本机</li><li>Chat 工作台</li><li>电脑任务需授权</li><li>应用内一键更新</li></ul>
@@ -394,6 +405,11 @@ footer a{color:var(--ink-2)}
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>
           <h4>多模型分工与统计</h4>
           <p>聊天、判断、记忆和整理可以用不同的模型；统计页按用途显示用量和一次回复的时间花在哪。</p>
+        </article>
+        <article class="reveal">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><path d="M17.5 14v7M14 17.5h7"/></svg>
+          <h4>扩展</h4>
+          <p>像 AstrBot 的插件，扩展可以给她加工具、接口和设置页，自带的生图就是一个扩展。别人写的扩展默认停用，确认可信后才启用。</p>
         </article>
       </div>
     </div>
