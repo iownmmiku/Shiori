@@ -148,7 +148,8 @@ def model_trace_snapshot(state):
         stage = state['stage']
         durations[stage] = durations.get(stage, 0) + max(0, now - state['_stage_started'])
     return {**{key: state[key] for key in ('trace_id', 'stage', 'request_id', 'dispatched',
-                'structured_output', 'format_compatibility_fallbacks', 'format_retry_count') if key in state},
+                'structured_output', 'format_compatibility_fallbacks', 'format_retry_count',
+                'target_corrected') if key in state},
             'request_ids': list(state.get('request_ids', [])),
             'elapsed_ms': round(max(0, now - state['_started']) * 1000, 1),
             'timings_ms': {key: round(value * 1000, 1) for key, value in durations.items()}}
@@ -693,6 +694,7 @@ class Provider:
             state = self._health.setdefault(key, {'failures': 0, 'last_error': '', 'last_attempt_at': '', 'last_success_at': ''})
             if config is None and state.get('until', 0) > time.monotonic():
                 last_error = ProviderError('模型暂时熔断，请稍后重试或在模型池手动测试连接。', retryable=True)
+                last_error.circuit_open = True
                 continue
             state['last_attempt_at'] = datetime.now(timezone.utc).isoformat()
             def guard(candidate=candidate, index=index):
@@ -726,8 +728,11 @@ class Provider:
                 if config is None:
                     self._report_result(key, candidate, exc)
                 # A health failure and permission to repeat an uncertain
-                # generation are separate decisions.
-                if exc.retryable or isinstance(exc, (ProviderTimeoutError, ProviderConnectionError)):
+                # generation are separate decisions. A used-up output allowance
+                # or a content filter is a property of this request, not of the
+                # model's health: it must not pause the model for other tasks.
+                if (not isinstance(exc, (ProviderOutputBudgetError, ProviderContentFilterError))
+                        and (exc.retryable or isinstance(exc, (ProviderTimeoutError, ProviderConnectionError)))):
                     state['failures'] += 1
                     if state['failures'] >= 2:
                         state['until'] = time.monotonic() + 30
@@ -955,7 +960,9 @@ class Provider:
                 raise ProviderError('模型服务未返回响应')
             if response.status_code >= 300:
                 if response.status_code == 429:
-                    raise ProviderRateLimitError('模型服务返回429：服务限流或额度受限，请检查服务商用量或稍后重试。', retryable=True)
+                    failure = ProviderRateLimitError('模型服务返回429：服务限流或额度受限，请检查服务商用量或稍后重试。', retryable=True)
+                    failure.status_code = 429
+                    raise failure
                 reason = {401: '密钥无效或未授权', 403: '无访问权限', 404: '地址或模型不存在', 429: '服务限流或额度不足'}.get(response.status_code, '服务请求失败')
                 failure = ProviderError(f'模型服务返回 {response.status_code}：{reason}。', retryable=response.status_code == 429 or 500 <= response.status_code <= 599)
                 failure.status_code = response.status_code

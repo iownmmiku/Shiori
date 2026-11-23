@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from shiori.chat import ChatService
+from shiori.chat import MEMORY_EXTRACT_MAX_TOKENS, ChatService
 from shiori.db import Store
 from shiori.memory_events import episode_content
 from shiori.settings import DEFAULTS
@@ -75,7 +75,7 @@ async def test_single_long_user_story_creates_complete_automatic_episode_without
     assert stored['event_time_known'] and stored['event_time_start'] == '2026-10-21T16:00:00.000000Z'
     assert stored['reported_at'] == '2026-10-23T02:00:00.000000Z' and not stored.get('occurred_at')
     assert [row['id'] for row in env.model.calls[0]['records']] == [original['id']]
-    assert env.model.calls[0]['max_tokens'] == 4000
+    assert env.model.calls[0]['max_tokens'] == MEMORY_EXTRACT_MAX_TOKENS == 8000
     assert env.chat.memory_lifecycle.pending('web:default', 'owner') == []
 
 

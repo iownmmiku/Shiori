@@ -95,7 +95,9 @@ def _escape_inner_quotes(text):
     return ''.join(out)
 
 
-def parse_plan(text, *, message_id, user_id):
+def parse_plan(text, *, message_id, user_id, source_ids=()):
+    """`source_ids` are the messages answered together in this turn (debounced
+    or merged); naming one of them is not a different target."""
     if not isinstance(text, str):
         raise PlanValidationError('invalid_type')
     if len(text) > MAX_PLAN_CHARS:
@@ -147,10 +149,22 @@ def parse_plan(text, *, message_id, user_id):
             raise PlanValidationError('missing_field', field)
     if choice['action'] not in ('reply', 'skip'):
         raise PlanValidationError('invalid_action', 'action')
-    if not isinstance(choice['target_message_id'], str) or choice['target_message_id'] != message_id:
-        raise PlanValidationError('target_mismatch', 'target_message_id')
+    # The target fields only echo the turn back. A long message ID is easy to
+    # miscopy; a skip with a wrong echo still decides nothing, so it stays a
+    # skip. A reply must name this turn's speaker and one of its messages.
+    corrected = None
+    sources = {message_id, *(key for key in source_ids if isinstance(key, str))}
+    target = choice['target_message_id']
+    if not isinstance(target, str) or target not in sources:
+        if choice['action'] != 'skip':
+            raise PlanValidationError('target_mismatch', 'target_message_id')
+        corrected = 'skip'
+    elif target != message_id:
+        corrected = 'merged'
     if type(choice['target_user_id']) not in (str, int) or str(choice['target_user_id']) != str(user_id):
-        raise PlanValidationError('target_mismatch', 'target_user_id')
+        if choice['action'] != 'skip':
+            raise PlanValidationError('target_mismatch', 'target_user_id')
+        corrected = 'skip'
     if type(choice['addressed_to_bot']) is not bool:
         raise PlanValidationError('invalid_type', 'addressed_to_bot')
     for field in ('intent', 'reason'):
@@ -173,6 +187,9 @@ def parse_plan(text, *, message_id, user_id):
         extra['audience'] = choice['audience']
     if isinstance(choice.get('speaker_intent'), str) and choice['speaker_intent'].strip():
         extra['speaker_intent'] = choice['speaker_intent'].strip()[:200]
+    if corrected:
+        # Downstream only ever acts on the current message and speaker.
+        extra.update(target_message_id=message_id, target_user_id=user_id, target_corrected=corrected)
     return {key: choice[key] for key in FIELDS if key not in OPTIONAL} | {'needed_info': needed} | extra
 
 

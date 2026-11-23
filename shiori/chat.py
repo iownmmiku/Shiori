@@ -43,6 +43,9 @@ _GROUP_READ_TOOLS = frozenset(('calculate', 'recall_memory', 'lookup_jargon', 'w
 _GROUP_TOOLS = _GROUP_READ_TOOLS | {'send_sticker'}
 _STICKER_SCOPES = ('qq:', 'qqofficial:')   # chats whose connector can deliver a sticker
 QQ_IMAGE_BATCH_TIMEOUT = 15.0
+# Room for a reasoning model to think before the candidate list (about one
+# extraction in three used up 4000).
+MEMORY_EXTRACT_MAX_TOKENS = 8000
 
 
 class QQImageSourceChanged(ValueError):
@@ -2257,7 +2260,7 @@ class ChatService:
                         'speaker': member_name, 'time': message_time_context(x, self.settings)} for x in records]
             result = await self.provider.complete([{'role': 'system', 'content': prompt}, *conversation,
                                                    {'role': 'user', 'content': json.dumps(sources, ensure_ascii=False)}],
-                                                  purpose='memory_extract', scope_id=scope_id, max_tokens=4000,
+                                                  purpose='memory_extract', scope_id=scope_id, max_tokens=MEMORY_EXTRACT_MAX_TOKENS,
                                                   before_send=extraction_current)
             candidates = safe_json(result['content'])
             stats['stage'] = 'validate'
