@@ -8,7 +8,8 @@ import unicodedata
 
 DEFAULT_OUTPUT = {'enabled': True, 'mode': 'model', 'target_chars': 160, 'max_chars': 320,
                   'interval_ms': 600, 'max_parts': 8, 'platform_max_chars': 1800,
-                  'reply_max_chars': 0, 'message_max_chars': 0, 'remove_parentheses': False}
+                  'reply_max_chars': 0, 'message_max_chars': 0, 'remove_parentheses': False, 'typing_cpm': 0}
+TYPING_MAX_MS = 8000     # a typing pause never holds the chat longer than this
 _PROTECTED_TEXT = r'(?P<fence>`{3,}|~{3,})[\s\S]*?(?:(?P=fence)|$)|`[^`\n]+`|\[(?:\\.|[^\]\\\n])*\]\(|https?://[^\s<>]+'
 
 
@@ -155,7 +156,21 @@ def output_config(config, scope=None):
             raise ValueError(f'{key}须为0—{maximum}的整数')
     if type(result['remove_parentheses']) is not bool:
         raise ValueError('remove_parentheses须为布尔值')
+    if type(result['typing_cpm']) is not int or result['typing_cpm'] != 0 and not 30 <= result['typing_cpm'] <= 600:
+        raise ValueError('typing_cpm须为0或30—600的整数')
     return result
+
+
+def part_gap_seconds(options, part):
+    """The pause before sending `part` after an earlier one: the fixed interval, or with a
+    typing speed set, about as long as a person would take to type it (never shorter than
+    the interval, at most TYPING_MAX_MS)."""
+    interval = options.get('interval_ms', 0)
+    speed = options.get('typing_cpm') or 0
+    if not speed:
+        return interval / 1000
+    typed = len(str(part).strip()) * 60000 / speed
+    return max(interval, min(TYPING_MAX_MS, typed)) / 1000
 
 
 def _atoms(text):

@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from .settings import resolve_model, resolved_identity, resolved_debounce
-from .output import OutputLimitError, output_config, split_output
+from .output import OutputLimitError, output_config, part_gap_seconds, split_output
 from .provider import (ProviderTimeoutError, ProviderConnectionError, ProviderRateLimitError, ProviderStreamError,
                        ProviderOutputBudgetError, ProviderContentFilterError, is_budget_exceeded,
                        model_request_trace, mark_model_stage, model_trace_snapshot)
@@ -2286,8 +2286,8 @@ class ConversationFlow:
         confirmed = 0
         current = lambda: self._may_answer(scope_id, user_id, batch)
         for index, part in enumerate(parts, 1):
-            if index > 1 and options['interval_ms']:
-                await asyncio.sleep(options['interval_ms'] / 1000)
+            if index > 1 and (gap := part_gap_seconds(options, part)):
+                await asyncio.sleep(gap)
             if self.pace:
                 await self.pace(scope_id)  # eligibility is checked after the wait
             if not self._may_answer(scope_id, user_id, batch):

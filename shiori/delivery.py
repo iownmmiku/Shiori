@@ -247,8 +247,8 @@ def install_delivery(app,store,onebot,official):
                 if part['status']!='pending':continue
                 if sent:
                     import asyncio
-                    from .output import output_config
-                    await asyncio.sleep(output_config(flow.settings.get(),flow.store.get_scope(record['scope_id']))['interval_ms']/1000)
+                    from .output import output_config, part_gap_seconds
+                    await asyncio.sleep(part_gap_seconds(output_config(flow.settings.get(),flow.store.get_scope(record['scope_id'])),part['text']))
                 if not ledger.valid(record,flow):break
                 part['status']='sending';ledger.save(record)
                 try:

@@ -584,10 +584,10 @@ class Store:
                         _boolean(value, 'output.' + key)
                     elif key == 'mode':
                         if value not in ('model','length'): raise ValueError('output.mode 无效')
-                    elif key in {'target_chars','max_chars','interval_ms','max_parts','platform_max_chars','reply_max_chars','message_max_chars'}:
+                    elif key in {'target_chars','max_chars','interval_ms','max_parts','platform_max_chars','reply_max_chars','message_max_chars','typing_cpm'}:
                         lower,upper = {'target_chars':(20,1000),'max_chars':(40,4000),'interval_ms':(0,5000),'max_parts':(1,20),'platform_max_chars':(40,20000),
-                                       'reply_max_chars':(0,20000),'message_max_chars':(0,4000)}[key]
-                        if type(value) is not int or not lower <= value <= upper:
+                                       'reply_max_chars':(0,20000),'message_max_chars':(0,4000),'typing_cpm':(0,600)}[key]
+                        if type(value) is not int or not lower <= value <= upper or key == 'typing_cpm' and 0 < value < 30:
                             raise ValueError('output.' + key + ' 超出范围')
                     else:
                         raise ValueError('未知output字段')
