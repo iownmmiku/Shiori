@@ -116,6 +116,8 @@ def refresh_dispatch_time(messages, settings=None, *, purpose='chat', for_transp
             # The first line is owned by ChatService. A persona may itself
             # contain this literal heading later; never rewrite those lines.
             item['content'] = re.sub(r'^【现实时间】[^\n]*(?:\n|$)', lambda _: clock_instruction(settings), content, count=1)
+            if not item['content'].strip():
+                continue    # a message that held only the clock, with time awareness now switched off
         elif marker == 'planner' and purpose == 'planner' and item.get('role') == 'user' and isinstance(content, str):
             try:
                 payload = json.loads(content)

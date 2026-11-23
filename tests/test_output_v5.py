@@ -266,7 +266,7 @@ async def test_actual_persona_knowledge_deleted_after_first_part_stops_remaining
     store.upsert_scope({'id': 'qq:group:202', 'plan_enabled': False, 'merge_window_ms': 0})
     class Provider:
         async def complete(self, messages, **kwargs):
-            assert '用于测试的音乐知识' in messages[1]['content']
+            assert '用于测试的音乐知识' in messages[2]['content']   # after the opening and the per-turn notes
             reply = '这是根据音乐知识整理的回答。' * 30
             return {'content': reply, 'message': {'role': 'assistant', 'content': reply}, 'tool_calls': [], 'usage': {}}
     chat = ChatService(store, settings, Provider())

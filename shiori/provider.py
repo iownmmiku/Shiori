@@ -351,6 +351,21 @@ def input_size(messages, tools=None):
     return chars, images
 
 
+def cached_input_tokens(usage, input_tokens):
+    """Input tokens the service read from its prompt cache, under whichever name it reports them
+    (OpenAI and compatible relays, DeepSeek, Anthropic-style); None when it does not say."""
+    details = usage.get('prompt_tokens_details')
+    for value in ((details or {}).get('cached_tokens') if isinstance(details, dict) else None,
+                  usage.get('prompt_cache_hit_tokens'), usage.get('cache_read_input_tokens'), usage.get('cached_tokens')):
+        if value is None:
+            continue
+        try:
+            return min(usage_token_count(value), input_tokens)
+        except ValueError:
+            continue
+    return None
+
+
 def estimate_tokens(messages, tools=None):
     chars, image_tokens = 0, 0
     for message in messages:
@@ -990,6 +1005,9 @@ class Provider:
                       'estimated': usage_incomplete,
                       'queue_wait_ms': _queue_wait_ms.get(),
                       'latency_ms': round((time.monotonic() - started) * 1000)}
+            cached = cached_input_tokens(raw_usage, input_tokens)
+            if cached is not None:
+                record['cached_input_tokens'] = cached
             if filtered:
                 if usage_incomplete:
                     record['unconfirmed'] = True

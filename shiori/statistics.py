@@ -59,7 +59,10 @@ def activity(store, params):
     with store._lock:
         connection = store._conn
         purposes = connection.execute(
-            "SELECT COALESCE(json_extract(data,'$.purpose'),'chat'),COUNT(*),COALESCE(SUM(input_tokens),0),COALESCE(SUM(output_tokens),0)"
+            "SELECT COALESCE(json_extract(data,'$.purpose'),'chat'),COUNT(*),COALESCE(SUM(input_tokens),0),COALESCE(SUM(output_tokens),0),"
+            # Cached input only counts where the service said how much it read from its cache.
+            "COALESCE(SUM(json_extract(data,'$.cached_input_tokens')),0),"
+            "COALESCE(SUM(CASE WHEN json_extract(data,'$.cached_input_tokens') IS NOT NULL THEN input_tokens END),0)"
             " FROM usage WHERE created_at>=? AND created_at<? GROUP BY 1 ORDER BY 3 DESC LIMIT 40", params).fetchall()
         replies = connection.execute(
             'SELECT ' + ','.join(path % key for key in (
@@ -102,7 +105,8 @@ def activity(store, params):
                 screen['failed'] += count
             elif screened:
                 screen['screened'] += count
-    return {'purposes': [{'purpose': str(row[0]), 'calls': int(row[1]), 'input_tokens': int(row[2]), 'output_tokens': int(row[3])}
+    return {'purposes': [{'purpose': str(row[0]), 'calls': int(row[1]), 'input_tokens': int(row[2]), 'output_tokens': int(row[3]),
+                          'cached_input_tokens': int(row[4]), 'cache_reported_input_tokens': int(row[5])}
                          for row in purposes],
             'replies': {'count': len(replies), 'median_ms': {
                 'total': _median(columns[0]), 'wait': _median(waits), 'planner': _median(columns[2]), 'memory': _median(columns[3]),

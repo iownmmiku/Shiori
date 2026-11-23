@@ -68,6 +68,21 @@ def test_sse_tools_are_assembled_only_after_complete_arguments(setup_provider):
     assert len(store.list_usage())==1
 
 
+@pytest.mark.parametrize('usage, cached', [
+    ({'prompt_tokens': 800, 'completion_tokens': 5, 'prompt_cache_hit_tokens': 512, 'prompt_cache_miss_tokens': 288}, 512),   # DeepSeek
+    ({'prompt_tokens': 800, 'completion_tokens': 5, 'prompt_tokens_details': {'cached_tokens': 640}}, 640),                  # OpenAI style
+    ({'prompt_tokens': 800, 'completion_tokens': 5, 'prompt_tokens_details': {'cached_tokens': 0}}, 0),
+    ({'prompt_tokens': 800, 'completion_tokens': 5}, None),                                                                   # not reported
+])
+def test_cached_input_tokens_are_recorded_as_the_service_reports_them(setup_provider, usage, cached):
+    provider, _, store, transport = setup_provider
+    raw = sse({'content': '好'}, 'stop') + ('data: ' + json.dumps({'choices': [], 'usage': usage}) + '\n\ndata: [DONE]\n\n').encode()
+    transport(lambda request: httpx.Response(200, headers={'content-type': 'text/event-stream'}, stream=Chunks([raw])))
+    result = asyncio.run(provider.complete([{'role': 'user', 'content': 'hi'}]))
+    assert result['usage'].get('cached_input_tokens') == cached
+    assert store.list_usage()[0].get('cached_input_tokens') == cached
+
+
 TOOLS=[{'type':'function','function':{'name':'calculate','parameters':{'type':'object'}}}]
 
 

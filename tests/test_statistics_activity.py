@@ -43,6 +43,14 @@ def test_usage_is_split_by_purpose_largest_first(store):
     assert snapshot(store, Settings(), 1, now=later)['purposes'][0]['purpose'] == 'planner'
 
 
+def test_cached_input_counts_only_where_the_service_reported_it(store):
+    store.record_usage({'purpose': 'planner', 'input_tokens': 4000, 'output_tokens': 10, 'cached_input_tokens': 3000})
+    store.record_usage({'purpose': 'planner', 'input_tokens': 4000, 'output_tokens': 10, 'cached_input_tokens': 0})
+    store.record_usage({'purpose': 'planner', 'input_tokens': 4000, 'output_tokens': 10})     # an older row, or a service that says nothing
+    planner = activity(store, ALL_TIME)['purposes'][0]
+    assert (planner['input_tokens'], planner['cached_input_tokens'], planner['cache_reported_input_tokens']) == (12000, 3000, 8000)
+
+
 def test_reply_time_is_the_median_of_each_step(store):
     for total, flow, memory in ((12000, 9000, 1000), (14000, 10000, 1400), (20000, 11000, 3000)):
         store.add_event('qq_reply_timing', 'QQ 回复全程耗时', scope_id=GROUP, ingress_to_complete_ms=total, flow_ms=flow,
@@ -101,10 +109,10 @@ const body = source.slice(source.indexOf("function activityPanels"), source.inde
 const purposeNames = source.slice(source.indexOf("const purposeNames"), source.indexOf("function activityPanels"));
 const count = value => Number(value || 0).toLocaleString();
 const panels = new Function("e", "count", purposeNames + body + "; return activityPanels;")(e, count);
-const html = panels({purposes:[{purpose:"planner",calls:3,input_tokens:7500,output_tokens:500},{purpose:"mystery",calls:1,input_tokens:2000,output_tokens:0}],
+const html = panels({purposes:[{purpose:"planner",calls:3,input_tokens:7500,output_tokens:500,cached_input_tokens:5000,cache_reported_input_tokens:7500},{purpose:"mystery",calls:1,input_tokens:2000,output_tokens:0}],
   replies:{count:3,median_ms:{total:12500,wait:3100,planner:4,memory:1200,context:1050,model:2500,delivery:2750}},
   decisions:{planner_calls:9,outcomes:{reply:2,skip:6,failed:1,cancelled:0},prescreen:{mode:"shadow",judged:9,screened:7,failed:0},unprompted_replies:2,unwanted_replies:1}});
-for (const text of ["回复判断", "80%", "mystery", "12.5 秒", "等待合并消息", "3.1 秒", "2 / 6 / 1", "其中 7 条会被筛掉", "没喊你"])
+for (const text of ["回复判断", "80%", "缓存命中", "<td>67%</td>", "<td>—</td>", "mystery", "12.5 秒", "等待合并消息", "3.1 秒", "2 / 6 / 1", "其中 7 条会被筛掉", "没喊你"])
   if (!html.includes(text)) { console.error("missing: " + text); process.exit(1); }
 const empty = panels({});
 if (!empty.includes("暂无模型用量记录") || !empty.includes("暂无 QQ 回复")) { console.error("empty state missing"); process.exit(1); }

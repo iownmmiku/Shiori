@@ -248,8 +248,8 @@ def test_quiet_default_and_full_natural_chat_calendar(tmp_path, monkeypatch):
             assert NY in changed['reply'] and '10:00' in changed['reply']
             assert store.list_tasks()[0]['due_at'].startswith('2026-10-21T14:00:00')
             await chat.respond('web:default', 'owner', '你好')
-            assert 'Asia/Tokyo' in provider.calls[-1][0][0]['content']
-            assert '(UTC+8)' not in provider.calls[-1][0][0]['content']
+            prompt = '\n'.join(str(item['content']) for item in provider.calls[-1][0])
+            assert 'Asia/Tokyo' in prompt and '(UTC+8)' not in prompt
         finally:
             await chat.close()
             store.close()

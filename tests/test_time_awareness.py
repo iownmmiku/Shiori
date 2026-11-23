@@ -75,16 +75,21 @@ async def test_chat_clock_refreshes_per_reply_and_switch_takes_effect(tmp_path, 
     store.upsert_scope({'id': 'web:clock', 'auto_memory': False})
     chat = ChatService(store, settings, model)
     try:
+        def prompt():
+            return '\n'.join(str(message['content']) for message in model.prompts[-1][0])
         await chat.respond('web:clock', 'owner', '现在方便聊天吗')
-        assert '2027-01-01T12:30:00+09:00' in model.prompts[-1][0][0]['content']
-        assert '星期五' in model.prompts[-1][0][0]['content']
+        assert '2027-01-01T12:30:00+09:00' in prompt() and '星期五' in prompt()
+        # The clock comes right before the request, not in the opening the prompt cache reuses.
+        assert '【现实时间】' not in model.prompts[-1][0][0]['content']
+        assert model.prompts[-1][0][-1]['role'] == 'user' and '【现实时间】' in ''.join(
+            str(message['content']) for message in model.prompts[-1][0][-3:])
         fixed[0] += timedelta(hours=2)
         await chat.respond('web:clock', 'owner', '再聊聊')
-        assert '2027-01-01T14:30:00+09:00' in model.prompts[-1][0][0]['content']
+        assert '2027-01-01T14:30:00+09:00' in prompt()
         settings.update({'time': {'awareness_enabled': False}})
         await chat.respond('web:clock', 'owner', '继续聊天')
-        assert '【现实时间】' not in model.prompts[-1][0][0]['content']
-        assert '当前时间' not in model.prompts[-1][0][0]['content']
+        assert '【现实时间】' not in prompt() and '当前时间' not in prompt()
+        assert all(str(message['content']).strip() for message in model.prompts[-1][0])
     finally:
         await chat.close()
         store.close()

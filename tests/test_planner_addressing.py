@@ -152,7 +152,8 @@ async def test_reply_prompt_carries_who_the_message_was_for(tmp_path):
         essential = next(item['content'] for item in messages if str(item['content']).startswith('【本轮回复计划与命令回执】'))
         data = json.loads(essential.split('\n', 1)[1])
         assert data['reply_plan']['audience'] == 'member' and data['reply_plan']['speaker_intent'] == '在问队友抓谁'
-        assert '不要替被问的人回答' in messages[0]['content']
+        # Per-turn guidance follows the cached opening.
+        assert '不要替被问的人回答' in messages[1]['content'] and '不要替被问的人回答' not in messages[0]['content']
     finally:
         await chat.close()
         store.close()

@@ -642,7 +642,8 @@ class Model:
     async def complete(self, messages, **kwargs):
         if kwargs.get('purpose', 'chat') != 'chat':
             return answer('{}')
-        self.seen.append({'system': messages[0]['content'], 'tools': kwargs.get('tools') or [], 'messages': list(messages)})
+        self.seen.append({'system': messages[0]['content'], 'turn': messages[1]['content'], 'tools': kwargs.get('tools') or [],
+                          'messages': list(messages)})
         return self.turns.pop(0) if self.turns else answer('嗯。')
 
 
@@ -898,22 +899,26 @@ async def test_she_sees_her_own_look_when_someone_sends_a_picture(make_chat):
     chat.imagegen.set_outfit(PRIVATE, 'default', 'pink pajamas')
     await over_qq(store, config, chat, '这是谁？', images=[data_url(png('green'))])
     seen = model.seen[0]
-    assert '【你自己的样子】外貌：long brown hair, amber eyes；现在穿着：pink pajamas。' in seen['system']
-    assert '那就是你' in seen['system']
+    # It comes with this turn only, so it sits in the per-turn notes and the cached opening stays the same.
+    assert '【你自己的样子】外貌：long brown hair, amber eyes；现在穿着：pink pajamas。' in seen['turn']
+    assert '那就是你' in seen['turn'] and '你自己的样子' not in seen['system']
     content = seen['messages'][-1]['content']
     assert [part['type'] for part in content] == ['text', 'image_url', 'text', 'image_url']
     assert '这是谁' in content[0]['text'] and '系统附上的参考图' in content[2]['text']   # her picture after theirs
-    assert '对方这条消息后面附了 1 张你自己的参考图' in seen['system']
+    assert '对方这条消息后面附了 1 张你自己的参考图' in seen['turn']
     url = content[3]['image_url']['url']
     assert url.startswith('data:image/jpeg;base64,') and url != content[1]['image_url']['url']
     assert max(ig.image_info(base64.b64decode(url.split(',', 1)[1]))[2]) == 512
     # A turn without pictures carries nothing about her look.
     await over_qq(store, config, chat, '在干嘛')
-    assert '你自己的样子' not in model.seen[1]['system'] and isinstance(model.seen[1]['messages'][-1]['content'], str)
+    assert '你自己的样子' not in model.seen[1]['system'] + model.seen[1]['turn']
+    assert isinstance(model.seen[1]['messages'][-1]['content'], str)
+    assert model.seen[1]['system'] == seen['system']                    # the opening did not change with the picture
     # Switched off in the extension settings: nothing either.
     chat.extensions.set_config('imagegen', {'recognize_self': False})
     await over_qq(store, config, chat, '这是谁？', images=[data_url(png('green'))])
-    assert '你自己的样子' not in model.seen[2]['system'] and len(model.seen[2]['messages'][-1]['content']) == 2
+    assert '你自己的样子' not in model.seen[2]['system'] + model.seen[2]['turn']
+    assert len(model.seen[2]['messages'][-1]['content']) == 2
 
 
 def test_without_reference_pictures_only_her_look_is_described(make_gen):

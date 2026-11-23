@@ -63,7 +63,7 @@ class Model:
     async def complete(self, messages, **kwargs):
         if kwargs.get('purpose', 'chat') != 'chat':
             return answer('{}')
-        self.seen.append({'system': messages[0]['content'], 'tools': kwargs.get('tools') or []})
+        self.seen.append({'system': messages[0]['content'], 'turn': messages[1]['content'], 'tools': kwargs.get('tools') or []})
         return self.turns.pop(0) if self.turns else answer('嗯。')
 
 
@@ -215,7 +215,8 @@ async def test_an_invited_reply_may_go_without_a_sticker(make):
     config.config['stickers']['send_probability'] = 1
     segments = await over_qq(store, config, chat, '我今天考过了')
     assert [segment['type'] for segment in segments] == ['text']
-    assert '顺手配一张' in model.seen[0]['system']
+    # The invitation changes per turn, so it sits after the cached opening.
+    assert '顺手配一张' in model.seen[0]['turn'] and '顺手配一张' not in model.seen[0]['system']
 
 
 @pytest.mark.anyio
