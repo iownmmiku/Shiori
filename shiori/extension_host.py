@@ -54,6 +54,11 @@ MAX_FOLDER_FILES = 400
 MAX_FOLDER_BYTES = 64 * 1024 * 1024
 MAX_PAGE_FILE_BYTES = 8 * 1024 * 1024
 JOB_TTL = 600.0          # work handed back by a tool whose reply never went out
+# What extensions may add to one turn's prompt (ext.turn_context).
+MAX_CONTEXT_TEXT = 1500
+MAX_CONTEXT_IMAGES = 3
+MAX_CONTEXT_IMAGE_CHARS = 2 * 1024 * 1024
+CONTEXT_IMAGE = re.compile(r'data:image/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+')
 
 
 class ExtensionError(ValueError):
@@ -116,6 +121,7 @@ class Record:
     tools: dict = field(default_factory=dict)
     apis: dict = field(default_factory=dict)
     unload: list = field(default_factory=list)
+    turn_context: list = field(default_factory=list)
 
 
 # ---------- manifest ----------
@@ -317,6 +323,15 @@ class ExtensionContext:
     def on_unload(self, function):
         """Called when the extension is turned off or Shiori stops."""
         self._record.unload.append(function)
+
+    def turn_context(self, function):
+        """`function(turn)` may add to a chat turn's prompt: None, or
+        {'text': ..., 'images': [data:image URLs]}. The text goes into the
+        system prompt; the pictures follow the user's own and are sent only
+        when this turn already carries pictures (the model reads them)."""
+        if not callable(function):
+            raise ExtensionError('turn_context 须为函数')
+        self._record.turn_context.append(function)
 
     def personas(self):
         try:
@@ -586,6 +601,34 @@ class ExtensionHost:
 
     def hints(self, names):
         return [provider.hint for provider in self._providers() if provider.name in names and provider.hint]
+
+    def turn_context(self, turn):
+        """(texts, images) the enabled extensions add to this turn's prompt."""
+        texts, images = [], []
+        for record in list(self.records.values()):
+            if not record.loaded:
+                continue
+            for function in list(record.turn_context):
+                try:
+                    result = function(turn)
+                    if result is None:
+                        continue
+                    if not isinstance(result, dict) or set(result) - {'text', 'images'}:
+                        raise ExtensionError('turn_context 须返回 None 或含 text、images 的字典')
+                    text = _text(result.get('text', ''), '本轮补充说明', MAX_CONTEXT_TEXT)
+                    pictures = result.get('images') or []
+                    if (not isinstance(pictures, list) or len(pictures) > MAX_CONTEXT_IMAGES
+                            or any(not isinstance(item, str) or len(item) > MAX_CONTEXT_IMAGE_CHARS
+                                   or not CONTEXT_IMAGE.fullmatch(item) for item in pictures)):
+                        raise ExtensionError('turn_context 的图片须为最多 3 张 PNG、JPEG 或 WebP 的 base64 地址')
+                except Exception as exc:
+                    self._event_error('扩展的本轮补充没有加上', exc, extension=record.id)
+                    continue
+                if text:
+                    texts.append(text)
+                if turn.images:
+                    images.extend(pictures[:MAX_CONTEXT_IMAGES - len(images)])
+        return texts, images
 
     async def call_tool(self, name, call):
         """Run an extension tool; returns what the model sees."""

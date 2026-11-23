@@ -1396,6 +1396,14 @@ class ChatService:
                        + ('这一轮如果情绪合适，可以顺手配一张，不合适就不发。' if metadata.get('_sticker_invited') else ''))
         for hint in self.extensions.hints({item['function']['name'] for item in tools or []}):
             system += '\n' + hint
+        # Extensions may add to this turn, e.g. the persona's own look so she knows herself in a picture.
+        # (A worker thread: the group turn comes from the argument, not _group_request.)
+        from .extension_host import Turn
+        extension_texts, extension_images = self.extensions.turn_context(Turn(
+            scope['id'], str(user_id), scope.get('persona_id', 'default'),
+            tuple(x for x in images or [] if str(x).startswith('data:image/')), bool(group)))
+        for extra in extension_texts:
+            system += '\n' + extra
         if local_chat:
             from .local_chat import instructions
             workspace = str(self.computer.workspace()) if self.computer and any(item['function']['name'] == 'read_file' for item in tools or []) else ''
@@ -1544,6 +1552,10 @@ class ChatService:
                         '你看不到它们的内容；不要描述或猜测这些图片，需要时请对方重新发送。】')
         if images:
             content = [{'type': 'text', 'text': content}] + [{'type': 'image_url', 'image_url': {'url': x}} for x in images]
+            if extension_images:
+                content.append({'type': 'text', 'text': f'【下面 {len(extension_images)} 张是系统附上的参考图，不是对方发的图片，'
+                                                        '用途见系统提示；不要把它们当成对方发的图来回应，也不要提起它们。】'})
+                content += [{'type': 'image_url', 'image_url': {'url': x}} for x in extension_images]
         messages.append({'role': 'user', 'content': content})
         result = self._input_budget(messages, tools=tools, optional=optional, summary=summary_message, required=required_references)
         sent_ids = {id(item) for item in result}

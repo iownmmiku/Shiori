@@ -61,6 +61,7 @@ MAX_OUTFIT_ENTRIES = 500
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 REFERENCE_SIDE, REFERENCE_LIMIT, THUMB_SIDE = 1536, 3 * 1024 * 1024, 256
 REFERENCE_NAME = re.compile(r'[0-9a-f]{16}\.(png|jpg)')
+SELF_SIDE, SELF_LIMIT = 512, 200 * 1024     # her reference as the chat model sees it
 MULTI_REFERENCE_KINDS = ('openai', 'gemini')   # the others take a single picture (img2img or one LoadImage)
 MAX_RESPONSE_BYTES = 48 * 1024 * 1024
 MAX_IMAGE_BYTES = outgoing_image.MAX_IMAGE_BYTES
@@ -780,6 +781,7 @@ class ImageGen:
         self.path = self.root / 'config.json'
         self.usage_path = self.root / 'usage.json'
         self.reference_dir = self.root / 'references'
+        self._self_cache = {}        # reference name -> small data URL for the chat model
         self.outfits_path = self.root / 'outfits.json'
         self._lock = threading.RLock()
         self._jobs = {}
@@ -1019,6 +1021,22 @@ class ImageGen:
                 continue
         return images
 
+    def self_images(self, persona_id):
+        """Small JPEG data URLs of the persona's reference pictures, for the
+        chat model to know her own look; made once per picture."""
+        cache = self._self_cache
+        urls = []
+        for name in self.appearance(persona_id).get('references', []):
+            if name not in cache:
+                try:
+                    small = outgoing_image.reencode((self.reference_dir / name).read_bytes(), max_side=SELF_SIDE,
+                                                    limit=SELF_LIMIT, keep=())
+                except (OSError, ValueError):
+                    continue
+                cache[name] = 'data:image/jpeg;base64,' + base64.b64encode(small).decode('ascii')
+            urls.append(cache[name])
+        return urls
+
     def add_reference(self, persona_id, raw):
         """Store an uploaded picture as one of the persona's references (blocking)."""
         try:
@@ -1066,6 +1084,7 @@ class ImageGen:
         return self.public()
 
     def _delete_files(self, name):
+        self._self_cache.pop(name, None)
         for path in (self.reference_dir / name, self.reference_dir / (name.rsplit('.', 1)[0] + '.thumb.jpg')):
             try:
                 path.unlink()

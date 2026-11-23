@@ -10,7 +10,9 @@ also have up to three reference pictures of her own (uploaded on the settings
 page, owner request 2026-11-18) that go along with her self portraits. She has
 a default outfit, and the outfit she changes into in a chat is remembered for
 her later self portraits there (owner request 2026-11-19: changing clothes did
-not work, the default clothes and her reference won). Each QQ
+not work, the default clothes and her reference won). When someone sends a
+picture, her look and reference pictures go to the chat model too, so she
+knows herself in it (owner request 2026-11-23). Each QQ
 account may draw a set number per day; administrators are not limited and a
 picture that fails gives its count back.
 """
@@ -640,7 +642,7 @@ class Model:
     async def complete(self, messages, **kwargs):
         if kwargs.get('purpose', 'chat') != 'chat':
             return answer('{}')
-        self.seen.append({'system': messages[0]['content'], 'tools': kwargs.get('tools') or []})
+        self.seen.append({'system': messages[0]['content'], 'tools': kwargs.get('tools') or [], 'messages': list(messages)})
         return self.turns.pop(0) if self.turns else answer('嗯。')
 
 
@@ -886,6 +888,43 @@ async def test_the_page_resets_a_remembered_outfit(make_chat):
     assert state['personas']['default']['outfits'] == [] and chat.imagegen.current_outfit(GROUP, 'default') == ''
     with pytest.raises(ValueError, match='服装参数无效'):
         handler(ExtensionRequest('DELETE', 'outfit', {}, {'persona_id': 'default'}))
+
+
+@pytest.mark.anyio
+async def test_she_sees_her_own_look_when_someone_sends_a_picture(make_chat):
+    model = Model(answer('这不就是我嘛。'), answer('在发呆。'), answer('不认识。'))
+    store, config, chat, _ = make_chat(model, personas={'default': LOOK})
+    chat.imagegen.add_reference('default', png('red', (600, 900)))
+    chat.imagegen.set_outfit(PRIVATE, 'default', 'pink pajamas')
+    await over_qq(store, config, chat, '这是谁？', images=[data_url(png('green'))])
+    seen = model.seen[0]
+    assert '【你自己的样子】外貌：long brown hair, amber eyes；现在穿着：pink pajamas。' in seen['system']
+    assert '那就是你' in seen['system']
+    content = seen['messages'][-1]['content']
+    assert [part['type'] for part in content] == ['text', 'image_url', 'text', 'image_url']
+    assert '这是谁' in content[0]['text'] and '系统附上的参考图' in content[2]['text']   # her picture after theirs
+    assert '对方这条消息后面附了 1 张你自己的参考图' in seen['system']
+    url = content[3]['image_url']['url']
+    assert url.startswith('data:image/jpeg;base64,') and url != content[1]['image_url']['url']
+    assert max(ig.image_info(base64.b64decode(url.split(',', 1)[1]))[2]) == 512
+    # A turn without pictures carries nothing about her look.
+    await over_qq(store, config, chat, '在干嘛')
+    assert '你自己的样子' not in model.seen[1]['system'] and isinstance(model.seen[1]['messages'][-1]['content'], str)
+    # Switched off in the extension settings: nothing either.
+    chat.extensions.set_config('imagegen', {'recognize_self': False})
+    await over_qq(store, config, chat, '这是谁？', images=[data_url(png('green'))])
+    assert '你自己的样子' not in model.seen[2]['system'] and len(model.seen[2]['messages'][-1]['content']) == 2
+
+
+def test_without_reference_pictures_only_her_look_is_described(make_gen):
+    gen, _, _ = make_gen()
+    assert gen.self_images('default') == []
+    gen.add_reference('default', png('red', (2000, 1000)))
+    [url] = gen.self_images('default')
+    assert gen.self_images('default') == [url]                        # made once
+    name = gen.appearance('default')['references'][0]
+    gen.remove_reference('default', name)
+    assert gen.self_images('default') == [] and name not in gen._self_cache
 
 
 @pytest.mark.anyio

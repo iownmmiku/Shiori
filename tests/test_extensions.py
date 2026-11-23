@@ -124,7 +124,7 @@ def test_the_bundled_image_extension_is_on_with_its_page_and_setting(make_host):
     assert item['builtin'] and item['enabled'] and item['loaded'] and not item['error']
     assert item['pages'] == [{'id': 'main', 'title': '生图设置', 'entry': 'pages/main/index.html',
                               'url': '/extensions/imagegen/pages/main/'}]
-    assert item['config'] == {'daily_per_user': 5} and item['config_schema']['daily_per_user']['type'] == 'int'
+    assert item['config'] == {'daily_per_user': 5, 'recognize_self': True} and item['config_schema']['daily_per_user']['type'] == 'int'
     assert item['tools'] == ['change_outfit', 'generate_image']
     # No service yet: the tool is not offered.
     assert host.tool_schemas(Turn(PRIVATE, '303')) == []
@@ -225,6 +225,40 @@ async def test_tools_hand_back_work_that_runs_after_the_reply_or_is_cancelled(ma
     waiting = (await host.call_tool('wave', ToolCall(PRIVATE, '303', 'qq:303', 'default', {'to': '小刚'})))['extension_job']
     host.set_enabled('hello', False)
     assert not host.pending(waiting['id']) and not host.has_tool('wave')
+
+
+CONTEXT_MAIN = '''
+import base64
+
+PICTURE = 'data:image/png;base64,' + base64.b64encode(b'not checked here').decode()
+
+
+def setup(ext):
+    def add(turn):
+        if turn.scope_id == 'qq:private:bad':
+            return {'text': 'x', 'images': ['https://example.com/a.png']}
+        if turn.scope_id == 'qq:private:boom':
+            raise RuntimeError('boom')
+        return {'text': '你是挥手的人。', 'images': [PICTURE, PICTURE]}
+    ext.turn_context(add)
+    ext.turn_context(lambda turn: None)
+'''
+
+
+def test_an_extension_adds_to_a_turn_and_its_pictures_need_pictures_in_the_turn(make_host):
+    host, store, _ = make_host(main=CONTEXT_MAIN)
+    host.set_enabled('hello', True, confirm=True)
+    texts, images = host.turn_context(Turn(PRIVATE, '303', images=('data:image/png;base64,AAAA',)))
+    assert texts == ['你是挥手的人。'] and len(images) == 2 and images[0].startswith('data:image/png;base64,')
+    # Without pictures in the turn the model may not read pictures at all: text only.
+    assert host.turn_context(Turn(PRIVATE, '303')) == (['你是挥手的人。'], [])
+    # A bad answer or an error is logged and leaves the turn alone.
+    assert host.turn_context(Turn('qq:private:bad', '1', images=('x',))) == ([], [])
+    assert host.turn_context(Turn('qq:private:boom', '1')) == ([], [])
+    errors = [event for event in store.list_events(limit=20) if event['kind'] == 'extension_error']
+    assert len(errors) == 2 and all(event['details']['extension'] == 'hello' for event in errors)
+    host.set_enabled('hello', False)
+    assert host.turn_context(Turn(PRIVATE, '303', images=('x',))) == ([], [])
 
 
 def test_a_broken_extension_or_tool_does_not_break_anything_else(make_host):

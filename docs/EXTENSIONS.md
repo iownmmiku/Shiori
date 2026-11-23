@@ -97,6 +97,7 @@ def setup(ext):
 | `ext.tool(name, schema, handler, hint='', queued=False)` | 给聊天模型加工具 |
 | `ext.api(method, path, handler)` | 注册接口 |
 | `ext.on_unload(fn)` | 扩展停用或 Shiori 退出时调用 |
+| `ext.turn_context(fn)` | 给每轮聊天补充说明和图片，见下文 |
 
 ### 工具
 
@@ -106,6 +107,16 @@ def setup(ext):
 - 返回 `ToolResult(output, after_reply=..., cancel=...)` 时，`after_reply(send)` 在文字回复送达后运行，`send.image(bytes, description='')` 发一张图片（`description` 用一句话写图里是什么，发出后会告诉聊天模型“这条回复之后发了这张图”，之后对方说起这张图她才接得上；0.2.4-beta.9 起支持），答应的图没画出来时调用 `send.image_failed(description, reason)`（不发消息，只告诉之后的回合“这张没画出来”和原因，免得她假装发了或反复重试；0.2.4-beta.10 起有，用前先检查有没有这个方法），`send.text(str)` 发一条短文字（最多 1000 字），都返回是否确认送达。回复没有发出（被打断、平台拒收、模型没写出文字）时改为调用 `cancel()`，用来退回预留的次数等；10 分钟内没有发出的也会取消。后来的消息不会取消已经开始的 `after_reply`。
 - `queued=True` 表示工具本身只是预留、真正的效果在回复之后：如果一轮只调用了这类工具，回复失败时可以像没用工具一样重试，不会把工具记录当成回复发出去。
 - `hint` 在提供这个工具的那一轮加进系统提示词。
+
+### 本轮补充
+
+`ext.turn_context(fn)` 注册的 `fn(turn)` 在每轮聊天组装提示词时调用（普通函数，要快；`turn` 同上）。返回 None 表示不补充，或者返回 `{'text': '…', 'images': [...]}`：
+
+- `text` 最多 1500 字，加进系统提示词。
+- `images` 最多 3 张 `data:image/png|jpeg|webp;base64,…` 地址，接在对方这一轮发的图片后面。只有这一轮本来就带图片（说明聊天模型能看图）时才会发出，否则只用 `text`。
+- 返回格式不对或者抛出异常时，这一轮不加任何东西，错误写进运行日志。
+
+自带的生图扩展用它在对方发图时附上人格的外貌和参考图，让角色认得出图里的自己。较旧的 Shiori 没有这个方法，扩展可以先用 `hasattr(ext, 'turn_context')` 判断。
 
 ### 接口
 
