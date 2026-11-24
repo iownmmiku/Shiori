@@ -41,7 +41,7 @@ def test_a_second_recall_reads_no_vector_text(tmp_path, monkeypatch):
     loads, digest, touched = memory.json.loads, memory._digest, []
 
     def parsed(raw, *args, **kwargs):
-        if isinstance(raw, str) and raw.startswith('['):
+        if isinstance(raw, str) and raw.startswith('[') and not raw.startswith('[['):   # not a page of references
             touched.append('parse')
         return loads(raw, *args, **kwargs)
 
@@ -63,6 +63,39 @@ def test_a_second_recall_reads_no_vector_text(tmp_path, monkeypatch):
         assert scan(engine, cfg, signature) == first
         assert touched == []
         assert not [sql for sql in statements if 'vector FROM' in sql or 'v.vector' in sql]
+    finally:
+        engine.close()
+        store.close()
+
+
+def test_a_scan_fetches_one_row_per_page_not_one_per_reference(tmp_path):
+    """Every fetched SQLite row hands the GIL to other threads. On the server a scan of ~1800
+    references in 64-row pages took ~0.5 s for ~30 ms of work while the event loop was busy."""
+    store, cfg, engine, signature, records = engine_with(tmp_path, 300)
+    index, main = [], []
+    engine._connection().set_trace_callback(index.append)
+    store._conn.set_trace_callback(main.append)
+    try:
+        assert scan(engine, cfg, signature) == [record['id'] for record in reversed(records[-64:])]
+        pages = [sql for sql in index if 'FROM vector_refs' in sql]
+        versions = [sql for sql in main if 'json_group_object(m.id' in sql]
+        assert len(pages) == 2 and len(versions) == 1       # one page, then the empty read that ends the scan
+    finally:
+        engine._connection().set_trace_callback(None)
+        store._conn.set_trace_callback(None)
+        engine.close()
+        store.close()
+
+
+def test_a_vector_of_another_dimension_is_skipped(tmp_path):
+    store, cfg, engine, signature, records = engine_with(tmp_path, 3)
+    try:
+        with engine._index_lock:
+            connection = engine._connection()
+            with connection:
+                connection.execute('UPDATE vectors SET dimension=3, vector=? WHERE content_hash=?',
+                                   (json.dumps([500., 1., 0.]), _digest('0')))
+        assert scan(engine, cfg, signature) == ['vec-002', 'vec-001']
     finally:
         engine.close()
         store.close()

@@ -1488,14 +1488,18 @@ class Store:
             where, params = boundary.sql(alias='m')
             keys = list(dict.fromkeys(record_ids))
             result = {}
-            for start in range(0, len(keys), 64):
-                part = keys[start:start + 64]
-                # Restrict to this <=64-ID batch before applying the boundary.
+            for start in range(0, len(keys), 2048):
+                part = keys[start:start + 2048]
+                # Restrict to this ID batch before applying the boundary.
                 # Without the LIMIT barrier SQLite may pick memories_scope and
                 # re-scan an entire large scope for every numeric-vector page.
-                rows = self._conn.execute('SELECT m.id,m.version FROM (SELECT * FROM memories WHERE id IN ('
-                    + ','.join('?' for _ in part) + f') LIMIT 64) m WHERE {where}', (*part, *params))
-                result.update((row[0], int(row[1])) for row in rows)
+                # One aggregated row per batch: each fetched row hands the GIL
+                # to other threads, which on a busy server costs far more than
+                # the query (see MemoryEngine._cached_candidates).
+                raw = self._conn.execute('SELECT json_group_object(m.id,m.version) FROM (SELECT * FROM memories '
+                    f'WHERE id IN (SELECT value FROM json_each(?)) LIMIT ?) m WHERE {where}',
+                    (json.dumps(part), len(part), *params)).fetchone()[0]
+                result.update((key, int(value)) for key, value in json.loads(raw or '{}').items())
             return result
 
     def memory_search_status(self):
