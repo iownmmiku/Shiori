@@ -50,7 +50,10 @@ def _prescreen(verdict):
     if not isinstance(verdict, dict):
         return ''
     if not verdict.get('ok'):
-        paused = f"，连续失败，暂停 {verdict['paused_seconds']:.0f} 秒" if verdict.get('paused_seconds') else ''
+        seconds = verdict.get('paused_seconds')
+        span = (f'{seconds / 3600:g} 小时' if seconds and seconds >= 3600 else f'{seconds / 60:g} 分钟' if seconds and seconds >= 120 else f'{seconds:.0f} 秒' if seconds else '')
+        why = '，余额或密钥被拒' if verdict.get('pause_reason') == 'lasting' else '，连续失败'
+        paused = f'{why}，暂停 {span}' if span else ''
         return f"Jev 未完成：{verdict.get('error') or '未知错误'} {_ms(verdict.get('latency_ms'))}".strip() + paused
     shadow = verdict.get('mode') == 'shadow'
     decision = ('会筛掉' if shadow else '筛掉') if verdict.get('screened') else ('会放行' if shadow else '放行')

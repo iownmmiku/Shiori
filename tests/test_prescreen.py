@@ -309,6 +309,47 @@ async def test_a_failed_connection_test_does_not_pause_live_traffic(tmp_path):
     await client.close()
 
 
+@pytest.mark.anyio
+async def test_an_empty_balance_pauses_for_half_an_hour_and_then_longer(tmp_path):
+    store = SettingsStore(tmp_path)
+    store.update({'provider_sources': [dict(SOURCE)], 'prescreen': {'mode': 'screen', 'source_id': 'jev'}})
+    client = ps.Prescreen(store)
+    client._client = httpx.AsyncClient(transport=httpx.MockTransport(Jev(status=403)))
+    cfg = client.config()
+    pauses = []
+    for _ in range(3):
+        for _ in range(ps.FAILURES_BEFORE_PAUSE):
+            result = await client.judge(ps.PROBE, cfg)
+        pauses.append(result['paused_seconds'])
+        assert result['pause_reason'] == 'lasting' and client.paused()
+        assert '余额或密钥被拒，暂停' in summary('planner_timing', {'prescreen': result})
+        client._paused_until = 0.0
+    assert pauses == [1800.0, 3600.0, 7200.0]
+    # Topped up: a passing connection test resumes at once and resets the doubling.
+    client._paused_until = time.monotonic() + 3600
+    client._client = httpx.AsyncClient(transport=httpx.MockTransport(Jev(jev(0.1))))
+    assert (await client.test({'source_id': 'jev'}))['ok'] and not client.paused() and client._lasting_pauses == 0
+    await client.close()
+
+
+@pytest.mark.anyio
+async def test_a_long_empty_balance_pauses_at_most_six_hours_and_other_errors_a_minute(tmp_path):
+    store = SettingsStore(tmp_path)
+    store.update({'provider_sources': [dict(SOURCE)], 'prescreen': {'mode': 'screen', 'source_id': 'jev'}})
+    client = ps.Prescreen(store)
+    client._lasting_pauses = 20
+    client._client = httpx.AsyncClient(transport=httpx.MockTransport(Jev(status=402)))
+    for _ in range(ps.FAILURES_BEFORE_PAUSE):
+        result = await client.judge(ps.PROBE, client.config())
+    assert result['paused_seconds'] == 6 * 3600
+    client._paused_until = 0.0
+    client._client = httpx.AsyncClient(transport=httpx.MockTransport(Jev(status=502)))
+    for _ in range(ps.FAILURES_BEFORE_PAUSE):
+        result = await client.judge(ps.PROBE, client.config())
+    assert result['paused_seconds'] == ps.PAUSE_SECONDS and 'pause_reason' not in result
+    await client.close()
+
+
 def test_failures_are_named_without_the_relays_own_text():
     label = ps.failure_label
     assert label({'error': 'timeout'}) == '超时'

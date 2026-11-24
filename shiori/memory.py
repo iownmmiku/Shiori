@@ -15,6 +15,7 @@ import hashlib
 import inspect
 import json
 import math
+import operator
 from pathlib import Path
 import re
 import sqlite3
@@ -47,6 +48,15 @@ def normalized(text: str) -> str:
 
 def _digest(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+# math.sumprod (Python 3.12+) multiplies in C; 3.11 falls back to map().
+_SUMPROD = getattr(math, 'sumprod', None)
+
+
+def _dot(left, right) -> float:
+    """Similarity of two unit vectors of the same dimension."""
+    return _SUMPROD(left, right) if _SUMPROD is not None else sum(map(operator.mul, left, right))
 
 
 def _record_hash(record: dict) -> str:
@@ -628,7 +638,12 @@ class MemoryEngine:
                     self._decoded_vectors[key] = cached
                     self._decoded_vector_bytes += size
                     return vector
-        vector = array('d', _vectors([json.loads(raw)], 1, dimension)[0])
+        # Single precision: unit-length embeddings need no more, and the same
+        # cache then holds twice as many vectors.
+        try:
+            vector = array('f', _vectors([json.loads(raw)], 1, dimension)[0])
+        except OverflowError as exc:
+            raise ValueError('向量数值超出范围') from exc
         size = sys.getsizeof(vector) + sys.getsizeof(key) + sum(sys.getsizeof(x) for x in key) + sys.getsizeof(digest)
         with self._index_lock:
             if size <= self._decoded_vector_limit and not self._closed and generation == self._generation:
@@ -641,6 +656,44 @@ class MemoryEngine:
                     _, (_, _, removed_size) = self._decoded_vectors.popitem(last=False)
                     self._decoded_vector_bytes -= removed_size
         return vector
+
+    def _vectors_for(self, signature, dimension, hashes, generation):
+        """Decoded vectors for these content hashes; only the ones not cached are read.
+
+        A stored vector is several kilobytes of JSON. Reading and checking every
+        one on each recall cost most of a second once there were a couple of
+        thousand, even when all of them were already decoded. A vector row only
+        changes through ``_store_vector``, which forgets the decoded copy.
+        """
+        found, missing, rows = {}, [], []
+        with self._index_lock:
+            if self._closed or generation != self._generation:
+                raise PermissionError('记忆索引已变化')
+            for content_hash in hashes:
+                key = (signature, content_hash, dimension)
+                cached = self._decoded_vectors.get(key)
+                if cached is None:
+                    missing.append(content_hash)
+                else:
+                    self._decoded_vectors.move_to_end(key)
+                    found[content_hash] = cached[1]
+            if missing:
+                rows = self._connection().execute('SELECT content_hash,vector FROM vectors WHERE signature=? AND dimension=? AND content_hash IN ('
+                    + ','.join('?' * len(missing)) + ')', (signature, dimension, *missing)).fetchall()
+        for content_hash, raw in rows:
+            try:
+                found[content_hash] = self._decoded_vector(signature, content_hash, raw, dimension)
+            except (ValueError, TypeError):
+                continue
+        return found
+
+    def _store_vector(self, connection, signature, content_hash, dimension, vector):
+        """Write one vector and drop its decoded copy. Callers hold ``_index_lock``."""
+        connection.execute('INSERT OR REPLACE INTO vectors(signature,content_hash,dimension,vector) VALUES (?,?,?,?)',
+                           (signature, content_hash, dimension, json.dumps(vector)))
+        old = self._decoded_vectors.pop((signature, content_hash, dimension), None)
+        if old is not None:
+            self._decoded_vector_bytes -= old[2]
 
     def indexing_status(self):
         return {**self._index_status, 'queued_batches': self._index_queue.qsize(),
@@ -708,8 +761,7 @@ class MemoryEngine:
                             with connection:
                                 for chunk, vector in zip(chunks, values):
                                     digest = _digest(chunk['text'])
-                                    connection.execute('INSERT OR REPLACE INTO vectors VALUES (?,?,?,?)',
-                                                       (signature, digest, dimension, json.dumps(vector)))
+                                    self._store_vector(connection, signature, digest, dimension, vector)
                                     connection.execute('INSERT OR REPLACE INTO vector_refs VALUES (?,?,?,?,?,?)',
                                                        (chunk['id'], chunk['version'], chunk['index'], chunk['hash'], signature, digest))
                         self._index_status['completed'] += len(chunks)
@@ -742,7 +794,9 @@ class MemoryEngine:
                 # The signature index makes SQLite repeatedly sort/join every
                 # matching reference for each 64-row page. Keyset this table by
                 # rowid directly so a full query visits each reference once.
-                batch = self._connection().execute('SELECT r.rowid,r.memory_id,r.version,v.vector,r.content_hash FROM vector_refs r NOT INDEXED JOIN vectors v '
+                # The vector text itself is not selected: decoded copies are
+                # reused and only the missing ones are read (_vectors_for).
+                batch = self._connection().execute('SELECT r.rowid,r.memory_id,r.version,r.content_hash FROM vector_refs r NOT INDEXED JOIN vectors v '
                     'ON r.signature=v.signature AND r.content_hash=v.content_hash '
                     'WHERE r.rowid>? AND r.signature=? AND v.dimension=? ORDER BY r.rowid LIMIT 64',
                     (cursor, signature, dimension)).fetchall()
@@ -751,14 +805,13 @@ class MemoryEngine:
             cursor = batch[-1][0]
             versions = self.store.memory_candidate_versions(scope_id, user_id, [r[1] for r in batch],
                        scope_allowed=lambda origin: self._permission(origin, config))
-            for _, memory_id, version, raw, content_hash in batch:
-                if versions.get(memory_id) != version:
+            rows = [row for row in batch if versions.get(row[1]) == row[2]]
+            vectors = self._vectors_for(signature, dimension, {row[3] for row in rows}, generation)
+            for _, memory_id, _, content_hash in rows:
+                vector = vectors.get(content_hash)
+                if vector is None:
                     continue
-                try:
-                    vector = self._decoded_vector(signature, content_hash, raw, dimension)
-                except (ValueError, TypeError):
-                    continue
-                score = sum(a*b for a,b in zip(vector, query_vector))
+                score = _dot(vector, query_vector)
                 if memory_id in best:
                     best[memory_id] = max(best[memory_id], score)
                 elif len(best) < 64:
@@ -845,19 +898,9 @@ class MemoryEngine:
             if self._closed or deadline is not None and time.monotonic() >= deadline:
                 raise TimeoutError('语义缓存读取已超过在线等待上限')
             part = hashes[start:start + 64]
-            with self._index_lock:
-                if self._closed or generation != self._generation:
-                    raise PermissionError('记忆索引已变化')
-                rows = self._connection().execute('SELECT content_hash,vector,dimension FROM vectors WHERE signature=? AND content_hash IN (' + ','.join('?' for _ in part) + ')',
-                                                  (signature, *part)).fetchall()
-            for content_hash, raw, size in rows:
-                try:
-                    vector = self._decoded_vector(signature, content_hash, raw, dimension) if size == dimension else None
-                except (ValueError, TypeError, json.JSONDecodeError):
-                    vector = None
-                if vector is not None:
-                    similarity = sum(a * b for a, b in zip(query_vector, vector))
-                    scores.update((doc.key, similarity) for doc in by_hash[content_hash])
+            for content_hash, vector in self._vectors_for(signature, dimension, part, generation).items():
+                similarity = _dot(query_vector, vector)
+                scores.update((doc.key, similarity) for doc in by_hash[content_hash])
         return scores, [doc for doc in docs if doc.key in candidate_keys and doc.key not in scores]
 
     async def _semantic(self, docs: list[_Document], query: str, scope_id: str, user_id: str, config: dict, *, deadline=None) -> dict:
@@ -932,7 +975,7 @@ class MemoryEngine:
                         values = _vectors(await self._embed([doc.embedding_text for doc in missing], scope_id, batch_guard), len(missing), dimension)
                         for doc, vector in zip(missing, values):
                             new_vectors[doc.key] = vector
-                            cached[doc.key] = sum(a * b for a, b in zip(query_vector, vector))
+                            cached[doc.key] = _dot(query_vector, vector)
                         status["embedded_chunks"] = len(missing)
                 if not guard() or self._signature(self._config(), dimension) != signature:
                     status["reason"] = "模型配置或索引已变化"
@@ -953,8 +996,7 @@ class MemoryEngine:
                                 continue
                             content_hash = _digest(doc.embedding_text)
                             if doc.key in new_vectors:
-                                connection.execute("INSERT OR REPLACE INTO vectors(signature,content_hash,dimension,vector) VALUES (?,?,?,?)",
-                                                   (signature, content_hash, dimension, json.dumps(new_vectors[doc.key])))
+                                self._store_vector(connection, signature, content_hash, dimension, new_vectors[doc.key])
                             connection.execute("INSERT OR IGNORE INTO vector_refs(memory_id,version,chunk_index,record_hash,signature,content_hash) VALUES (?,?,?,?,?,?)",
                                                (doc.record["id"], doc.record["version"], doc.index, _record_hash(doc.record), signature, content_hash))
                             doc.semantic = similarity
