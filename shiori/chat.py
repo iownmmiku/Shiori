@@ -573,7 +573,8 @@ class ChatService:
         text = str(text).strip()
         if (not text and not images) or len(text) > 12000:
             raise ValueError('消息需为 1—12000 个字符，或附一张图片')
-        quoted_images = [image for image in self._quoted_images(scope_id, metadata, 3 - len(images or []))
+        room = self.settings.get().get('context', {}).get('max_images', 3) - len(images or [])
+        quoted_images = [image for image in self._quoted_images(scope_id, metadata, room)
                          if image not in (images or [])]
         if quoted_images:
             images = [*(images or []), *quoted_images]
@@ -1458,9 +1459,16 @@ class ChatService:
         # It comes only with some turns, so it joins the per-turn notes, not the cached opening.
         # (A worker thread: the group turn comes from the argument, not _group_request.)
         from .extension_host import Turn
+        from .stickers import model_picture
+        # Many vision models refuse GIF: those go as PNG, an animated one as a strip of frames.
+        pictures = [model_picture(x) for x in images or []]
+        images = [url for url, _ in pictures]
+        animated = [index for index, (_, frames) in enumerate(pictures, 1) if frames > 1]
+        # Extension pictures only take what is left of the per-request picture limit.
+        room = max(0, self.settings.get().get('context', {}).get('max_images', 3) - len(images))
         extension_texts, extension_images = self.extensions.turn_context(Turn(
             scope['id'], str(user_id), scope.get('persona_id', 'default'),
-            tuple(x for x in images or [] if str(x).startswith('data:image/')), bool(group)))
+            tuple(x for x in images if str(x).startswith('data:image/')), bool(group), room))
         turn.extend(extension_texts)
         if metadata.get('_injection'):
             turn.append(injection.turn_note(metadata['_injection']))
@@ -1617,6 +1625,9 @@ class ChatService:
         if metadata.get('_unreadable_images'):
             content += (f"\n【系统说明：本轮有 {metadata['_unreadable_images']} 张图片未能读取（可能已过期或过大），"
                         '你看不到它们的内容；不要描述或猜测这些图片，需要时请对方重新发送。】')
+        if animated:
+            which = '这张图' if len(images) == 1 else '、'.join(f'第 {index} 张图' for index in animated)
+            content += f'\n【系统说明：{which}是动图，按时间从左到右排了几帧。】'
         if images:
             content = [{'type': 'text', 'text': content}] + [{'type': 'image_url', 'image_url': {'url': x}} for x in images]
             if extension_images:

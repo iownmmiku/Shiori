@@ -250,6 +250,10 @@ def test_an_extension_adds_to_a_turn_and_its_pictures_need_pictures_in_the_turn(
     host.set_enabled('hello', True, confirm=True)
     texts, images = host.turn_context(Turn(PRIVATE, '303', images=('data:image/png;base64,AAAA',)))
     assert texts == ['你是挥手的人。'] and len(images) == 2 and images[0].startswith('data:image/png;base64,')
+    # Only as many pictures as the user's own leave under the request's limit.
+    picture = 'data:image/png;base64,AAAA'
+    assert len(host.turn_context(Turn(PRIVATE, '303', images=(picture,) * 2, room=1))[1]) == 1
+    assert host.turn_context(Turn(PRIVATE, '303', images=(picture,) * 3, room=0)) == (['你是挥手的人。'], [])
     # Without pictures in the turn the model may not read pictures at all: text only.
     assert host.turn_context(Turn(PRIVATE, '303')) == (['你是挥手的人。'], [])
     # A bad answer or an error is logged and leaves the turn alone.

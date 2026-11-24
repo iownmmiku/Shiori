@@ -1,7 +1,7 @@
 {
   "id": "imagegen",
   "name": "生图",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "author": "Shiori",
   "description": "在 QQ 群聊和私聊里，角色可以画画、拍照、自拍或照着对方发的图改图；文字先发，图片画好后单独发出。支持 OpenAI 兼容图像接口、Gemini、NovelAI 和 ComfyUI。",
   "entry": "main.py",
