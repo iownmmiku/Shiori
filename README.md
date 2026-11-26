@@ -1,14 +1,14 @@
-# Shiori 0.2.4
+# Shiori 0.2.5
 
 ![Shiori 与看板娘佐藤栞](site/assets/banner.jpg)
 
 看板娘是佐藤栞。下载与介绍页：<https://iownmmiku.github.io/Shiori/>
 
-> **[0.2.4 正式版](https://github.com/iownmmiku/Shiori/releases/tag/v0.2.4)**：新增扩展（可以带自己的聊天工具、接口和设置页）和自带的生图扩展（OpenAI 兼容接口、Gemini、NovelAI、ComfyUI，人格外貌、参考图和换装，每人每日次数）；聊天模型自己决定发表情包；看得到引用的消息（文字和图片）和合并转发。修复长私聊回复前卡顿、发送记录越存越大、部分模型中转站的工具调用整轮失败、回复里漏出内部标签。详见[更新日志](RELEASE_NOTES.md)。
+> **[0.2.5 正式版](https://github.com/iownmmiku/Shiori/releases/tag/v0.2.5)**：记忆召回更快（实际部署上向量比对从约 0.8 秒降到约 0.14 秒）；新增跟着复读（每个群单独开）、打字节奏、QQ 官方私聊“正在输入”、注入检查和心情层（除注入检查的规则外默认都关闭）；生图扩展让她认得出图里的自己；聊天请求的开头保持不变，方便模型服务复用提示缓存，统计页显示缓存命中；思考型模型带来的误报错更少；快速预筛余额不足时长时间暂停。修复 GIF 图让 Gemini 回复失败、引用多图时超出图片上限。详见[更新日志](RELEASE_NOTES.md)。
 
 > 主仓库为 `iownmmiku/Shiori`；旧 `mikubot` 仓库是没有安装文件的迁移说明占位仓库。**0.1.6 及更早版本无法在应用内更新，请从本仓库发行页手动下载安装包覆盖安装，继续使用原数据目录。**
 
-本次版本为 **0.2.4（正式版）**，GitHub 标签为 `v0.2.4`。提供 Windows 安装版、便携版与源码部署；安装包和便携包无需 Python，源码支持 Python 3.11–3.13。
+本次版本为 **0.2.5（正式版）**，GitHub 标签为 `v0.2.5`。提供 Windows 安装版、便携版与源码部署；安装包和便携包无需 Python，源码支持 Python 3.11–3.13。
 
 本机运行的 AI 聊天机器人与任务助手。预装可删除的原创人格佐藤栞（东京的高二学生，轻音社贝斯手，嘴硬心软的傲娇，也是看板娘），支持独立聊天、QQ 接入、记忆、黑话学习、人格蒸馏和管理员电脑任务。
 
@@ -22,15 +22,15 @@
 
 ## 下载与选择
 
-请下载 **[0.2.4 正式版](https://github.com/iownmmiku/Shiori/releases/tag/v0.2.4)**，在发行记录的 Assets 中获取。安装包未做 Windows 代码签名，系统可能出现 SmartScreen 提示；运行前核对旁置的同名 `.sha256`。
+请下载 **[0.2.5 正式版](https://github.com/iownmmiku/Shiori/releases/tag/v0.2.5)**，在发行记录的 Assets 中获取。安装包未做 Windows 代码签名，系统可能出现 SmartScreen 提示；运行前核对旁置的同名 `.sha256`。
 
 | 文件 | 适合谁 | 使用方式 |
 | --- | --- | --- |
-| [shiori-0.2.4-Windows-Setup.exe](https://github.com/iownmmiku/Shiori/releases/download/v0.2.4/shiori-0.2.4-Windows-Setup.exe) | Windows 用户，推荐 | 一键安装 |
-| [shiori-0.2.4-Windows-x64.zip](https://github.com/iownmmiku/Shiori/releases/download/v0.2.4/shiori-0.2.4-Windows-x64.zip) | 希望解压即用 | 完整解压后运行 `shiori.exe` |
-| [shiori-0.2.4-source.zip](https://github.com/iownmmiku/Shiori/releases/download/v0.2.4/shiori-0.2.4-source.zip) | 希望运行或修改代码 | 安装 Python 3.12，按下方命令启动 |
+| [shiori-0.2.5-Windows-Setup.exe](https://github.com/iownmmiku/Shiori/releases/download/v0.2.5/shiori-0.2.5-Windows-Setup.exe) | Windows 用户，推荐 | 一键安装 |
+| [shiori-0.2.5-Windows-x64.zip](https://github.com/iownmmiku/Shiori/releases/download/v0.2.5/shiori-0.2.5-Windows-x64.zip) | 希望解压即用 | 完整解压后运行 `shiori.exe` |
+| [shiori-0.2.5-source.zip](https://github.com/iownmmiku/Shiori/releases/download/v0.2.5/shiori-0.2.5-source.zip) | 希望运行或修改代码 | 安装 Python 3.12，按下方命令启动 |
 
-0.2.0 到 0.2.3 的用户可在右上角“版本与更新”重新检查，选择 `v0.2.4` 切换；升级前另存完整数据副本。历史版本见 [Releases](https://github.com/iownmmiku/Shiori/releases)。
+0.2.0 到 0.2.4 的用户可在右上角“版本与更新”重新检查，选择 `v0.2.5` 切换；升级前另存完整数据副本。历史版本见 [Releases](https://github.com/iownmmiku/Shiori/releases)。
 
 安装版和便携版无需 Python、Node 或 Git，默认打开独立桌面窗口。它们不包含模型账号、API Key、QQ 客户端或 NapCat/SnowLuma，需要自行准备。模型调用按所选服务商规则计费。
 
