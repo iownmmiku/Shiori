@@ -55,6 +55,12 @@ IMPLICIT_VALUE_CAP = 69
 # conversation for a while unless it is spoken to.
 FEEDBACK_SECONDS = 120.0
 FEEDBACK_BOOST, FEEDBACK_HALF_LIFE = 40.0, 600.0
+# Joining in (复读): when a group's `echo_repeat` is N (2-10), N different
+# members sending the same short plain line one after another make her send
+# it once too, without asking a model. One line per run, at most one run per
+# ECHO_COOLDOWN_SECONDS in a group.
+ECHO_MAX_CHARS = 50
+ECHO_COOLDOWN_SECONDS = 120.0
 _UNWANTED = re.compile(
     r'没(?:有)?(?:在)?(?:喊|叫|问|找|说|艾特|@)(?:的)?(?:是)?你|不是(?:在)?(?:喊|叫|问|说|找)你|谁(?:问|叫|喊|理|找)你了?'
     r'|没人(?:问|叫|喊|找|理)你|没跟你(?:说|讲|聊)|关你(?:什么|啥|屁|毛)事|没你(?:的)?事|(?:别|不要|少)(?:插嘴|插话|接话|多嘴)|闭嘴')
@@ -1674,6 +1680,8 @@ class ConversationFlow:
         # Extension work after a reply (a picture takes tens of seconds); a
         # later message does not cancel it.
         self._extension_jobs = set()
+        # Per group: the run of identical lines being counted, and when she last joined one.
+        self._echo, self._echoed_at = {}, {}
         self._closed = False
         # A bridge that knows a group's send limit sets these: pace(scope)
         # waits for room, send_room(scope) is the free count or None.
@@ -1692,6 +1700,9 @@ class ConversationFlow:
         group = scope_id.startswith(('qq:group:', 'qqofficial:group:'))
         key = (scope_id, 'group') if group else actor_key
         scope = self.store.get_scope(scope_id)
+        line = self._echo_line(scope_id, scope, user_id, text, images, metadata)
+        if line and await self._send_echo(scope_id, user_id, line, message):
+            return {'accepted': True, 'code': 'echoed'}
         schedule_delivery = getattr(self, 'schedule_delivery', None)
         if schedule_delivery:
             identity = resolved_identity(self.settings.get(), scope)
@@ -1730,6 +1741,59 @@ class ConversationFlow:
                                               direct=direct, reply_to_bot=reply_to_bot, wait=wait)
         return await self._handle_observed(scope_id,user_id,text,images,metadata,message,
                                            direct=direct,reply_to_bot=reply_to_bot,wait=wait)
+
+    def _echo_line(self, scope_id, scope, user_id, text, images, metadata):
+        """The line to send when this message completes a run of identical lines, else None."""
+        needed = scope.get('echo_repeat') or 0
+        if not scope_id.startswith('qq:group:') or type(needed) is not int or needed < 2:
+            self._echo.pop(scope_id, None)
+            return None
+        line = str(text or '').strip()
+        # Only short plain text: no picture, mention, quote, command or placeholder like [动画表情].
+        if (not line or images or len(line) > ECHO_MAX_CHARS or line.startswith('/') or _PLACEHOLDER.search(line)
+                or metadata.get('at_bot') or metadata.get('reply_to_id') or metadata.get('mentioned_user_ids')):
+            self._echo.pop(scope_id, None)
+            return None
+        run = self._echo.get(scope_id)
+        if run is None or run['line'] != line:
+            run = self._echo[scope_id] = {'line': line, 'members': set(), 'done': False}
+            while len(self._echo) > 512:
+                self._echo.pop(next(iter(self._echo)))
+        run['members'].add(str(user_id))
+        if run['done'] or len(run['members']) < needed:
+            return None
+        run['done'] = True            # a run is joined once, or not at all
+        if _quiet(scope, self.settings) or _value(scope, 'activity', 'balanced') == 'quiet':
+            return None
+        if time.monotonic() - self._echoed_at.get(scope_id, -float('inf')) < ECHO_COOLDOWN_SECONDS:
+            return None
+        return line
+
+    async def _send_echo(self, scope_id, user_id, line, message):
+        """Join the run with the same line, as a plain message of her own."""
+        social = getattr(self.chat, 'social', None) or self._fallback
+        async with self._output_locks[scope_id]:
+            if self._closed or not self.allowed(scope_id, user_id) or not social._allowed(scope_id):
+                return False
+            room = self.send_room(scope_id) if self.send_room else None
+            if room is not None and room < 1:
+                return False
+            self._echoed_at[scope_id] = time.monotonic()
+            while len(self._echoed_at) > 512:
+                self._echoed_at.pop(next(iter(self._echoed_at)))
+            record = self.store.add_message(scope_id, 'assistant', 'assistant', line,
+                source_ids=[message['id']], context_source_ids=[message['id']], echo=True,
+                flow_trace_id=(message.get('metadata') or {}).get('flow_trace_id'))
+            try:
+                delivered = await self.emit(scope_id, line, {'assistant_message_id': record['id'],
+                                                             'output_part': {'index': 1, 'total': 1}})
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                delivered = False
+        self.store.add_event('qq_echo', '跟着复读已发送' if delivered else '跟着复读未确认送达',
+                             scope_id=scope_id, message_id=record['id'], text=line)
+        return bool(delivered)
 
     def _cancel_sticker(self, scope_id):
         task = self._sticker_tasks.pop(scope_id, None)

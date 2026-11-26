@@ -529,7 +529,7 @@ class Store:
                       "auto_memory": True, "quiet_start": "", "quiet_end": "", "allow_tools": True,
                       "plan_enabled": None, "trigger_at": None, "trigger_reply": None, "trigger_name": None, "proactive_reply": None,
                       "always_reply": False, "expression_learn": False, "expression_use": False, "context_compress": False,
-                      "memory_space": "", "use_persona_knowledge": True,
+                      "memory_space": "", "use_persona_knowledge": True, "echo_repeat": 0,
                       "planner_min_interval_ms": None, "planner_daily_calls": None,
                       "planner_daily_tokens": None, "planner_max_age_ms": None, "planner_eagerness": None,
                       "settings": {}, **previous, **incoming}
@@ -549,6 +549,8 @@ class Store:
             _choice(record["activity"], {"quiet", "balanced", "active"}, "activity")
             for field in ("enabled", "dictionary_understand", "dictionary_use", "auto_memory", "allow_tools", "always_reply", "expression_learn", "expression_use", "context_compress", "use_persona_knowledge"):
                 _boolean(record[field], field)
+            if type(record["echo_repeat"]) is not int or record["echo_repeat"] not in (0, *range(2, 11)):
+                raise ValueError("跟着复读的人数须为 0（关闭）或 2—10")
             for field in ("trigger_at", "trigger_reply", "trigger_name", "plan_enabled", "proactive_reply", "debounce_enabled"):
                 for container in (record, record['settings']):
                     if container.get(field) is not None:

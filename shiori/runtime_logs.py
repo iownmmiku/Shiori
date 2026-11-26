@@ -15,7 +15,7 @@ CATEGORIES = {'qq': 'QQ 收发', 'planner': '回复判断', 'reply': '回复生�
 KIND_LABELS = {
     'qq_sent': '已发送', 'qq_delivery': '送达问题', 'qq_output': '分段发送', 'qq_outbox': '分段记录', 'qq_ingress': '收到消息',
     'qq_debounce': '消息合并', 'qq_suppressed': '停止发送', 'qq_reply_timing': '回复耗时', 'qq_rate_limited': '群限速',
-    'qq_feedback': '失败提示', 'qq_image_error': '图片读取', 'qq_error': 'QQ 错误', 'qq_protocol_error': '协议错误',
+    'qq_feedback': '失败提示', 'qq_echo': '跟着复读', 'qq_image_error': '图片读取', 'qq_error': 'QQ 错误', 'qq_protocol_error': '协议错误',
     'planner_timing': '回复判断', 'planner_prescreen': '快速预筛', 'planner_local_skip': '本地跳过', 'planner_feedback': '接话反馈', 'jargon_digest': '待审提醒', 'topic_starter': '主动开话题', 'topic_starter_error': '开话题失败', 'planner_error': '判断失败', 'planner_format_retry': '格式重试', 'planner_batch_error': '集中判断失败',
     'chat_timing': '生成回复', 'model': '备用模型', 'model_output_budget': '输出额度', 'model_stream_incomplete': '流中断',
     'model_call': '模型调用', 'memory_use': '使用记忆', 'memory_cursor': '整理进度', 'memory_extract_attempt': '开始整理',

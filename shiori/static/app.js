@@ -409,6 +409,7 @@ async function saveModal(kind,form) {
   else return;
   if (kind === "persona") { payload.profile = {}; for (const key of ["residence","occupation","age","birthday","routine","background","relationship"]) { payload.profile[key] = data["profile_"+key] ?? item?.profile?.[key] ?? ""; delete payload["profile_"+key]; } }
   if (kind === "scope") {
+    if(data.echo_repeat !== undefined)payload.echo_repeat=Number(data.echo_repeat);
     if(data.debounce_enabled !== undefined)payload.debounce_enabled=data.debounce_enabled === "" ? null : data.debounce_enabled === "true";
     for(const key of ["debounce_seconds","debounce_max_wait_seconds"])if(data[key] !== undefined)payload[key]=data[key] === "" ? null : Number(data[key]);
     payload = window.ShioriFeatures.scopePatch(payload,data,item,form);
