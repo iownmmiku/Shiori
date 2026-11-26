@@ -921,6 +921,54 @@ async def test_she_sees_her_own_look_when_someone_sends_a_picture(make_chat):
     assert len(model.seen[2]['messages'][-1]['content']) == 2
 
 
+@pytest.mark.anyio
+async def test_her_reference_picture_only_takes_what_the_picture_limit_leaves(make_chat):
+    from shiori.provider import input_size
+    model = Model(answer('好多图。'), answer('两张呀。'))
+    store, config, chat, _ = make_chat(model, personas={'default': LOOK})
+    chat.imagegen.add_reference('default', png('red', (600, 900)))
+    theirs = [data_url(png(color)) for color in ('green', 'blue', 'white')]
+    # Three of theirs already fill the limit of three: her look goes in words only, and the request fits
+    # (a fourth picture made the request fail before it was sent).
+    await over_qq(store, config, chat, '看看这些', images=theirs)
+    seen = model.seen[0]
+    assert [part['type'] for part in seen['messages'][-1]['content']] == ['text'] + ['image_url'] * 3
+    assert input_size(seen['messages'])[1] == 3
+    assert '外貌：long brown hair, amber eyes' in seen['turn'] and '张你自己的参考图' not in seen['turn']
+    # Two of theirs leave room for hers.
+    await over_qq(store, config, chat, '看看这两张', images=theirs[:2])
+    seen = model.seen[1]
+    assert [part['type'] for part in seen['messages'][-1]['content']] == ['text', 'image_url', 'image_url', 'text', 'image_url']
+    assert '对方这条消息后面附了 1 张你自己的参考图' in seen['turn']
+
+
+def gif_url(frames=1, size=(40, 30)):
+    out = io.BytesIO()
+    pictures = [Image.new('RGB', size, (index * 60 % 256, 80, 160)) for index in range(frames)]
+    pictures[0].save(out, format='GIF', save_all=frames > 1, append_images=pictures[1:], duration=80, loop=0)
+    return 'data:image/gif;base64,' + base64.b64encode(out.getvalue()).decode()
+
+
+@pytest.mark.anyio
+async def test_a_gif_reaches_the_chat_model_as_a_png(make_chat):
+    # Gemini answers 400 "Unsupported MIME type: image/gif" to a GIF.
+    model = Model(answer('蓝色的。'), answer('在动呢。'))
+    store, config, chat, _ = make_chat(model)
+    await over_qq(store, config, chat, '这是什么颜色', images=[gif_url()])
+    content = model.seen[0]['messages'][-1]['content']
+    url = content[1]['image_url']['url']
+    assert url.startswith('data:image/png;base64,')
+    with Image.open(io.BytesIO(base64.b64decode(url.split(',', 1)[1]))) as picture:
+        assert picture.size == (40, 30)
+    assert '动图' not in content[0]['text']
+    # An animated one becomes a strip of frames, and she is told so.
+    await over_qq(store, config, chat, '看这个', images=[gif_url(frames=6)])
+    content = model.seen[1]['messages'][-1]['content']
+    assert content[1]['image_url']['url'].startswith('data:image/png;base64,')
+    assert '这张图是动图' in content[0]['text']
+    assert not any('data:image/gif' in json.dumps(seen['messages']) for seen in model.seen)
+
+
 def test_without_reference_pictures_only_her_look_is_described(make_gen):
     gen, _, _ = make_gen()
     assert gen.self_images('default') == []

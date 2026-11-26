@@ -30,6 +30,8 @@ from .conversation_history import align_rounds, time_history, continuity_history
 from .settings import resolve_model, resolved_identity
 from .knowledge import PersonaKnowledge
 from .tool_actions import ToolActions, validate_arguments, bounded_result
+from . import injection
+from .mood import Mood, appraise as appraise_mood, weight_for as mood_weight
 from .output import strip_context_labels, strip_memory_citations, model_reply_parts, generation_instructions, output_config, prepare_reply
 from .chat_preview import preview_filter
 
@@ -41,6 +43,9 @@ _GROUP_READ_TOOLS = frozenset(('calculate', 'recall_memory', 'lookup_jargon', 'w
 _GROUP_TOOLS = _GROUP_READ_TOOLS | {'send_sticker'}
 _STICKER_SCOPES = ('qq:', 'qqofficial:')   # chats whose connector can deliver a sticker
 QQ_IMAGE_BATCH_TIMEOUT = 15.0
+# Room for a reasoning model to think before the candidate list (about one
+# extraction in three used up 4000).
+MEMORY_EXTRACT_MAX_TOKENS = 8000
 
 
 class QQImageSourceChanged(ValueError):
@@ -249,6 +254,7 @@ class ChatService:
         self.handle_platform_command = None
         from .life_schedule import CharacterSchedule
         self.character_schedule = CharacterSchedule(store, settings, provider, store.data_dir)
+        self.mood = Mood(store.data_dir / 'mood.json')
         # Extensions run in this process and may add tools (extension_host.py).
         from .extension_host import ExtensionHost
         self.extensions = ExtensionHost(store, settings, store.data_dir,
@@ -567,7 +573,8 @@ class ChatService:
         text = str(text).strip()
         if (not text and not images) or len(text) > 12000:
             raise ValueError('消息需为 1—12000 个字符，或附一张图片')
-        quoted_images = [image for image in self._quoted_images(scope_id, metadata, 3 - len(images or []))
+        room = self.settings.get().get('context', {}).get('max_images', 3) - len(images or [])
+        quoted_images = [image for image in self._quoted_images(scope_id, metadata, room)
                          if image not in (images or [])]
         if quoted_images:
             images = [*(images or []), *quoted_images]
@@ -710,6 +717,7 @@ class ChatService:
                 if local_turn:
                     await self.tool_actions.refresh_for_chat(scope_id, str(user_id), metadata.get('trusted_identity'))
                 tools = self._request_tools(scope, user_id, text, metadata)
+                tools = await self._screen_injection(scope, user_id, text, metadata, tools)
                 computer_snapshot = self.settings.get().get('computer', {}) if local_turn else None
                 manifest['message_ids'].update(context.get('source_ids', []))
                 manifest['memory_versions'].update(context.get('memory_versions', {}))
@@ -959,6 +967,8 @@ class ChatService:
                 self._capture_schedule_material(message)
                 self._counts[(scope_id, user_id)] += 1
                 self.memory.mark_used(scope_id,str(user_id),versions,message['id'])
+                if generated_reply and (self.settings.get().get('mood') or {}).get('enabled') is True:
+                    self._feel(scope, user_id, text, reply, metadata)
                 jobs = [self.runs.get(job_id) for job_id in job_ids if hasattr(self, 'runs') and job_id in self.runs._jobs]
                 return {'reply': reply, 'reply_parts': reply_parts, 'message_id': message['id'], 'jobs': jobs, 'memories': memories, 'jargon': jargon, 'expressions': expressions, 'context_compressed': context.get('compressed', False), 'usage': usage, 'actions': actions, 'pending_actions':pending_actions,
                         'output_filtered': adjusted.get('output_filtered', False), 'output_adjustment': adjusted.get('output_adjustment', {}),
@@ -1077,6 +1087,50 @@ class ChatService:
             if item.get('kind') == 'event' and item.get('episode'):
                 item['event_context'] = episode_prompt_text(item, item['excerpt'])
         return memories
+
+    def _feel(self, scope, user_id, said, reply, metadata):
+        """After a reply, estimate in the background how the exchange moved her mood."""
+        persona_id = scope.get('persona_id', 'default')
+        try:
+            name = self.store.get_persona(persona_id).get('name') or '她'
+        except KeyError:
+            return
+        weight = mood_weight(metadata, scope['id'])
+
+        async def run():
+            impulses = await appraise_mood(
+                lambda messages: self.provider.complete(messages, purpose='gate', scope_id=scope['id'], max_tokens=600), name, said, reply)
+            if impulses:
+                feelings = self.mood.feel(persona_id, impulses, weight)
+                self.store.add_event('mood', '情绪已更新', scope_id=scope['id'], persona_id=persona_id, weight=weight,
+                                     feelings={key: round(value, 2) for key, value in feelings.items()})
+        task = asyncio.create_task(run())
+        self._jobs.add(task)
+        task.add_done_callback(self._jobs.discard)
+
+    async def _screen_injection(self, scope, user_id, text, metadata, tools):
+        """A turn that would get tools, from someone who is not an administrator, is checked for
+        signs that it tries to steer her; with such signs the reply goes on without tools."""
+        if not tools or metadata.get('is_admin') or not scope['id'].startswith(('qq:', 'qqofficial:')):
+            return tools
+        mode = (self.settings.get().get('injection_check') or {}).get('mode', 'rules')
+        if mode == 'off':
+            return tools
+        material = '\n'.join(str(item) for item in (text, metadata.get('reply_to_text')) if item)
+        finding = {'hits': injection.scan(material), 'by': 'rule'}
+        if not finding['hits']:
+            if mode != 'model':
+                return tools
+            verdict = await injection.model_check(
+                lambda messages: self.provider.complete(messages, purpose='gate', scope_id=scope['id'], max_tokens=600), material)
+            if not verdict or not verdict['risky']:
+                return tools
+            finding = {'hits': [], 'reason': verdict['reason'], 'by': 'model'}
+        metadata['_injection'] = finding
+        self.store.add_event('injection_suspected', '消息里有疑似指挥机器人的内容，本轮不提供工具', scope_id=scope['id'],
+                             user_id=str(user_id), by=finding['by'], kinds=[hit['kind'] for hit in finding['hits']],
+                             samples=[hit['sample'] for hit in finding['hits']], reason=finding.get('reason', ''))
+        return None
 
     def _quoted_images(self, scope_id, metadata, room):
         """Pictures of the message this one quotes, when that message is stored in the same chat
@@ -1405,10 +1459,23 @@ class ChatService:
         # It comes only with some turns, so it joins the per-turn notes, not the cached opening.
         # (A worker thread: the group turn comes from the argument, not _group_request.)
         from .extension_host import Turn
+        from .stickers import model_picture
+        # Many vision models refuse GIF: those go as PNG, an animated one as a strip of frames.
+        pictures = [model_picture(x) for x in images or []]
+        images = [url for url, _ in pictures]
+        animated = [index for index, (_, frames) in enumerate(pictures, 1) if frames > 1]
+        # Extension pictures only take what is left of the per-request picture limit.
+        room = max(0, self.settings.get().get('context', {}).get('max_images', 3) - len(images))
         extension_texts, extension_images = self.extensions.turn_context(Turn(
             scope['id'], str(user_id), scope.get('persona_id', 'default'),
-            tuple(x for x in images or [] if str(x).startswith('data:image/')), bool(group)))
+            tuple(x for x in images if str(x).startswith('data:image/')), bool(group), room))
         turn.extend(extension_texts)
+        if metadata.get('_injection'):
+            turn.append(injection.turn_note(metadata['_injection']))
+        if (self.settings.get().get('mood') or {}).get('enabled') is True:
+            feeling = self.mood.note(scope.get('persona_id', 'default'))
+            if feeling:
+                turn.append(feeling)
         if local_chat:
             from .local_chat import instructions
             workspace = str(self.computer.workspace()) if self.computer and any(item['function']['name'] == 'read_file' for item in tools or []) else ''
@@ -1558,6 +1625,9 @@ class ChatService:
         if metadata.get('_unreadable_images'):
             content += (f"\n【系统说明：本轮有 {metadata['_unreadable_images']} 张图片未能读取（可能已过期或过大），"
                         '你看不到它们的内容；不要描述或猜测这些图片，需要时请对方重新发送。】')
+        if animated:
+            which = '这张图' if len(images) == 1 else '、'.join(f'第 {index} 张图' for index in animated)
+            content += f'\n【系统说明：{which}是动图，按时间从左到右排了几帧。】'
         if images:
             content = [{'type': 'text', 'text': content}] + [{'type': 'image_url', 'image_url': {'url': x}} for x in images]
             if extension_images:
@@ -2201,7 +2271,7 @@ class ChatService:
                         'speaker': member_name, 'time': message_time_context(x, self.settings)} for x in records]
             result = await self.provider.complete([{'role': 'system', 'content': prompt}, *conversation,
                                                    {'role': 'user', 'content': json.dumps(sources, ensure_ascii=False)}],
-                                                  purpose='memory_extract', scope_id=scope_id, max_tokens=4000,
+                                                  purpose='memory_extract', scope_id=scope_id, max_tokens=MEMORY_EXTRACT_MAX_TOKENS,
                                                   before_send=extraction_current)
             candidates = safe_json(result['content'])
             stats['stage'] = 'validate'

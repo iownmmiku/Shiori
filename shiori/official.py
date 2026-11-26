@@ -32,6 +32,10 @@ def _ids(value: Any) -> set[str]:
     return {str(item).strip() for item in value or [] if str(item).strip()}
 
 
+# A passive reply's msg_seq above any text part, sticker or picture of the same reply.
+INPUT_NOTIFY_SEQ = 99
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -50,6 +54,7 @@ class OfficialBridge:
         self._seen = OrderedDict()
         self._event_tasks = set()
         self._gateway_tasks = set()
+        self._notify_tasks = set()
         self._lifecycle_lock = asyncio.Lock()
         self._outgoing = OrderedDict()
         self._diagnostics = QQDiagnostics(store, 'qqofficial')
@@ -323,6 +328,11 @@ class OfficialBridge:
                     if result.get('reply'):
                         await self._send(scope_id, result['reply'], msg_id=platform_id, metadata=metadata)
                     return
+            if kind == 'private' and self._config().get('input_notify') is True:
+                # Not awaited: the reply never waits on the indicator, and a failure only costs it.
+                task = asyncio.create_task(self._input_notify(target, platform_id))
+                self._notify_tasks.add(task)
+                task.add_done_callback(self._notify_tasks.discard)
             if hasattr(self.chat, 'observe'):
                 result = await self._flow.handle(scope_id, user_id, text, images, metadata, direct=direct, reply_to_bot=metadata.get('reply_to_bot', False), wait=wait)
                 if result and result.get('accepted') is False:
@@ -365,6 +375,25 @@ class OfficialBridge:
                 msg_seq=(metadata.get('output_part') or {}).get('index',1),metadata=metadata)
         return await self._send(scope_id, text, msg_id=metadata.get('platform_message_id'),
                                 msg_seq=(metadata.get('output_part') or {}).get('index', 1), metadata=metadata)
+
+    async def _input_notify(self, openid: str, msg_id: str) -> bool:
+        """Show “正在输入…” in a private chat while the reply is written. The official API offers it
+        for private (C2C) chats only; whether it counts against the passive reply allowance is not
+        documented, so it is off unless the owner turns it on."""
+        if not self._connected or self._client is None:
+            return False
+        try:
+            from botpy.http import Route
+            route = Route('POST', '/v2/users/{openid}/messages', openid=openid)
+            body = {'msg_type': 6, 'input_notify': {'input_type': 1, 'input_second': 60}, 'msg_id': msg_id, 'msg_seq': INPUT_NOTIFY_SEQ}
+            await asyncio.wait_for(self._client.api._http.request(route, json=body), timeout=2.5)
+            return True
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            self.store.add_event('qq_official_input_notify', '“正在输入”状态没有发出，回复照常进行',
+                                 scope_id=f'qqofficial:private:{openid}', error=type(exc).__name__)
+            return False
 
     async def send(self, scope_id: str, text: str) -> bool:
         """Send a proactive reminder; never disguise it as an old passive reply."""

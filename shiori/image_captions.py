@@ -151,10 +151,11 @@ class ImageCaptions:
         if model is None or not self._config()['enabled'] or not self._within_limit():
             return ''
         self._calls.append(self._clock())
+        from .stickers import model_picture   # many vision models refuse GIF
+        url, _ = await asyncio.to_thread(model_picture, f'data:{mime};base64,' + base64.b64encode(raw).decode())
         result = await self.provider.complete(
             [{'role': 'system', 'content': _PROMPT},
-             {'role': 'user', 'content': [{'type': 'image_url', 'image_url': {
-                 'url': f'data:{mime};base64,' + base64.b64encode(raw).decode()}}]}],
+             {'role': 'user', 'content': [{'type': 'image_url', 'image_url': {'url': url}}]}],
             config=model, purpose='image_caption', scope_id=message['scope_id'], max_tokens=120)
         text = clean(result.get('content', '') if isinstance(result, dict) else '')
         if text:

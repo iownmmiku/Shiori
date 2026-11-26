@@ -1,5 +1,6 @@
 """Owner-uploaded stickers, fixed categories and on-demand semantic analysis."""
 import asyncio
+import base64
 import io
 import json
 import zipfile
@@ -13,7 +14,8 @@ from shiori.api import create_app
 from shiori.db import Store
 from shiori.settings import Settings
 from shiori.social import SocialEngine
-from shiori.stickers import CATEGORIES, CATEGORY_GUIDE, StickerLibrary, StickerReplyError, _json, folder_category, vision_image
+from shiori.stickers import (CATEGORIES, CATEGORY_GUIDE, StickerLibrary, StickerReplyError, _json, folder_category,
+                             model_picture, vision_image)
 
 
 def image(color='cyan', fmt='PNG', size=(16, 16)):
@@ -200,6 +202,21 @@ def test_analysis_needs_a_vision_model(library):
     cfg.update({'model': {'vision': False}})
     with pytest.raises(ValueError, match='视觉'):
         engine.start_analysis()
+
+
+def test_a_vision_model_gets_a_gif_as_a_png():
+    def url(raw, mime='image/gif'):
+        return f'data:{mime};base64,' + base64.b64encode(raw).decode()
+    still, frames = model_picture(url(image('red', 'GIF', (3000, 100))))
+    assert still.startswith('data:image/png;base64,') and frames == 1
+    with Image.open(io.BytesIO(base64.b64decode(still.split(',', 1)[1]))) as picture:
+        assert picture.format == 'PNG' and picture.size == (1536, 51)       # no larger than MODEL_SIDE
+    strip, frames = model_picture(url(gif(6)))
+    assert strip.startswith('data:image/png;base64,') and frames == 4
+    other = url(image('red'), 'image/png')
+    assert model_picture(other) == (other, 1)
+    broken = url(b'GIF89a not really')
+    assert model_picture(broken) == (broken, 1)
 
 
 def test_animated_stickers_are_analysed_from_several_frames(library):

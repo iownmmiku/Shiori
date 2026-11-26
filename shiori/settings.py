@@ -20,6 +20,8 @@ from urllib.parse import urlsplit
 from .prescreen import DEFAULTS as PRESCREEN_DEFAULTS, validate as validate_prescreen
 from .alerts import DEFAULTS as ALERT_DEFAULTS, validate as validate_alerts
 from .image_captions import DEFAULTS as IMAGE_CAPTION_DEFAULTS, validate as validate_image_captions
+from .injection import DEFAULTS as INJECTION_DEFAULTS, validate as validate_injection
+from .mood import DEFAULTS as MOOD_DEFAULTS, validate as validate_mood
 from .topic_starter import DEFAULTS as TOPIC_STARTER_DEFAULTS, validate as validate_topic_starter
 from .profiles import DEFAULT_PROFILES
 from .timezones import config_zone
@@ -63,7 +65,8 @@ DEFAULTS = {
                'owner_ids': [], 'allowed_users': [], 'allowed_groups': [], 'chat_policy': 'blacklist',
                'blocked_users': [], 'blocked_groups': [], 'max_message_chars': 0, 'bot_accounts': []},
     'qq_official': {'enabled': False, 'app_id': '', 'app_secret': '', 'allowed_groups': [], 'allowed_users': [],
-                    'chat_policy': 'blacklist', 'blocked_users': [], 'blocked_groups': [], 'max_message_chars': 0},
+                    'chat_policy': 'blacklist', 'blocked_users': [], 'blocked_groups': [], 'max_message_chars': 0,
+                    'input_notify': False},
     'budget': {'daily_tokens': 100000, 'daily_cost': 0.0},
     'time': {'timezone': 'Asia/Shanghai', 'awareness_enabled': True},
     'debounce': {'enabled': False, 'seconds': 3, 'max_wait_seconds': 30},
@@ -81,6 +84,8 @@ DEFAULTS = {
     'prescreen': dict(PRESCREEN_DEFAULTS),
     'alerts': dict(ALERT_DEFAULTS),
     'image_captions': dict(IMAGE_CAPTION_DEFAULTS),
+    'injection_check': dict(INJECTION_DEFAULTS),
+    'mood': dict(MOOD_DEFAULTS),
     'topic_starter': dict(TOPIC_STARTER_DEFAULTS),
     'stickers': {'enabled':True,'collect_enabled':True,'collect_probability':0.1,'send_enabled':True,
                  'send_probability':0.1,'model_id':'','min_confidence':0.85,'daily_recognitions':30,'daily_model_calls':60,'max_items':1000,
@@ -101,7 +106,7 @@ DEFAULTS = {
     'mcp_servers': [],
     'identity': {'name':'佐藤栞','aliases':['小栞','栞酱'], 'respond_to_at':True,'respond_to_reply':True,'respond_to_name':True,
                  'planner_enabled':True,'proactive_enabled':True},
-    'output': {'enabled':True,'mode':'model','target_chars':160,'max_chars':320,'interval_ms':600,'max_parts':8,'platform_max_chars':1800,
+    'output': {'enabled':True,'mode':'model','target_chars':160,'max_chars':320,'interval_ms':600,'max_parts':8,'platform_max_chars':1800,'typing_cpm':0,
                'reply_max_chars':0,'message_max_chars':0,'remove_parentheses':False},
     'exploration': {'enabled':False,'interval_hours':24,'daily_searches':6,'max_results':4,'valid_days':90},
     'routing': {'chat': '', 'planner':'', 'memory': '', 'gate': '', 'summary': '', 'distillation': '', 'embedding': '', 'fallback': []},
@@ -250,7 +255,7 @@ _KEPT_ON_RESTORE = ('updates', 'webui')
 SECTION_LABELS = {
     'model': '默认模型', 'providers': '模型池', 'provider_sources': '供应商连接', 'routing': '任务分工',
     'search_providers': '网页搜索', 'mcp_servers': 'MCP 服务', 'onebot': 'QQ 连接', 'qq_official': 'QQ 官方机器人',
-    'identity': '名称与触发', 'planner': '回复判断', 'prescreen': '快速预筛', 'alerts': '故障提醒', 'image_captions': '图片理解', 'topic_starter': '主动开话题', 'memory': '记忆',
+    'identity': '名称与触发', 'planner': '回复判断', 'prescreen': '快速预筛', 'alerts': '故障提醒', 'image_captions': '图片理解', 'injection_check': '注入判断', 'mood': '情绪', 'topic_starter': '主动开话题', 'memory': '记忆',
     'language': '黑话与表达', 'stickers': '表情包', 'debounce': '消息防抖', 'output': '回复格式', 'scheduler': '并发与排队',
     'budget': '预算', 'context': '上下文', 'access': '管理员', 'computer': '电脑任务', 'bot_profiles': '机器人配置',
     'time': '时间', 'exploration': '兴趣探索', 'webui': '管理台入口', 'updates': '更新', 'paused': '暂停开关',
@@ -715,6 +720,8 @@ class Settings:
             updated['prescreen'] = validate_prescreen(updated['prescreen'], {x['id'] for x in updated['provider_sources']})
             updated['alerts'] = validate_alerts(updated['alerts'])
             updated['image_captions'] = validate_image_captions(updated['image_captions'])
+            updated['injection_check'] = validate_injection(updated['injection_check'])
+            updated['mood'] = validate_mood(updated['mood'])
             updated['topic_starter'] = validate_topic_starter(updated['topic_starter'])
             config_zone(updated)
             memory_policy=updated['memory']
@@ -798,11 +805,13 @@ class Settings:
                     raise ValueError('表情包数量配置无效')
             if not isinstance(stickers['model_id'],str) or stickers['model_id'] and stickers['model_id']!='default' and stickers['model_id'] not in ids:
                 raise ValueError('表情包识图模型不存在')
+            if type(updated['qq_official']['input_notify']) is not bool:
+                raise ValueError('“正在输入”开关须为布尔值')
             for section in ('onebot','qq_official'):
                 value=updated[section]['max_message_chars']
                 if type(value) is not int or value != 0 and not 40 <= value <= 20000:
                     raise ValueError('通道单条长度须为0（继承）或40—20000的整数')
-            for section, ranges in (('output',{'target_chars':(20,1000),'max_chars':(40,4000),'interval_ms':(0,5000),'max_parts':(1,20),'platform_max_chars':(40,20000)}),
+            for section, ranges in (('output',{'target_chars':(20,1000),'max_chars':(40,4000),'interval_ms':(0,5000),'max_parts':(1,20),'platform_max_chars':(40,20000),'typing_cpm':(0,600)}),
                                     ('exploration',{'interval_hours':(1,720),'daily_searches':(0,100),'max_results':(1,8),'valid_days':(1,365)})):
                 if type(updated[section]['enabled']) is not bool: raise ValueError('功能开关须为布尔值')
                 for key,(minimum,maximum) in ranges.items():
@@ -813,6 +822,7 @@ class Settings:
                     if not minimum<=value<=maximum: raise ValueError(f'{key}超出范围{minimum}—{maximum}')
                     updated[section][key]=value
             if updated['output'].get('mode') not in ('model','length'): raise ValueError('输出分段模式须为model或length')
+            if 0 < updated['output']['typing_cpm'] < 30: raise ValueError('打字速度须为0（按固定间隔）或30—600字/分钟')
             if updated['output']['target_chars']>updated['output']['max_chars']: raise ValueError('分段目标长度不能超过最大长度')
             for key, maximum in (('reply_max_chars',20000),('message_max_chars',4000)):
                 value = updated['output'][key]

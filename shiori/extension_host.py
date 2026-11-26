@@ -73,6 +73,7 @@ class Turn:
     persona_id: str = 'default'
     images: tuple = ()           # data:image URLs the user attached to this turn
     group: bool = False          # several members' messages answered together
+    room: int = MAX_CONTEXT_IMAGES   # pictures turn_context may still add under the request's limit
 
 
 @dataclass(frozen=True)
@@ -328,7 +329,8 @@ class ExtensionContext:
         """`function(turn)` may add to a chat turn's prompt: None, or
         {'text': ..., 'images': [data:image URLs]}. The text goes into the
         system prompt; the pictures follow the user's own and are sent only
-        when this turn already carries pictures (the model reads them)."""
+        when this turn already carries pictures (the model reads them), and
+        only as many as `turn.room` leaves under the request's picture limit."""
         if not callable(function):
             raise ExtensionError('turn_context 须为函数')
         self._record.turn_context.append(function)
@@ -627,7 +629,7 @@ class ExtensionHost:
                 if text:
                     texts.append(text)
                 if turn.images:
-                    images.extend(pictures[:MAX_CONTEXT_IMAGES - len(images)])
+                    images.extend(pictures[:max(0, min(MAX_CONTEXT_IMAGES, turn.room) - len(images))])
         return texts, images
 
     async def call_tool(self, name, call):

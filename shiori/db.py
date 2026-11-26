@@ -529,7 +529,7 @@ class Store:
                       "auto_memory": True, "quiet_start": "", "quiet_end": "", "allow_tools": True,
                       "plan_enabled": None, "trigger_at": None, "trigger_reply": None, "trigger_name": None, "proactive_reply": None,
                       "always_reply": False, "expression_learn": False, "expression_use": False, "context_compress": False,
-                      "memory_space": "", "use_persona_knowledge": True,
+                      "memory_space": "", "use_persona_knowledge": True, "echo_repeat": 0,
                       "planner_min_interval_ms": None, "planner_daily_calls": None,
                       "planner_daily_tokens": None, "planner_max_age_ms": None, "planner_eagerness": None,
                       "settings": {}, **previous, **incoming}
@@ -549,6 +549,8 @@ class Store:
             _choice(record["activity"], {"quiet", "balanced", "active"}, "activity")
             for field in ("enabled", "dictionary_understand", "dictionary_use", "auto_memory", "allow_tools", "always_reply", "expression_learn", "expression_use", "context_compress", "use_persona_knowledge"):
                 _boolean(record[field], field)
+            if type(record["echo_repeat"]) is not int or record["echo_repeat"] not in (0, *range(2, 11)):
+                raise ValueError("跟着复读的人数须为 0（关闭）或 2—10")
             for field in ("trigger_at", "trigger_reply", "trigger_name", "plan_enabled", "proactive_reply", "debounce_enabled"):
                 for container in (record, record['settings']):
                     if container.get(field) is not None:
@@ -584,10 +586,10 @@ class Store:
                         _boolean(value, 'output.' + key)
                     elif key == 'mode':
                         if value not in ('model','length'): raise ValueError('output.mode 无效')
-                    elif key in {'target_chars','max_chars','interval_ms','max_parts','platform_max_chars','reply_max_chars','message_max_chars'}:
+                    elif key in {'target_chars','max_chars','interval_ms','max_parts','platform_max_chars','reply_max_chars','message_max_chars','typing_cpm'}:
                         lower,upper = {'target_chars':(20,1000),'max_chars':(40,4000),'interval_ms':(0,5000),'max_parts':(1,20),'platform_max_chars':(40,20000),
-                                       'reply_max_chars':(0,20000),'message_max_chars':(0,4000)}[key]
-                        if type(value) is not int or not lower <= value <= upper:
+                                       'reply_max_chars':(0,20000),'message_max_chars':(0,4000),'typing_cpm':(0,600)}[key]
+                        if type(value) is not int or not lower <= value <= upper or key == 'typing_cpm' and 0 < value < 30:
                             raise ValueError('output.' + key + ' 超出范围')
                     else:
                         raise ValueError('未知output字段')
@@ -1488,14 +1490,18 @@ class Store:
             where, params = boundary.sql(alias='m')
             keys = list(dict.fromkeys(record_ids))
             result = {}
-            for start in range(0, len(keys), 64):
-                part = keys[start:start + 64]
-                # Restrict to this <=64-ID batch before applying the boundary.
+            for start in range(0, len(keys), 2048):
+                part = keys[start:start + 2048]
+                # Restrict to this ID batch before applying the boundary.
                 # Without the LIMIT barrier SQLite may pick memories_scope and
                 # re-scan an entire large scope for every numeric-vector page.
-                rows = self._conn.execute('SELECT m.id,m.version FROM (SELECT * FROM memories WHERE id IN ('
-                    + ','.join('?' for _ in part) + f') LIMIT 64) m WHERE {where}', (*part, *params))
-                result.update((row[0], int(row[1])) for row in rows)
+                # One aggregated row per batch: each fetched row hands the GIL
+                # to other threads, which on a busy server costs far more than
+                # the query (see MemoryEngine._cached_candidates).
+                raw = self._conn.execute('SELECT json_group_object(m.id,m.version) FROM (SELECT * FROM memories '
+                    f'WHERE id IN (SELECT value FROM json_each(?)) LIMIT ?) m WHERE {where}',
+                    (json.dumps(part), len(part), *params)).fetchone()[0]
+                result.update((key, int(value)) for key, value in json.loads(raw or '{}').items())
             return result
 
     def memory_search_status(self):

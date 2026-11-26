@@ -57,6 +57,14 @@ _HEADER = re.compile(r'[A-Za-z0-9-]{1,64}')
 # This many failed calls in a row switch the pre-screen off for PAUSE_SECONDS.
 FAILURES_BEFORE_PAUSE = 3
 PAUSE_SECONDS = 60.0
+# A refusal that waiting a minute cannot fix (no balance left, a rejected key)
+# pauses for LASTING_PAUSE_SECONDS instead, doubling up to the maximum. On the
+# deployment an empty balance was retried every minute for days, each try
+# adding about 0.3 s before the Planner. A successful call, including the
+# settings page's connection test, lifts the pause at once.
+LASTING_STATUSES = (401, 402, 403)
+LASTING_PAUSE_SECONDS = 1800.0
+LASTING_PAUSE_MAX_SECONDS = 6 * 3600.0
 # Group messages are often more than httpx's default 5 seconds apart; a
 # longer idle time saves the TCP and TLS handshake on most calls.
 KEEPALIVE_SECONDS = 120.0
@@ -210,6 +218,7 @@ class Prescreen:
         self.settings = settings
         self._client = None
         self._failures, self._paused_until = 0, 0.0
+        self._lasting_pauses = 0
         self.on_result = None   # on_result(ok, reason): every live call, for the outage alert
 
     def paused(self):
@@ -263,12 +272,17 @@ class Prescreen:
         result['latency_ms'] = round((time.perf_counter() - started) * 1000, 1)
         if result['ok']:
             result['screened'] = self.screened(result, cfg)
-            self._failures, self._paused_until = 0, 0.0
+            self._failures, self._paused_until, self._lasting_pauses = 0, 0.0, 0
         elif count_failure:
             self._failures += 1
             if self._failures >= FAILURES_BEFORE_PAUSE:
-                self._failures, self._paused_until = 0, time.monotonic() + PAUSE_SECONDS
-                result['paused_seconds'] = PAUSE_SECONDS
+                pause = PAUSE_SECONDS
+                if result.get('status') in LASTING_STATUSES:
+                    pause = min(LASTING_PAUSE_MAX_SECONDS, LASTING_PAUSE_SECONDS * 2 ** self._lasting_pauses)
+                    self._lasting_pauses += 1
+                    result['pause_reason'] = 'lasting'
+                self._failures, self._paused_until = 0, time.monotonic() + pause
+                result['paused_seconds'] = pause
         if count_failure and self.on_result is not None:
             try:
                 self.on_result(result['ok'], '' if result['ok'] else failure_label(result))

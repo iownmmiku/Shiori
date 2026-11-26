@@ -496,6 +496,8 @@ def create_app(data_dir=None, *, start_workers=True, allow_remote=False):
                 raise ValueError('静默时间需采用 HH:MM 格式')
         if 'daily_tokens' in data:
             data['daily_tokens'] = max(0, min(10000000, int(data['daily_tokens'] or 0)))
+        if 'echo_repeat' in data and (type(data['echo_repeat']) is not int or data['echo_repeat'] not in (0, *range(2, 11))):
+            raise ValueError('跟着复读的人数须为 0（关闭）或 2—10')
         for key, minimum, maximum in (('cooldown_seconds', 0, 600), ('merge_window_ms', 0, 2000), ('followup_seconds', 0, 600)):
             if key in data:
                 try:

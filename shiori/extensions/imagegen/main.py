@@ -156,7 +156,8 @@ def setup(ext):
         if not turn.images or not ext.config().get('recognize_self', True):
             return None
         look = engine.appearance(turn.persona_id)
-        pictures = engine.self_images(turn.persona_id)
+        # Only what the user's own pictures leave of the request's limit (older hosts allow 3).
+        pictures = engine.self_images(turn.persona_id)[:max(0, min(3, getattr(turn, 'room', 3)))]
         wearing = engine.current_outfit(turn.scope_id, turn.persona_id) or look.get('outfit', '')
         facts = [f'外貌：{look["prompt"]}' if look.get('prompt') else '',
                  f'现在穿着：{wearing}' if wearing else '']
@@ -167,7 +168,7 @@ def setup(ext):
                 + (f'对方这条消息后面附了 {len(pictures)} 张你自己的参考图。' if pictures else '')
                 + '对方发来的图里如果有和你长得一样的人（比如你发过的自拍、别人画的你），那就是你，按“这是我”来理解和回应；'
                   '长得不一样就不是你。不要提起参考图或外貌设定本身。')
-        return {'text': text[:1500], 'images': pictures[:3]}
+        return {'text': text[:1500], 'images': pictures}
 
     if hasattr(ext, 'turn_context'):          # an older Shiori has no such hook
         ext.turn_context(self_context)
